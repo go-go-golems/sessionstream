@@ -1,6 +1,6 @@
-root: hair-booking/ttmp
+root: ttmp
 defaults:
     owners: []
     intent: ""
 filenamePrefixPolicy: ""
-vocabulary: hair-booking/ttmp/vocabulary.yaml
+vocabulary: ttmp/vocabulary.yaml

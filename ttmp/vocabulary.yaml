@@ -1,0 +1,50 @@
+topics:
+    - slug: chat
+      description: Chat backend and frontend surfaces
+    - slug: backend
+      description: Backend services
+    - slug: websocket
+      description: WebSocket lifecycle & events
+    - slug: architecture
+      description: Architecture and system design
+    - slug: framework
+      description: Reusable framework and library design
+    - slug: event-streaming
+      description: Session or event streaming architecture
+    - slug: migration
+      description: Migration and extraction planning
+    - slug: onboarding
+      description: Intern or new contributor onboarding material
+    - slug: extraction
+      description: Repository or module extraction work
+    - slug: systemlab
+      description: Interactive lab or documentation app surfaces
+docTypes:
+    - slug: design-doc
+      description: Structured rationale and architecture notes
+    - slug: reference
+      description: Reference docs and API contracts
+    - slug: playbook
+      description: Operational procedures and QA/Smoke steps
+    - slug: index
+      description: Ticket landing page
+    - slug: skill
+      description: Skill documentation (what it's for and when to use it)
+intent:
+    - slug: long-term
+      description: Likely to persist
+    - slug: short-term
+      description: Short-term documentation for active work
+    - slug: throwaway
+      description: Temporary/experimental documentation
+status:
+    - slug: draft
+      description: Initial draft state
+    - slug: active
+      description: Active work in progress
+    - slug: review
+      description: Ready for review
+    - slug: complete
+      description: Work completed
+    - slug: archived
+      description: Archived/completed work
