@@ -75,10 +75,11 @@ type Server struct {
 }
 
 type connection struct {
-	id    sessionstream.ConnectionId
-	ws    *websocket.Conn
-	send  chan []byte
-	close sync.Once
+	id     sessionstream.ConnectionId
+	ws     *websocket.Conn
+	send   chan []byte
+	close  sync.Once
+	closed atomic.Bool
 
 	mu   sync.RWMutex
 	subs map[sessionstream.SessionId]subscription
@@ -323,6 +324,7 @@ func (s *Server) closeConnection(c *connection) {
 		}
 		s.mu.Unlock()
 
+		c.closed.Store(true)
 		close(c.send)
 		_ = c.ws.Close()
 		if s.hooks.OnDisconnect != nil {
@@ -362,15 +364,29 @@ func (s *Server) removeSubscription(c *connection, sid sessionstream.SessionId) 
 	s.mu.Unlock()
 }
 
-func (s *Server) sendEnvelope(c *connection, env envelope) error {
+func (s *Server) sendEnvelope(c *connection, env envelope) (err error) {
+	if c == nil {
+		return fmt.Errorf("connection is nil")
+	}
+	if c.closed.Load() {
+		return fmt.Errorf("connection %s is closed", c.id)
+	}
 	body, err := json.Marshal(env)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("connection %s is closed", c.id)
+		}
+	}()
 	select {
 	case c.send <- body:
 		return nil
 	default:
+		if c.closed.Load() {
+			return fmt.Errorf("connection %s is closed", c.id)
+		}
 		return fmt.Errorf("connection %s send buffer full", c.id)
 	}
 }
