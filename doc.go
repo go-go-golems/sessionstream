@@ -1,12 +1,11 @@
-// Package sessionstream provides a reusable substrate for session-based streaming applications.
+// Package sessionstream provides a reusable substrate for event-streaming LLM and agent applications.
 //
-// The framework is intended to own generic concepts such as:
-//   - session identity,
-//   - typed commands and backend events,
-//   - UI and timeline projections,
-//   - hydration stores,
-//   - transport adapters.
+// Design goals:
+//   - one canonical routing key: SessionId
+//   - typed commands in, typed backend events out
+//   - sibling UI and timeline projections
+//   - storage and transport kept behind small public interfaces
 //
-// Product-specific runtime policy, middleware behavior, and HTTP edge compatibility
-// belong in downstream consumer applications rather than in this repository.
+// The package is intentionally generic. Application-specific concepts such as chat,
+// agents, or legacy webchat envelopes belong in consuming packages and apps.
 package sessionstream

@@ -32,12 +32,12 @@
 
 ### Phase 1 — extract the pure substrate
 
-- [ ] Move the root `evtstream` substrate files into `sessionstream` with import-path rewrites.
-- [ ] Move `hydration/memory` into `sessionstream`.
-- [ ] Move `hydration/sqlite` into `sessionstream`.
-- [ ] Move `transport` and `transport/ws` into `sessionstream`.
-- [ ] Add a boundary check ensuring the moved substrate no longer imports `github.com/go-go-golems/pinocchio/...`.
-- [ ] Validate the moved substrate in `sessionstream` with `go test ./...`.
+- [x] Move the root `evtstream` substrate files into `sessionstream` with import-path rewrites.
+- [x] Move `hydration/memory` into `sessionstream`.
+- [x] Move `hydration/sqlite` into `sessionstream`.
+- [x] Move `transport` and `transport/ws` into `sessionstream`.
+- [x] Add a boundary check ensuring the moved substrate no longer imports `github.com/go-go-golems/pinocchio/...`.
+- [x] Validate the moved substrate in `sessionstream` with `go test ./...`.
 
 ### Phase 2 — move framework-oriented examples and Systemlab
 

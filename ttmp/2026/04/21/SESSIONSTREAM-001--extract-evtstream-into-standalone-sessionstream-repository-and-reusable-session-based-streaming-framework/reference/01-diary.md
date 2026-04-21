@@ -629,7 +629,7 @@ This was the right second slice because it completed Phase 0 cleanly: the reposi
 
 **Inferred user intent:** Make visible, reviewable progress on the extraction program rather than batching too much cleanup into one opaque change.
 
-**Commit (code):** pending — Phase 0 cleanup slice had not been committed yet at the time of this diary step
+**Commit (code):** `6422dc546f22c613a320eb1fb8fb09bb29bf7274` — `chore(sessionstream): finish phase 0 bootstrap cleanup`
 
 ### What I did
 - Replaced the old template `Makefile` with a smaller library/framework-oriented one exposing only:
@@ -713,6 +713,137 @@ cd sessionstream && go build ./...
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/XXX/main.go` (deleted)
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/.goreleaser.yaml` (deleted)
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/.github/workflows/release.yaml` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
+
+## Step 9: Move the pure substrate into sessionstream and add a boundary check
+
+With Phase 0 complete, I moved into the first real extraction slice: copying the pure substrate out of `pinocchio` and into the new repository. I deliberately stopped at the framework core, hydration stores, and websocket transport. I did **not** move `apps/chat`, examples, or Systemlab in this slice, because the updated ticket plan now treats those as separate boundary decisions.
+
+This slice was the first point where the new repository started to hold real framework code instead of just ticket docs and bootstrap metadata. The goal was to prove that the generic core can live under the `sessionstream` module path, compile, and test cleanly without `pinocchio/...` imports.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 7)
+
+**Assistant interpretation:** Continue through the task list and begin the actual framework extraction work in focused, reviewable increments.
+
+**Inferred user intent:** Make concrete extraction progress, not just repository cleanup progress, while preserving the revised architecture boundary.
+
+**Commit (code):** pending — pure-substrate extraction slice had not been committed yet at the time of this diary step
+
+### What I did
+- Copied the pure substrate root files from `pinocchio/pkg/evtstream` into the `sessionstream` repository root:
+  - `bus.go`
+  - `command_registry.go`
+  - `consumer.go`
+  - `doc.go`
+  - `fanout.go`
+  - `handler.go`
+  - `hub.go`
+  - `hydration.go`
+  - `noop_store.go`
+  - `ordinals.go`
+  - `projection.go`
+  - `schema.go`
+  - `session_registry.go`
+  - `types.go`
+  - related `*_test.go` files
+- Renamed the root package from `package evtstream` to `package sessionstream`.
+- Copied the generic subpackages:
+  - `hydration/memory`
+  - `hydration/sqlite`
+  - `transport`
+  - `transport/ws`
+- Rewrote import paths in the moved subpackages from `github.com/go-go-golems/pinocchio/pkg/evtstream` to `github.com/go-go-golems/sessionstream`.
+- Fixed one remaining test import in `transport/ws/server_test.go` that still referenced `github.com/go-go-golems/pinocchio/pkg/evtstream/hydration/memory`.
+- Added a `boundary-check` target to `sessionstream/Makefile`:
+
+```make
+boundary-check:
+	@! rg -n 'github.com/go-go-golems/pinocchio/' . --glob '*.go' --glob '!ttmp/**' >/dev/null || (echo 'sessionstream must not import pinocchio packages' && exit 1)
+```
+
+- Ran:
+
+```bash
+cd sessionstream && go mod tidy
+cd sessionstream && go test ./...
+cd sessionstream && make check
+```
+
+### Why
+- This was the first slice that actually proves the extraction is real.
+- Moving the pure substrate first matches the revised architecture: framework core moves now, while product chat code stays downstream for later rebasing.
+- The boundary check prevents accidental backsliding once the moved code is in place.
+
+### What worked
+- After import rewrites and one test fix, `go test ./...` passed for the moved substrate packages.
+- `make check` passed with the new boundary check plus `go test ./...` and `go build ./...`.
+- The extracted code now compiles under the `github.com/go-go-golems/sessionstream` module path.
+
+### What didn't work
+- The first `go mod tidy && go test ./...` run failed because one moved test still imported the old pinocchio hydration path:
+
+```text
+github.com/go-go-golems/sessionstream/transport/ws.test imports
+	github.com/go-go-golems/pinocchio/pkg/evtstream/hydration/memory: module github.com/go-go-golems/pinocchio@latest found (v0.10.16), but does not contain package github.com/go-go-golems/pinocchio/pkg/evtstream/hydration/memory
+```
+
+I fixed that by updating `transport/ws/server_test.go` to import `github.com/go-go-golems/sessionstream/hydration/memory` instead.
+
+### What I learned
+- The core substrate really is extractable with relatively light mechanical changes. The package-level architecture held up.
+- A simple regex-based boundary check is worth adding immediately once copied code lands.
+
+### What was tricky to build
+- The main care point was deciding how far to go in one slice. I intentionally did not touch `apps/chat`, examples, or Systemlab here even though they are nearby in the source tree. Keeping this slice limited to the pure substrate made the review and the failure mode much easier to manage.
+
+### What warrants a second pair of eyes
+- Review the package rename from `evtstream` to `sessionstream` at the root package level and confirm that this is the desired long-term public API naming.
+- Review the boundary-check target to make sure it is strict enough without blocking legitimate future work.
+
+### What should be done in the future
+- Move to Phase 2 only after deciding whether a small `examples/chatdemo` should land before or alongside the framework-oriented Systemlab move.
+- Start planning the downstream `pinocchio` rebase so the old in-tree `pkg/evtstream` copy can later be retired cleanly.
+
+### Code review instructions
+- Review in this order:
+  1. root package files in `sessionstream/`
+  2. `sessionstream/hydration/*`
+  3. `sessionstream/transport/*`
+  4. `sessionstream/Makefile`
+- Validate with:
+
+```bash
+cd sessionstream && go test ./...
+cd sessionstream && make check
+```
+
+### Technical details
+- Files changed in this step include:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/bus.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/command_registry.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/consumer.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/doc.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/fanout.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/handler.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/hub.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/hydration.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/noop_store.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ordinals.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/projection.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/schema.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/session_registry.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/types.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/hydration/memory/store.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/hydration/sqlite/store.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/transport/transport.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/transport/ws/server.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/Makefile`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/go.mod`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/go.sum`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`

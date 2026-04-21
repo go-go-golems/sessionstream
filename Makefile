@@ -1,4 +1,7 @@
-.PHONY: fmt lint lintmax gosec govulncheck test build check
+.PHONY: fmt lint lintmax gosec govulncheck test build boundary-check check
+
+boundary-check:
+	@! rg -n 'github.com/go-go-golems/pinocchio/' . --glob '*.go' --glob '!ttmp/**' >/dev/null || (echo 'sessionstream must not import pinocchio packages' && exit 1)
 
 fmt:
 	GOWORK=off go fmt ./...
@@ -24,4 +27,4 @@ build:
 	GOWORK=off go generate ./...
 	GOWORK=off go build ./...
 
-check: test build
+check: boundary-check test build
