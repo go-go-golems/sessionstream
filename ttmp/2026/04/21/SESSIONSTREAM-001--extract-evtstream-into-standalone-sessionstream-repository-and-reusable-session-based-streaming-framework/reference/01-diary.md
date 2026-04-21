@@ -1329,3 +1329,211 @@ cd pinocchio && GOWORK=off go test ./pkg/chatapp ./cmd/web-chat/... -count=1
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
+
+## Step 14: Switch the downstream Systemlab consumer over to the external sessionstream module
+
+After the web-chat slices were using the extracted module, the biggest remaining downstream consumer still pointing at the in-tree framework copy was `pinocchio/cmd/evtstream-systemlab`. That command is still downstream because it owns the migration-oriented Phase 6 console, but its framework-facing labs should exercise the external `sessionstream` module rather than the old in-tree copy.
+
+This made a good next Phase 4 slice because it updated a real consumer, left the historical in-tree package available for now, and gave me a clean place to re-run both backend and frontend validation.
+
+### Prompt Context
+
+**User prompt (verbatim):** "continue"
+
+**Assistant interpretation:** Keep moving through the remaining extraction plan with another focused slice after the Phase 3 ownership cleanup.
+
+**Inferred user intent:** Reduce the remaining number of live downstream consumers that still depend on the in-tree `pkg/evtstream` copy, without yet trying to delete that old package island.
+
+**Commit (code):** `b84a3f49ac6cfbe5997d7e964a23dc86be8626bf` — `refactor(systemlab): consume external sessionstream module`
+
+### What I did
+- Rewired the downstream Systemlab command to import the external framework module:
+  - `pinocchio/cmd/evtstream-systemlab/lab_environment.go`
+  - `pinocchio/cmd/evtstream-systemlab/phase2_lab.go`
+  - `pinocchio/cmd/evtstream-systemlab/phase3_lab.go`
+  - `pinocchio/cmd/evtstream-systemlab/phase4_lab.go`
+  - `pinocchio/cmd/evtstream-systemlab/phase5_lab.go`
+  - `pinocchio/cmd/evtstream-systemlab/snapshot_provider.go`
+- Switched those files from `github.com/go-go-golems/pinocchio/pkg/evtstream` imports to:
+  - `github.com/go-go-golems/sessionstream`
+  - `github.com/go-go-golems/sessionstream/hydration/memory`
+  - `github.com/go-go-golems/sessionstream/hydration/sqlite`
+  - `github.com/go-go-golems/sessionstream/transport/ws`
+- Updated Phase 4 Systemlab to use the new downstream real chat package:
+  - `github.com/go-go-golems/pinocchio/pkg/chatapp`
+- Kept the slice intentionally scoped:
+  - Phase 6 remained downstream in the pinocchio Systemlab command,
+  - I did **not** try to delete `pinocchio/pkg/evtstream` yet,
+  - I did **not** attempt a repo-wide doc rewrite in the same commit.
+- Validated with:
+
+```bash
+cd pinocchio && GOWORK=off go test ./cmd/web-chat/... ./cmd/evtstream-systemlab/... -count=1
+cd pinocchio/cmd/web-chat/web && npm run check
+```
+
+### Why
+- `cmd/evtstream-systemlab` is an important downstream consumer, especially for the migration lab story. If it kept importing the in-tree framework copy, the extraction would remain half-real.
+- This slice proves that both the real chat app and the downstream teaching/migration app can sit on the extracted `sessionstream` module while still keeping pinocchio-owned downstream surfaces where they belong.
+
+### What worked
+- The downstream Systemlab command compiled and passed focused tests on the external module.
+- Focused backend validation passed for both `cmd/web-chat` and `cmd/evtstream-systemlab`.
+- Frontend validation passed with `npm run check` in the web frontend.
+
+### What didn't work
+- The first mechanical import rewrite accidentally produced a duplicated alias in `phase4_lab.go`:
+
+```go
+chatapp chatapp "github.com/go-go-golems/pinocchio/pkg/chatapp"
+```
+
+- `gofmt` caught that immediately with import-path parse errors, so I fixed the duplicate alias before rerunning tests.
+
+### What I learned
+- The external-module consumer cutover is becoming easier after the earlier ownership cleanup. Once `pkg/chatapp` existed and `cmd/web-chat` owned `agentmode`, the Systemlab cutover was largely a mechanical import rewrite plus focused validation.
+
+### What was tricky to build
+- The main subtlety was scope discipline: Phase 6 still belongs downstream in pinocchio, but phases 0 through 5 in the same command should still consume the external framework module. That means one command can remain downstream without justifying continued imports of the old in-tree substrate.
+
+### What warrants a second pair of eyes
+- Review whether any remaining downstream code outside `pinocchio/pkg/evtstream` still imports the in-tree substrate after this slice.
+- Review whether the pinocchio Systemlab README and chapter wording should be normalized in a later doc pass now that the implementation imports are externalized.
+
+### What should be done in the future
+- Retire the old in-tree `pkg/evtstream` copy once the remaining donor/shim/history needs are resolved.
+- Decide whether `pkg/evtstream/examples/chat` should become a shim to the downstream `pkg/chatapp` or be deleted when the in-tree package island is retired.
+
+### Code review instructions
+- Review in this order:
+  1. `pinocchio/cmd/evtstream-systemlab/*.go`
+  2. `sessionstream/ttmp/.../tasks.md`, `changelog.md`, and this diary step
+- Validate with:
+
+```bash
+cd pinocchio && GOWORK=off go test ./cmd/web-chat/... ./cmd/evtstream-systemlab/... -count=1
+cd pinocchio/cmd/web-chat/web && npm run check
+```
+
+### Technical details
+- Files changed in this step include:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/evtstream-systemlab/lab_environment.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/evtstream-systemlab/phase2_lab.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/evtstream-systemlab/phase3_lab.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/evtstream-systemlab/phase4_lab.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/evtstream-systemlab/phase5_lab.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/evtstream-systemlab/snapshot_provider.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
+
+## Step 15: Shrink the remaining in-tree evtstream island and fix the flaky websocket close race
+
+At this point the live downstream consumers were already using the extracted `sessionstream` module, but two cleanup items were still bothering me:
+
+1. the old in-tree `pkg/evtstream/apps/chat` package was still present as dead duplicate code, and
+2. the focused downstream validation was still occasionally tripping a `send on closed channel` panic in the extracted websocket transport.
+
+Those two issues fit together well as one stabilization slice: remove one more piece of the stale in-tree app-grade framework copy, and make the external module's websocket transport robust enough that the downstream validation stops flaking.
+
+### Prompt Context
+
+**User prompt (verbatim):** "continue"
+
+**Assistant interpretation:** Keep pushing through the stabilization/cleanup work after the main downstream consumer cutover.
+
+**Inferred user intent:** Do not stop at "it mostly works" — keep reducing duplication and paper-cut failures while the architecture is still fresh in context.
+
+**Commit (code):** pending — stabilization slice had not been committed yet at the time of this diary step
+
+### What I did
+- Deleted the old in-tree app-grade chat donor package from pinocchio:
+
+```text
+pinocchio/pkg/evtstream/apps/chat/chat.go
+pinocchio/pkg/evtstream/apps/chat/service.go
+pinocchio/pkg/evtstream/apps/chat/chat_test.go
+pinocchio/pkg/evtstream/apps/chat/service_test.go
+```
+
+- Repointed `pinocchio/pkg/evtstream/examples/chat` at the downstream real chat package and the external framework module:
+  - `pinocchio/pkg/evtstream/examples/chat/chat.go`
+  - `pinocchio/pkg/evtstream/examples/chat/chat_test.go`
+- Updated the main pinocchio docs/tutorial references that still named the deleted `pkg/evtstream/apps/chat` files:
+  - `pinocchio/pkg/doc/topics/webchat-backend-internals.md`
+  - `pinocchio/pkg/doc/topics/webchat-sem-and-ui.md`
+  - `pinocchio/pkg/doc/tutorials/04-intern-app-owned-middleware-events-timeline-widgets.md`
+  - `pinocchio/pkg/doc/tutorials/05-building-standalone-webchat-ui.md`
+- Fixed the flaky websocket transport race in the extracted framework module:
+  - `sessionstream/transport/ws/server.go`
+  - added a closed-state guard and panic-safe send handling around `sendEnvelope(...)`
+- Validated with:
+
+```bash
+cd sessionstream && GOWORK=off go test ./... -count=1
+cd pinocchio && GOWORK=off go test ./pkg/evtstream/examples/chat ./cmd/web-chat/... ./cmd/evtstream-systemlab/... -count=1
+```
+
+### Why
+- Once `pkg/chatapp` became the real downstream home for the live chat app, keeping the old duplicate app package under `pkg/evtstream/apps/chat` only added confusion.
+- The websocket race was polluting exactly the focused validation loop we were relying on to keep the extraction safe, so it was worth fixing while the failure mode was fresh.
+
+### What worked
+- The old in-tree app-grade chat donor package could be removed without breaking focused downstream validation.
+- `pkg/evtstream/examples/chat` still builds as a shimmed example path.
+- The websocket close-race fix eliminated the repeated `send on closed channel` panic in the focused validation command I had been rerunning.
+
+### What didn't work
+- The first attempt at broad focused validation surfaced the same flaky panic again before the transport fix landed:
+
+```text
+panic: send on closed channel
+...
+github.com/go-go-golems/sessionstream/transport/ws.(*Server).sendEnvelope
+```
+
+- That failure was the signal to stop treating it as a harmless rerun-only nuisance and fix the transport more directly.
+
+### What I learned
+- Stabilization work is part of architecture work. If the validation loop is flaky, contributors stop trusting their own evidence.
+- Removing stale duplicate code gets easier once the live consumers have already moved. By this point, deleting `pkg/evtstream/apps/chat` was a cleanup step rather than a risky migration step.
+
+### What was tricky to build
+- The subtle part of the transport fix was making `sendEnvelope(...)` safe without turning real send failures into silent success. The solution I used still returns a meaningful error for closed connections and preserves the existing backpressure error for full buffers.
+
+### What warrants a second pair of eyes
+- Review the `sessionstream/transport/ws/server.go` close/send interaction and confirm the guard/recover approach is an acceptable transport-level robustness fix.
+- Review whether any remaining docs or examples still imply that `pkg/evtstream/apps/chat` is the canonical live path.
+
+### What should be done in the future
+- Finish retiring the rest of the old in-tree `pkg/evtstream` copy after any remaining donor/history needs are resolved.
+- Consider whether `pkg/evtstream/examples/chat` should remain as a historical shim for a while or be removed along with the rest of the old package island.
+
+### Code review instructions
+- Review in this order:
+  1. `sessionstream/transport/ws/server.go`
+  2. `pinocchio/pkg/evtstream/examples/chat/*`
+  3. deleted `pinocchio/pkg/evtstream/apps/chat/*`
+  4. `pinocchio/pkg/doc/...` references updated in this slice
+- Validate with:
+
+```bash
+cd sessionstream && GOWORK=off go test ./... -count=1
+cd pinocchio && GOWORK=off go test ./pkg/evtstream/examples/chat ./cmd/web-chat/... ./cmd/evtstream-systemlab/... -count=1
+```
+
+### Technical details
+- Files changed in this step include:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/transport/ws/server.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/evtstream/examples/chat/chat.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/evtstream/examples/chat/chat_test.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/evtstream/apps/chat/chat.go` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/evtstream/apps/chat/service.go` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/evtstream/apps/chat/chat_test.go` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/evtstream/apps/chat/service_test.go` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/doc/topics/webchat-backend-internals.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/doc/topics/webchat-sem-and-ui.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/doc/tutorials/04-intern-app-owned-middleware-events-timeline-widgets.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/doc/tutorials/05-building-standalone-webchat-ui.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`

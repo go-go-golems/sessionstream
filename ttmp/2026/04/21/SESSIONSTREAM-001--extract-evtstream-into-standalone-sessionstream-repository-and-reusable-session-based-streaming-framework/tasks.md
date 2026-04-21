@@ -54,7 +54,7 @@
 
 ### Phase 4 — switch pinocchio to consume sessionstream
 
-- [ ] Switch `pinocchio` to consume the external `sessionstream` module.
-- [ ] Update downstream imports/tests in `pinocchio`.
+- [x] Switch `pinocchio` to consume the external `sessionstream` module.
+- [x] Update downstream imports/tests in `pinocchio`.
 - [ ] Retire the old in-tree `pkg/evtstream` copy after stabilization.
-- [ ] Re-run focused `cmd/web-chat` backend/frontend validation after the consumer cutover.
+- [x] Re-run focused `cmd/web-chat` backend/frontend validation after the consumer cutover.
