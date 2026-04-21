@@ -1,17 +1,7 @@
-.PHONY: gifs
+.PHONY: fmt lint lintmax gosec govulncheck test build check
 
-all: gifs
-
-VERSION=v0.1.14
-GORELEASER_ARGS ?= --skip=sign --snapshot --clean
-GORELEASER_TARGET ?= --single-target
-
-TAPES=$(wildcard doc/vhs/*tape)
-gifs: $(TAPES)
-	for i in $(TAPES); do vhs < $$i; done
-
-docker-lint:
-	docker run --rm -v $(shell pwd):/app -w /app golangci/golangci-lint:latest golangci-lint run -v
+fmt:
+	GOWORK=off go fmt ./...
 
 lint:
 	GOWORK=off golangci-lint run -v
@@ -34,28 +24,4 @@ build:
 	GOWORK=off go generate ./...
 	GOWORK=off go build ./...
 
-goreleaser:
-	GOWORK=off goreleaser release $(GORELEASER_ARGS) $(GORELEASER_TARGET)
-
-tag-major:
-	git tag $(shell svu major)
-
-tag-minor:
-	git tag $(shell svu minor)
-
-tag-patch:
-	git tag $(shell svu patch)
-
-release:
-	git push origin --tags
-	GOWORK=off GOPROXY=proxy.golang.org go list -m github.com/go-go-golems/XXX@$(shell svu current)
-
-bump-glazed:
-	GOWORK=off go get github.com/go-go-golems/glazed@latest
-	GOWORK=off go get github.com/go-go-golems/clay@latest
-	GOWORK=off go mod tidy
-
-XXX_BINARY=$(shell which XXX)
-install:
-	GOWORK=off go build -o ./dist/XXX ./cmd/XXX && \
-		cp ./dist/XXX $(XXX_BINARY)
+check: test build

@@ -560,7 +560,7 @@ I intentionally kept this first implementation slice narrow. The template still 
 
 **Inferred user intent:** Move from architecture planning into disciplined implementation with clear progress tracking rather than leaving the ticket as documentation-only.
 
-**Commit (code):** pending — Phase 0 bootstrap slice had not been committed yet at the time of this diary step
+**Commit (code):** `682a0d053f99a75f2bfe2fa713a0b6326d86538a` — `chore(sessionstream): bootstrap repo identity`
 
 ### What I did
 - Expanded the task list so the future work is grouped into explicit phases and smaller checkboxes.
@@ -600,7 +600,7 @@ which passed with:
 - `go test ./...` still passed after the bootstrap edits.
 
 ### What didn't work
-- The test output still shows `cmd/XXX`, which confirms there are more template placeholders to remove in the next Phase 0 slice.
+- The test output still showed `cmd/XXX`, which confirmed there were more template placeholders to remove in the next Phase 0 slice.
 
 ### What I learned
 - The right first implementation slice was identity cleanup, not code movement. That reduced ambiguity immediately without forcing any extraction decisions yet.
@@ -614,6 +614,108 @@ which passed with:
 ### What should be done in the future
 - Finish the remaining Phase 0 cleanup by removing `cmd/XXX` and the remaining template placeholders from the Makefile/release metadata.
 - Re-run focused repo validation after that second cleanup slice and then begin the actual substrate move.
+
+## Step 8: Finish the remaining Phase 0 template cleanup
+
+After the first bootstrap slice, the repository still had obvious template residue in the developer tooling layer: a placeholder `cmd/XXX` command, a binary-oriented `Makefile`, and unreconciled release configuration aimed at a nonexistent `XXX` binary. I treated that as a separate cleanup checkpoint and removed those artifacts before starting any real framework code movement.
+
+This was the right second slice because it completed Phase 0 cleanly: the repository now identifies itself correctly, no longer exposes the fake `XXX` command path, and still passes basic Go validation. That means future substrate extraction work can happen in a repo that already looks and behaves like a real library/framework repository.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 7)
+
+**Assistant interpretation:** Continue working through the task list in focused increments, committing each meaningful slice and documenting the work as it happens.
+
+**Inferred user intent:** Make visible, reviewable progress on the extraction program rather than batching too much cleanup into one opaque change.
+
+**Commit (code):** pending — Phase 0 cleanup slice had not been committed yet at the time of this diary step
+
+### What I did
+- Replaced the old template `Makefile` with a smaller library/framework-oriented one exposing only:
+  - `fmt`
+  - `lint`
+  - `lintmax`
+  - `gosec`
+  - `govulncheck`
+  - `test`
+  - `build`
+  - `check`
+- Removed the placeholder command tree:
+
+```text
+sessionstream/cmd/XXX/main.go
+```
+
+- Removed the unreconciled placeholder release artifacts:
+
+```text
+sessionstream/.goreleaser.yaml
+sessionstream/.github/workflows/release.yaml
+```
+
+- Ran:
+
+```bash
+cd sessionstream && go test ./...
+cd sessionstream && go build ./...
+```
+
+- Ran a placeholder search with:
+
+```bash
+cd sessionstream && rg -uu -n 'XXX|GO GO TEMPLATE' .
+```
+
+and confirmed the only remaining matches were historical mentions inside the diary documenting the earlier state.
+
+### Why
+- Phase 0 was not really complete while the repository still contained a fake command path and CLI-oriented release scaffolding for a nonexistent `XXX` binary.
+- Removing those artifacts now reduces confusion for every later extraction slice.
+
+### What worked
+- `go test ./...` passed after removing the placeholder command and simplifying the repository tooling.
+- `go build ./...` also passed.
+- The remaining `XXX` matches were only in historical ticket documentation, which is acceptable.
+
+### What didn't work
+- N/A
+
+### What I learned
+- Cleaning template artifacts early is worth a dedicated commit. It prevents the extraction work from being mixed with “what is even real in this repo?” noise.
+
+### What was tricky to build
+- The judgment call here was whether to keep or rewrite the placeholder release config. Since the repository does not yet have a real releasable command and we have not decided the module-release strategy, deleting the unreconciled placeholder release config was cleaner than carrying forward a broken template.
+
+### What warrants a second pair of eyes
+- Review whether removing `.goreleaser.yaml` and the release workflow is the right interim state, or whether you want a module-oriented release pipeline added immediately in a later ticket.
+
+### What should be done in the future
+- Start Phase 1 by moving the pure substrate packages into the cleaned repository.
+- Add back release automation later once the repository has a real publish/release strategy instead of a CLI template stub.
+
+### Code review instructions
+- Review these files first:
+  - `sessionstream/Makefile`
+  - deleted: `sessionstream/cmd/XXX/main.go`
+  - deleted: `sessionstream/.goreleaser.yaml`
+  - deleted: `sessionstream/.github/workflows/release.yaml`
+- Validate with:
+
+```bash
+cd sessionstream && go test ./...
+cd sessionstream && go build ./...
+```
+
+### Technical details
+- Files changed in this step:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/Makefile`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/XXX/main.go` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/.goreleaser.yaml` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/.github/workflows/release.yaml` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
 
 ### Code review instructions
 - Review these files first:

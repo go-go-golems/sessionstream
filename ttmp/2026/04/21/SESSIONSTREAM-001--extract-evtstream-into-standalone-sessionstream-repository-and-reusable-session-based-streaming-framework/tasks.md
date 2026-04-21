@@ -27,8 +27,8 @@
 
 - [x] Replace the template `sessionstream/go.mod` module path with `github.com/go-go-golems/sessionstream`.
 - [x] Replace the placeholder/template repository docs and agent guidance (`README.md`, `AGENT.md`, package doc stubs) with sessionstream-specific content.
-- [ ] Clean the template placeholders out of repo metadata and dev tooling (`Makefile`, release config, placeholder command stubs, CI references as needed).
-- [ ] Validate the bootstrapped repo with focused checks (`go test ./...`, any repo-local lint/build checks that still apply).
+- [x] Clean the template placeholders out of repo metadata and dev tooling (`Makefile`, release config, placeholder command stubs, CI references as needed).
+- [x] Validate the bootstrapped repo with focused checks (`go test ./...`, any repo-local lint/build checks that still apply).
 
 ### Phase 1 — extract the pure substrate
 
