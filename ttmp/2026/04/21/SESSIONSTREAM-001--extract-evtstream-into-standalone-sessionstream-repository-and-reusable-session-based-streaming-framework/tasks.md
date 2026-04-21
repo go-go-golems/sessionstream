@@ -41,7 +41,7 @@
 
 ### Phase 2 — move framework-oriented examples and Systemlab
 
-- [ ] Add a small generic demo/example chat app to `sessionstream` if a framework-owned application example is still desired.
+- [x] Add a small generic demo/example chat app to `sessionstream` if a framework-owned application example is still desired.
 - [ ] Move the framework-oriented Systemlab pieces into the new repo.
 - [ ] Decide whether the current Phase 6 pinocchio migration lab should stay downstream instead of moving with the framework-oriented Systemlab phases.
 - [ ] Validate the moved example/Systemlab code in `sessionstream`.

@@ -731,7 +731,7 @@ This slice was the first point where the new repository started to hold real fra
 
 **Inferred user intent:** Make concrete extraction progress, not just repository cleanup progress, while preserving the revised architecture boundary.
 
-**Commit (code):** pending — pure-substrate extraction slice had not been committed yet at the time of this diary step
+**Commit (code):** `2795d41e2e3531169ec3da86b28e3f4b930d2448` — `feat(sessionstream): extract core substrate packages`
 
 ### What I did
 - Copied the pure substrate root files from `pinocchio/pkg/evtstream` into the `sessionstream` repository root:
@@ -844,6 +844,95 @@ cd sessionstream && make check
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/Makefile`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/go.mod`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/go.sum`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
+
+## Step 10: Add a framework-owned demo chat app without pinocchio dependencies
+
+Once the pure substrate landed, I moved to the next task that fits the revised plan: provide a small chat-shaped example in `sessionstream` without importing the real pinocchio chat product. The key point of this slice was to prove that `sessionstream` can host an application-level teaching example without inheriting `pinocchio` runtime composition or `agentmode` behavior.
+
+I intentionally built this as `examples/chatdemo`, not as a resurrected `apps/chat` extraction. The example mirrors only the generic parts we actually want in the framework repo: session-based command submission, projected user and assistant messages, stop handling, and a fake/demo inference loop.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 7)
+
+**Assistant interpretation:** Continue through the task list with another focused slice, this time implementing the framework-owned demo/example chat app that the updated plan calls for.
+
+**Inferred user intent:** Give the new repository a practical application example without collapsing the framework boundary back into product-specific chat logic.
+
+**Commit (code):** pending — chat demo slice had not been committed yet at the time of this diary step
+
+### What I did
+- Added:
+
+```text
+sessionstream/examples/chatdemo/chat.go
+sessionstream/examples/chatdemo/chat_test.go
+```
+
+- Implemented a small demo chat app that provides:
+  - `ChatStartInference` / `ChatStopInference` commands,
+  - user-message acceptance event,
+  - assistant started/delta/finished/stopped events,
+  - UI projection for the message lifecycle,
+  - timeline projection into `ChatMessage` entities,
+  - a simple fake/demo answer generator (`Answer: <prompt>`),
+  - `Service`, `Engine`, `RegisterSchemas`, and `Install` helpers built directly on `sessionstream`.
+- Wrote focused tests for:
+  - happy-path completion,
+  - stop path.
+- Ran:
+
+```bash
+cd sessionstream && go test ./...
+```
+
+which passed and included:
+
+```text
+ok  	github.com/go-go-golems/sessionstream/examples/chatdemo	...
+```
+
+### Why
+- The revised architecture explicitly called for a small demo/example chat app in `sessionstream` instead of extracting the real `pinocchio` chat package.
+- This slice makes that distinction concrete and testable.
+
+### What worked
+- The demo app compiled and tested cleanly using only `sessionstream` and generic protobuf helpers.
+- The tests proved the example supports both normal completion and interruption.
+
+### What didn't work
+- N/A
+
+### What I learned
+- A useful framework-owned chat example can stay much smaller than the real product chat package. That is a good sign: we do not need to over-generalize the downstream application to make the framework repo feel complete.
+
+### What was tricky to build
+- The main design constraint was resisting the urge to copy more of `pinocchio/pkg/evtstream/apps/chat` than necessary. The goal was not feature parity; it was a clean teaching example that demonstrates the substrate API honestly.
+
+### What warrants a second pair of eyes
+- Review whether the example should keep the current `Chat*` command/event names for familiarity, or whether a more explicitly demo-oriented naming scheme would better signal that this is not the product chat layer.
+
+### What should be done in the future
+- Move on to the framework-oriented Systemlab extraction slices next.
+- Keep the example intentionally small unless a second consumer proves a richer shared chat package is genuinely reusable.
+
+### Code review instructions
+- Review these files first:
+  - `sessionstream/examples/chatdemo/chat.go`
+  - `sessionstream/examples/chatdemo/chat_test.go`
+- Validate with:
+
+```bash
+cd sessionstream && go test ./...
+```
+
+### Technical details
+- Files changed in this step:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/examples/chatdemo/chat.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/examples/chatdemo/chat_test.go`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
