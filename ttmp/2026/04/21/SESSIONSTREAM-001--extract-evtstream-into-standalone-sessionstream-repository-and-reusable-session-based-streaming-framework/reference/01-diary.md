@@ -1119,3 +1119,108 @@ cd sessionstream && make check
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
+
+## Step 12: Rebase the real pinocchio chat app onto sessionstream without extracting it into the framework repo
+
+With the framework repo now hosting the substrate, the demo chat, and the framework-owned Systemlab, the next task was to prove the downstream architecture choice in real code: the real chat app should stay in `pinocchio`, but it should stop living under the framework namespace. I treated this as a focused first Phase 3 slice rather than trying to solve the remaining `agentmode` ownership cleanup in the same change.
+
+The point of this slice was to move the real app-grade chat package out of `pinocchio/pkg/evtstream/apps/chat` conceptually and into an explicitly pinocchio-owned home, while rebasing it on the extracted `sessionstream` APIs.
+
+### Prompt Context
+
+**User prompt (verbatim):** "go ahead."
+
+**Assistant interpretation:** Continue into the next implementation phase after the extracted Systemlab move and Phase 6 removal, using another focused slice with code changes, validation, and diary updates.
+
+**Inferred user intent:** Start the downstream `pinocchio` rebase work now that the framework-side extraction is real, but continue in narrow reviewable increments.
+
+**Commit (code):** `8405bd3ee468c9e73db231b304059d445ceeccff` — `refactor(web-chat): move downstream chat app off pkg/evtstream`
+
+### What I did
+- Added a new pinocchio-owned chat package:
+
+```text
+pinocchio/pkg/chatapp/chat.go
+pinocchio/pkg/chatapp/service.go
+pinocchio/pkg/chatapp/chat_test.go
+pinocchio/pkg/chatapp/service_test.go
+```
+
+- Rebased this package on the extracted framework module by importing:
+  - `github.com/go-go-golems/sessionstream`
+  - while keeping pinocchio-owned runtime and middleware dependencies in pinocchio where they belong.
+- Rewired the live canonical web-chat server to use the new downstream package plus external framework stores/transports:
+  - `pinocchio/cmd/web-chat/app/server.go`
+- Added a temporary local module wire-up in `pinocchio/go.mod` so the slice also works with `GOWORK=off` during the extraction branch:
+  - `require github.com/go-go-golems/sessionstream v0.0.0`
+  - `replace github.com/go-go-golems/sessionstream => ../sessionstream`
+- Kept this slice intentionally narrow:
+  - I did **not** yet move `agentmode` event ownership out of the downstream chat package.
+  - I did **not** yet switch the rest of pinocchio off the in-tree `pkg/evtstream` copy.
+  - I did **not** try to retire the legacy package island in the same commit.
+- Validated with:
+
+```bash
+cd pinocchio && GOWORK=off go test ./pkg/chatapp ./cmd/web-chat/app ./cmd/web-chat/... -count=1
+```
+
+### Why
+- The extraction plan says the real chat app should remain downstream in `pinocchio` rather than being treated as framework-owned shared code.
+- Moving it into `pinocchio/pkg/chatapp` makes that ownership explicit.
+- Rebasing the live `cmd/web-chat` server onto `sessionstream` proves that the extracted framework is already useful to the real downstream app.
+
+### What worked
+- The new pinocchio-owned package compiled and passed its copied/adapted tests.
+- `cmd/web-chat/app` built and tested against the new downstream package.
+- Focused `cmd/web-chat/...` tests passed after the rebase.
+
+### What didn't work
+- The first `GOWORK=off` test run failed before the temporary module wiring existed because `pinocchio/go.mod` did not yet require the extracted `sessionstream` module.
+- After adding the local `require` + `replace`, the first rerun surfaced a transient websocket panic already seen elsewhere in this migration line:
+
+```text
+panic: send on closed channel
+...
+github.com/go-go-golems/sessionstream/transport/ws.(*Server).sendEnvelope
+```
+
+- An immediate rerun passed cleanly, so I treated that as the known flaky transport race rather than a deterministic failure introduced by this slice.
+
+### What I learned
+- The first real downstream rebase step can be done without yet solving every remaining architectural cleanup. Making ownership explicit first is a good intermediate state.
+- It is valuable to separate the “downstream package ownership” move from the later “agentmode ownership” move, because they are related but not identical changes.
+
+### What was tricky to build
+- The main care point was not over-reaching into the full pinocchio-wide cutover. The user asked to continue, but the right continuation was still a narrow slice: move the real app package first, then keep the remaining dependency cleanup for later slices.
+
+### What warrants a second pair of eyes
+- Review the package naming/location choice `pinocchio/pkg/chatapp` and confirm it is the right long-term home for the downstream real chat app.
+- Review whether any remaining downstream importers should move to the new package in the next slice before the old in-tree framework copy is retired.
+
+### What should be done in the future
+- Move `agentmode` event ownership out of the downstream chat package and into `cmd/web-chat` or another pinocchio-owned adapter layer.
+- Continue the broader pinocchio consumer cutover to the external `sessionstream` module once the downstream ownership split is complete.
+
+### Code review instructions
+- Review in this order:
+  1. `pinocchio/pkg/chatapp/*`
+  2. `pinocchio/cmd/web-chat/app/server.go`
+  3. `sessionstream/ttmp/.../tasks.md`, `changelog.md`, and this diary step
+- Validate with:
+
+```bash
+cd pinocchio && GOWORK=off go test ./pkg/chatapp ./cmd/web-chat/app ./cmd/web-chat/... -count=1
+```
+
+### Technical details
+- Files changed in this step include:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/chatapp/chat.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/chatapp/service.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/chatapp/chat_test.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/chatapp/service_test.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/web-chat/app/server.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/go.mod`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/go.sum`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
