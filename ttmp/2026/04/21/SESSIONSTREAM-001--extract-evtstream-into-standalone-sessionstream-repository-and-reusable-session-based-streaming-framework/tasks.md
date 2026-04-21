@@ -49,8 +49,8 @@
 ### Phase 3 — keep the real chat app downstream in pinocchio
 
 - [x] Keep the real chat app in `pinocchio` and rebase it on `sessionstream` instead of extracting `pkg/evtstream/apps/chat` wholesale.
-- [ ] Move `agentmode` ownership out of the shared chat package and into `cmd/web-chat` or another pinocchio-owned adapter layer.
-- [ ] Update the downstream chat app so it publishes the needed sessionstream-compatible events without making the framework repo depend on `agentmode`.
+- [x] Move `agentmode` ownership out of the shared chat package and into `cmd/web-chat` or another pinocchio-owned adapter layer.
+- [x] Update the downstream chat app so it publishes the needed sessionstream-compatible events without making the framework repo depend on `agentmode`.
 
 ### Phase 4 — switch pinocchio to consume sessionstream
 

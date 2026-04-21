@@ -1224,3 +1224,108 @@ cd pinocchio && GOWORK=off go test ./pkg/chatapp ./cmd/web-chat/app ./cmd/web-ch
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
+
+## Step 13: Move agentmode ownership out of the downstream chat package and into cmd/web-chat
+
+Once the real chat app lived in a pinocchio-owned package, the next cleanup was the one the plan had been aiming at all along: `agentmode` should not be owned by the app-grade chat package itself. The downstream chat package should know how to do chat. The `cmd/web-chat` application should decide which app-specific features are layered onto that chat surface.
+
+I kept this as a second narrow slice rather than folding it into the first rebase commit. That made the before/after easier to review: first move ownership of the chat app package, then move ownership of the `agentmode` feature.
+
+### Prompt Context
+
+**User prompt (verbatim):** "go ahead."
+
+**Assistant interpretation:** Continue after the downstream chat rebase with the next focused Phase 3 cleanup slice.
+
+**Inferred user intent:** Finish the app-ownership boundary for the real chat app before broader pinocchio-wide consumer cutover work.
+
+**Commit (code):** `cc6768d99a585bb10ecd9ec93447c8aad500e312` — `refactor(web-chat): move agentmode chat feature into cmd/web-chat`
+
+### What I did
+- Added a generic feature seam to the downstream pinocchio-owned chat package:
+
+```text
+pinocchio/pkg/chatapp/features.go
+```
+
+- Changed `pinocchio/pkg/chatapp/chat.go` so the package now owns only the base chat behavior:
+  - chat commands/events,
+  - user + assistant message projection,
+  - runtime inference sink handling for generic completion/error/interrupt events,
+  - feature registration hooks for app-owned extensions.
+- Removed direct `agentmode` ownership from `pinocchio/pkg/chatapp`:
+  - no direct `agentmode` import remains in the package,
+  - no `agentmode`-specific event/UI/timeline constants remain in the package,
+  - chat package tests were reduced back to base chat behavior.
+- Added the concrete `agentmode` feature to the application layer instead:
+
+```text
+pinocchio/cmd/web-chat/agentmode_chat_feature.go
+pinocchio/cmd/web-chat/agentmode_chat_feature_test.go
+```
+
+- Wired the canonical web-chat app server to accept feature sets and passed the `agentmode` feature from `main.go`:
+  - `pinocchio/cmd/web-chat/app/server.go`
+  - `pinocchio/cmd/web-chat/main.go`
+- Validated with:
+
+```bash
+cd pinocchio && GOWORK=off go test ./pkg/chatapp ./cmd/web-chat/... -count=1
+```
+
+### Why
+- This is the architecture boundary the extraction plan called for: framework-like chat plumbing stays in the downstream app package, while `cmd/web-chat` owns the product-specific `agentmode` extension.
+- It removes the last live `agentmode` dependency from the downstream shared chat package.
+- It proves the real app can keep custom backend events and widgets without forcing those behaviors into the package that sits closest to the reusable sessionstream substrate.
+
+### What worked
+- `pkg/chatapp` now compiles and tests without importing `agentmode`.
+- `cmd/web-chat` now owns the concrete `agentmode` translation/projection feature.
+- Focused `GOWORK=off` tests passed for the downstream chat package and canonical web-chat app.
+
+### What didn't work
+- The first attempt at the new `cmd/web-chat` feature test used the wrong `gepevents.NewAgentModeSwitchEvent(...)` signature and a too-small test timeline-view stub.
+- Fixing that required:
+  - changing the test to call `NewAgentModeSwitchEvent(meta, from, to, analysis)`, and
+  - adding `List(...)` and `Ordinal()` methods to the stub so it satisfied `sessionstream.TimelineView`.
+
+### What I learned
+- The generic extension seam is small but powerful: once the chat package can delegate runtime-event handling plus UI/timeline projection, the app package no longer needs to know about every downstream feature.
+- This is a better long-term shape for future custom widgets than continuing to grow one increasingly product-specific shared chat package.
+
+### What was tricky to build
+- The subtle part was remembering that `agentmode` preview clearing on final/stopped assistant events was also feature-owned behavior, not core chat behavior. The base chat package had to stop clearing preview state itself so the app-owned feature could own that behavior consistently.
+
+### What warrants a second pair of eyes
+- Review the feature interface in `pinocchio/pkg/chatapp/features.go` and confirm it is the right long-term seam for future app-owned extensions.
+- Review the `cmd/web-chat/agentmode_chat_feature.go` event names and payload shapes to ensure they exactly preserve the browser-facing behavior expected by the existing frontend.
+
+### What should be done in the future
+- Continue with the broader pinocchio consumer cutover to external `sessionstream` surfaces beyond this focused canonical web-chat slice.
+- Decide when the old historical `pkg/evtstream/apps/chat` donor package and any remaining in-tree framework references should be retired.
+
+### Code review instructions
+- Review in this order:
+  1. `pinocchio/pkg/chatapp/features.go`
+  2. `pinocchio/pkg/chatapp/chat.go`
+  3. `pinocchio/cmd/web-chat/agentmode_chat_feature.go`
+  4. `pinocchio/cmd/web-chat/app/server.go`
+  5. `pinocchio/cmd/web-chat/main.go`
+- Validate with:
+
+```bash
+cd pinocchio && GOWORK=off go test ./pkg/chatapp ./cmd/web-chat/... -count=1
+```
+
+### Technical details
+- Files changed in this step include:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/chatapp/features.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/chatapp/chat.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/chatapp/chat_test.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/web-chat/agentmode_chat_feature.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/web-chat/agentmode_chat_feature_test.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/web-chat/app/server.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/web-chat/main.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
