@@ -56,5 +56,5 @@
 
 - [x] Switch `pinocchio` to consume the external `sessionstream` module.
 - [x] Update downstream imports/tests in `pinocchio`.
-- [ ] Retire the old in-tree `pkg/evtstream` copy after stabilization.
+- [x] Retire the old in-tree `pkg/evtstream` copy after stabilization.
 - [x] Re-run focused `cmd/web-chat` backend/frontend validation after the consumer cutover.

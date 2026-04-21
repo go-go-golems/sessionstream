@@ -1537,3 +1537,119 @@ cd pinocchio && GOWORK=off go test ./pkg/evtstream/examples/chat ./cmd/web-chat/
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/doc/tutorials/05-building-standalone-webchat-ui.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
+
+## Step 16: Remove the remaining pinocchio copies entirely
+
+The user then made the cleanup target completely explicit: remove Systemlab from `pinocchio` and remove `pkg/evtstream`. By the time this request arrived, those were no longer migration-critical codepaths; they were historical duplicates and stale downstream leftovers. That made this a clean deletion slice rather than a risky architecture change.
+
+### Prompt Context
+
+**User prompt (verbatim):** "rm systemlab from pinocchio, rm pkg/evtstream."
+
+**Assistant interpretation:** Delete the remaining downstream pinocchio copies of the old Systemlab command and the old in-tree evtstream package tree, then clean any surviving build/comment references and rerun focused validation on the still-live surfaces.
+
+**Inferred user intent:** Finish the extraction by removing the last redundant in-tree implementation copies, not merely by stopping new code from using them.
+
+**Commit (code):** `bf86d848e79bd8b5146dcd3c9ab74f13475fd7da` — `refactor(pinocchio): remove in-tree evtstream and systemlab`
+
+### What I did
+- Deleted the downstream pinocchio Systemlab command entirely:
+
+```text
+pinocchio/cmd/evtstream-systemlab/
+```
+
+including:
+- server/lab Go code,
+- all chapters,
+- static assets,
+- the Phase 6 console code,
+- and the README.
+
+- Deleted the remaining in-tree evtstream subtree entirely:
+
+```text
+pinocchio/pkg/evtstream/
+```
+
+including:
+- the root substrate,
+- stores,
+- transports,
+- tests,
+- and the remaining example shim.
+
+- Cleaned the old build hooks from `pinocchio/Makefile` by removing:
+  - `evtstream-test`
+  - `systemlab-build`
+  - `systemlab-run`
+  - `evtstream-boundary-check`
+  - `evtstream-check`
+- Updated the remaining code comments that still talked about keeping behavior out of `pkg/evtstream`:
+  - `pinocchio/cmd/web-chat/app/runtime.go`
+  - `pinocchio/cmd/web-chat/agentmode_sink.go`
+- Verified there were no remaining live references with:
+
+```bash
+cd pinocchio && rg -n 'pkg/evtstream|cmd/evtstream-systemlab|evtstream-systemlab|evtstream-test|evtstream-boundary-check|evtstream-check' . -g'*.go' -g'*.md' -g'Makefile' -g'*.sh'
+```
+
+which returned no matches after the deletion and cleanup.
+- Revalidated the remaining live surface with:
+
+```bash
+cd pinocchio && GOWORK=off go test ./cmd/web-chat/... -count=1
+cd pinocchio/cmd/web-chat/web && npm run check
+```
+
+### Why
+- The user explicitly asked for the hard cleanup, and by this point the live downstream consumers were already on the external `sessionstream` module.
+- Keeping the deleted trees around would only preserve confusion and stale mental models.
+- Removing the old Makefile hooks ensures future validation flows stop implying that pinocchio still owns the framework or a Systemlab command.
+
+### What worked
+- The large deletion commit applied cleanly.
+- The follow-up reference grep came back empty.
+- Focused backend/frontend validation for the remaining live `cmd/web-chat` surface passed after the removal.
+
+### What didn't work
+- N/A in this slice.
+
+### What I learned
+- The real hard part of extraction was not the final deletion. The hard part was moving the live consumers first. Once that was done, deleting the old trees was mostly a proof that the earlier work had really succeeded.
+
+### What was tricky to build
+- The only real care point was scope: after such a large deletion, it is tempting to start rewriting lots of surrounding docs at the same time. I intentionally kept this slice to the deletion plus minimal build/comment cleanup and focused runtime validation.
+
+### What warrants a second pair of eyes
+- Review whether there are any non-code archival references outside the grep patterns I used that should also be cleaned for operator clarity.
+- Review whether pinocchio still needs replacement local developer docs for the removed Makefile targets, or whether the external `sessionstream` repo now fully owns that story.
+
+### What should be done in the future
+- If desired, add a new pinocchio-local helper target whose name reflects reality (for example, a `web-chat-cutover-check` style target) rather than reviving the old `evtstream-*` naming.
+- Decide whether the local `replace github.com/go-go-golems/sessionstream => ../sessionstream` should remain a branch-only development aid or become a cleaner long-term dependency workflow.
+
+### Code review instructions
+- Review in this order:
+  1. deleted `pinocchio/cmd/evtstream-systemlab/**`
+  2. deleted `pinocchio/pkg/evtstream/**`
+  3. `pinocchio/Makefile`
+  4. `pinocchio/cmd/web-chat/app/runtime.go`
+  5. `pinocchio/cmd/web-chat/agentmode_sink.go`
+- Validate with:
+
+```bash
+cd pinocchio && GOWORK=off go test ./cmd/web-chat/... -count=1
+cd pinocchio/cmd/web-chat/web && npm run check
+```
+
+### Technical details
+- Files changed in this step include:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/Makefile`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/web-chat/app/runtime.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/web-chat/agentmode_sink.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/evtstream-systemlab/` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/evtstream/` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
