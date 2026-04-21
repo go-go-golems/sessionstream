@@ -960,3 +960,162 @@ cd sessionstream && go test ./...
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
+
+## Step 11: Move the framework-oriented Systemlab companion app and explicitly drop Phase 6
+
+After the pure substrate and demo chat example were in place, I continued with the framework-owned Systemlab move. The user explicitly asked to continue and to remove Phase 6, so I treated that as a scope decision rather than a later optional cleanup. The extracted Systemlab in `sessionstream` should own only framework-oriented labs. The old `cmd/web-chat` migration console is downstream product work and belongs in `pinocchio`, not in the standalone framework repo.
+
+This meant the new command had two jobs at once:
+
+1. import and exercise the extracted `sessionstream` APIs and the local `examples/chatdemo`, and
+2. stop pretending that the pinocchio migration console is part of the framework-owned lab set.
+
+### Prompt Context
+
+**User prompt (verbatim):** "continue, remove phase 6"
+
+**Assistant interpretation:** Continue with the next extraction slice, move the framework-oriented Systemlab into `sessionstream`, and explicitly remove the old Phase 6 migration lab from the extracted companion app.
+
+**Inferred user intent:** Keep the extracted repo focused on the generic substrate and framework teaching surfaces only; do not carry downstream `cmd/web-chat` migration machinery into `sessionstream`.
+
+**Commit (code):** pending — Systemlab extraction slice had not been committed yet at the time of this diary step
+
+### What I did
+- Copied `pinocchio/cmd/evtstream-systemlab` into:
+
+```text
+sessionstream/cmd/sessionstream-systemlab
+```
+
+- Rewired the copied command to import the extracted framework packages:
+  - `github.com/go-go-golems/sessionstream`
+  - `github.com/go-go-golems/sessionstream/hydration/memory`
+  - `github.com/go-go-golems/sessionstream/hydration/sqlite`
+  - `github.com/go-go-golems/sessionstream/transport/ws`
+- Rewired Phase 4 to use the local framework example instead of the downstream app-owned chat package:
+  - `github.com/go-go-golems/sessionstream/examples/chatdemo`
+- Removed the Phase 6 migration console from the extracted command:
+  - deleted `cmd/sessionstream-systemlab/phase6_lab.go`
+  - deleted `cmd/sessionstream-systemlab/chapters/phase-6-webchat-migration.md`
+  - deleted `cmd/sessionstream-systemlab/static/partials/phase6.html`
+  - deleted `cmd/sessionstream-systemlab/static/js/pages/phase6.js`
+  - removed Phase 6 routes/handlers/status entries from `server.go`
+  - removed Phase 6 state from `lab_environment.go`
+  - removed the Phase 6 test from `lab_environment_test.go`
+  - removed Phase 6 navigation/bootstrap/API helpers from the browser UI
+- Renamed the extracted companion app identity to `sessionstream-systemlab` in the command, UI shell, and README.
+- Added standalone-friendly root targets:
+
+```make
+systemlab-build:
+	GOWORK=off go build ./cmd/sessionstream-systemlab
+
+systemlab-run:
+	GOWORK=off go run ./cmd/sessionstream-systemlab
+```
+
+- Added the missing standalone dependency with:
+
+```bash
+cd sessionstream && GOWORK=off go mod tidy
+```
+
+which pulled in `github.com/yuin/goldmark` for chapter rendering.
+- Validated with:
+
+```bash
+cd sessionstream && GOWORK=off go test ./...
+cd sessionstream && make systemlab-build
+cd sessionstream && make check
+```
+
+### Why
+- The updated extraction boundary says framework-oriented Systemlab material should move, but pinocchio-specific migration labs should remain downstream.
+- The user's "remove phase 6" instruction made that boundary concrete for this slice.
+- Replacing the old app-grade chat import with `examples/chatdemo` keeps the new repo honest: the companion app demonstrates the framework without depending on product code.
+
+### What worked
+- The extracted `cmd/sessionstream-systemlab` now builds and tests inside `sessionstream` with `GOWORK=off`.
+- Phase 4 now uses the local framework-owned chat demo instead of the downstream `pkg/evtstream/apps/chat` package.
+- The extracted Systemlab owns phases 0 through 5 only; the old Phase 6 migration console is gone from this repo slice.
+
+### What didn't work
+- The first standalone build surfaced a missing module dependency for chapter rendering:
+
+```text
+cmd/sessionstream-systemlab/chapter_api.go:10:2: no required module provides package github.com/yuin/goldmark
+```
+
+This was a useful catch: earlier `go test ./...` had succeeded in the workspace context, but the real standalone check needed `GOWORK=off`. I fixed it with `GOWORK=off go mod tidy` and then reran the validation successfully.
+
+### What I learned
+- `GOWORK=off` checks are mandatory once the extracted repo starts hosting real code, otherwise the surrounding workspace can hide missing standalone dependencies.
+- The Phase 6 removal was not just a UI deletion; it clarified the ownership boundary of the extracted repo.
+
+### What was tricky to build
+- The main tricky part was doing a faithful copy of the companion app while also changing its architectural center of gravity. The extracted Systemlab should still feel like the old lab app, but it must now point only at framework-owned code.
+
+### What warrants a second pair of eyes
+- Review the decision to keep only phases 0 through 5 in `sessionstream-systemlab` and confirm that no remaining framework-owned lab material is still stranded in `pinocchio`.
+- Review the copied chapter text for any remaining wording that should be normalized from `evtstream`-era naming to `sessionstream` naming.
+
+### What should be done in the future
+- Decide whether the framework-oriented Systemlab should stay under the current copied command structure or be further renamed/simplified now that it lives in the standalone repo.
+- Start the downstream `pinocchio` rebase work without trying to resurrect Phase 6 in `sessionstream`.
+
+### Code review instructions
+- Review in this order:
+  1. `sessionstream/cmd/sessionstream-systemlab/*.go`
+  2. `sessionstream/cmd/sessionstream-systemlab/static/*`
+  3. `sessionstream/cmd/sessionstream-systemlab/chapters/*`
+  4. `sessionstream/Makefile`
+  5. `sessionstream/go.mod`
+- Validate with:
+
+```bash
+cd sessionstream && GOWORK=off go test ./...
+cd sessionstream && make systemlab-build
+cd sessionstream && make check
+```
+
+### Technical details
+- Files changed in this step include:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/README.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/chapter_api.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/chapters/phase-0-foundations.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/chapters/phase-1-command-to-projection.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/chapters/phase-2-ordering-and-ordinals.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/chapters/phase-3-hydration-and-reconnect.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/chapters/phase-4-chat-example.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/chapters/phase-5-persistence-and-restart.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/lab_environment.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/lab_environment_test.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/main.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase2_lab.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase4_lab.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase5_lab.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/server.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/snapshot_provider.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/index.html`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/api.js`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/main.js`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/pages/overview.js`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/pages/phase1.js`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/pages/phase2.js`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/pages/phase3.js`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/pages/phase4.js`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/pages/phase5.js`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/partials/overview.html`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/partials/phase1.html`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/partials/phase2.html`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/partials/phase3.html`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/partials/phase4.html`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/partials/phase5.html`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/Makefile`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/go.mod`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/go.sum`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/index.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`

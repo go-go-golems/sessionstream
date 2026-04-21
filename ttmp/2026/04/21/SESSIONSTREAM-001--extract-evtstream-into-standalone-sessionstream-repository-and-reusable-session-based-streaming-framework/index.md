@@ -45,7 +45,10 @@ This ticket currently contains:
 - a detailed design doc / intern guide,
 - a chronological diary,
 - ticket tasks and changelog,
-- repo-local docmgr setup aligned to `sessionstream/ttmp`.
+- repo-local docmgr setup aligned to `sessionstream/ttmp`,
+- extracted pure substrate packages in the repo root,
+- a framework-owned `examples/chatdemo`,
+- and an extracted `cmd/sessionstream-systemlab` companion app that now owns only framework-oriented phases 0 through 5.
 
 ## Primary documents
 

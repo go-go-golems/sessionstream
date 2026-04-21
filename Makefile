@@ -1,4 +1,4 @@
-.PHONY: fmt lint lintmax gosec govulncheck test build boundary-check check
+.PHONY: fmt lint lintmax gosec govulncheck test build boundary-check systemlab-build systemlab-run check
 
 boundary-check:
 	@! rg -n 'github.com/go-go-golems/pinocchio/' . --glob '*.go' --glob '!ttmp/**' >/dev/null || (echo 'sessionstream must not import pinocchio packages' && exit 1)
@@ -26,5 +26,12 @@ test:
 build:
 	GOWORK=off go generate ./...
 	GOWORK=off go build ./...
+
+systemlab-build:
+	@mkdir -p .bin
+	GOWORK=off go build -o ./.bin/sessionstream-systemlab ./cmd/sessionstream-systemlab
+
+systemlab-run:
+	GOWORK=off go run ./cmd/sessionstream-systemlab
 
 check: boundary-check test build

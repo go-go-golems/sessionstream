@@ -8,6 +8,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/mattn/go-sqlite3 v1.14.42
 	github.com/stretchr/testify v1.11.1
+	github.com/yuin/goldmark v1.8.2
 	google.golang.org/protobuf v1.36.11
 )
 
