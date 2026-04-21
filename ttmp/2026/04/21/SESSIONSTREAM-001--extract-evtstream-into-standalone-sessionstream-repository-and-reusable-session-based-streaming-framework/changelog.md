@@ -11,3 +11,5 @@
 - Related the key source files to the design doc and diary with `docmgr doc relate`.
 - Validated the ticket successfully with `docmgr doctor --ticket SESSIONSTREAM-001 --stale-after 30`.
 - Uploaded the bundled ticket deliverable to reMarkable as `SESSIONSTREAM-001 Sessionstream Extraction Plan.pdf` under `/ai/2026/04/21/SESSIONSTREAM-001`.
+- Revised the extraction recommendation: keep the real chat app in `pinocchio`, move `agentmode` ownership outward to `cmd/web-chat` or another pinocchio-owned adapter layer, treat `sessionstream` as the home of the generic substrate plus a small demo/example chat app, and split framework-oriented Systemlab work from pinocchio-specific migration labs when useful.
+- Started Phase 0 implementation: updated `go.mod` to `github.com/go-go-golems/sessionstream`, replaced the template README/agent guidance/doc stub with sessionstream-specific content, and verified the repo still passes `go test ./...`.

@@ -475,3 +475,166 @@ remarquee cloud ls /ai/2026/04/21/SESSIONSTREAM-001 --long --non-interactive
   - `/ai/2026/04/21/SESSIONSTREAM-001`
 - Bundle name:
   - `SESSIONSTREAM-001 Sessionstream Extraction Plan`
+
+## Step 6: Revise the extraction plan so the real chat app stays in pinocchio
+
+After the initial ticket was written, the user challenged an important boundary assumption: do we really want to extract the real LLM chat app into `sessionstream`, or is that over-generalizing the framework? That was the right question. On review, the cleaner cut is to extract the substrate, keep the real chat app in `pinocchio`, move `agentmode` ownership outward to `cmd/web-chat` or another pinocchio-owned adapter layer, and provide only a smaller demo/example chat app in `sessionstream`.
+
+This update changed the plan from “make `apps/chat` generic enough to move” to “treat the current `apps/chat` package as downstream product code built on the substrate.” I updated the design doc, ticket summary, task list, and changelog to reflect that revised ownership model.
+
+### Prompt Context
+
+**User prompt (verbatim):** "can we move the agentmode dependency from apps/chat to cmd/web-chat, and however keep apps/chat in pinocchio, but base it on sessionstream? we can provide a demo chat app in session stream as an example, i'm not sure how generic we can make an llm chat app without tying it to pinocchio"
+
+**Assistant interpretation:** Re-evaluate the extraction boundary and revise the plan so the real chat app stays in pinocchio, `agentmode` ownership moves outward, and `sessionstream` owns only the generic substrate plus optional framework-grade examples.
+
+**Inferred user intent:** Avoid over-generalizing the product chat stack just to make the extraction look tidy, and instead choose a more honest and maintainable architecture boundary.
+
+**Commit (code):** pending — updated sessionstream ticket docs were not committed yet at the time of this diary step
+
+### What I did
+- Rewrote the design doc’s executive summary, problem statement, package classification, target layout, package strategy, migration phases, risks, alternatives, open questions, and implementation checklist to reflect the new cut.
+- Changed the core recommendation from “extract and de-pinocchio `apps/chat`” to:
+  - extract the substrate,
+  - keep the real chat app in `pinocchio`,
+  - move `agentmode` ownership to `cmd/web-chat` or another pinocchio-owned adapter,
+  - add only a small generic demo/example chat app to `sessionstream`.
+- Updated `index.md`, `tasks.md`, and `changelog.md` to match the revised plan.
+
+### Why
+- The existing current `apps/chat` package is not just a demo or generic app package; it is part of the real pinocchio product stack and still imports pinocchio runtime and middleware code.
+- Forcing that package into `sessionstream` would risk making the framework repo less reusable, not more reusable.
+- A demo/example chat app is a much better fit for `sessionstream` than the full real product chat layer.
+
+### What worked
+- The revised architecture is cleaner and easier to explain: substrate in `sessionstream`, real product app in `pinocchio`.
+- The new plan keeps the valuable framework extraction intact without requiring us to prematurely generalize every LLM-chat assumption.
+
+### What didn't work
+- N/A
+
+### What I learned
+- The right framework boundary is often narrower than the first enthusiastic extraction plan. The substrate was clearly generic; the real chat product was not.
+
+### What was tricky to build
+- The subtle part was updating the document deeply enough that it stopped implying the old direction. It was not enough to change one summary paragraph; the tasks, migration phases, alternatives, and open questions all had to be brought into alignment with the new ownership model.
+
+### What warrants a second pair of eyes
+- Review whether the framework-oriented versus pinocchio-specific split for Systemlab should be made explicit in a future follow-up ticket, especially around the current Phase 6 migration lab.
+
+### What should be done in the future
+- Create the first implementation ticket around substrate extraction only, not around extracting the real chat app.
+- Consider renaming `pkg/evtstream/apps/chat` inside `pinocchio` later so its downstream ownership is more obvious once it is rebased on `sessionstream`.
+
+### Code review instructions
+- Review these updated files in order:
+  1. `design-doc/01-intern-guide-and-extraction-plan-for-moving-evtstream-into-standalone-sessionstream.md`
+  2. `index.md`
+  3. `tasks.md`
+  4. `changelog.md`
+- Re-run validation with:
+
+```bash
+cd sessionstream && docmgr doctor --ticket SESSIONSTREAM-001 --stale-after 30
+```
+
+### Technical details
+- Files updated in this step:
+  - `sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/design-doc/01-intern-guide-and-extraction-plan-for-moving-evtstream-into-standalone-sessionstream.md`
+  - `sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/index.md`
+  - `sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
+  - `sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
+
+## Step 7: Start Phase 0 implementation by replacing the repository identity and package stub
+
+After updating the ticket plan, I moved from planning into implementation. I started with the smallest useful Phase 0 slice: make the repository stop pretending to be a generic template and start behaving like `sessionstream`. That meant changing the module path, replacing the template README and agent instructions, and introducing a real root package doc comment.
+
+I intentionally kept this first implementation slice narrow. The template still contains other placeholders such as `cmd/XXX` and release/build metadata, but the repository now at least identifies itself correctly and supports `go test ./...` under the right module path. That gives us a solid checkpoint before cleaning the remaining template artifacts.
+
+### Prompt Context
+
+**User prompt (verbatim):** "ok, create tasks if you haven't already, then work task by task, commit at appropriate intervals, keep a diary"
+
+**Assistant interpretation:** Break the extraction work into explicit tasks, then begin executing those tasks in focused slices, committing at sensible checkpoints and recording the work in the diary.
+
+**Inferred user intent:** Move from architecture planning into disciplined implementation with clear progress tracking rather than leaving the ticket as documentation-only.
+
+**Commit (code):** pending — Phase 0 bootstrap slice had not been committed yet at the time of this diary step
+
+### What I did
+- Expanded the task list so the future work is grouped into explicit phases and smaller checkboxes.
+- Updated `sessionstream/go.mod` from the template module path to:
+
+```go
+module github.com/go-go-golems/sessionstream
+
+go 1.26.1
+```
+
+- Replaced the template `README.md` with a sessionstream-specific repository overview.
+- Replaced the template `AGENT.md` with sessionstream-specific guidance about framework boundaries.
+- Added a real root `doc.go` with package comment for `package sessionstream`.
+- Deleted the old placeholder `pkg/doc.go` stub.
+- Ran:
+
+```bash
+cd sessionstream && go test ./...
+```
+
+which passed with:
+
+```text
+?   	github.com/go-go-golems/sessionstream	[no test files]
+?   	github.com/go-go-golems/sessionstream/cmd/XXX	[no test files]
+```
+
+### Why
+- The new repository needed to stop presenting itself as `XXX` before any substrate code was moved into it.
+- A correct module path is a prerequisite for every later import rewrite.
+- Replacing the README/agent/package stub first makes the repository easier to reason about while later code movement happens.
+
+### What worked
+- The module path changed cleanly.
+- The repository now has a meaningful README and package-level intent.
+- `go test ./...` still passed after the bootstrap edits.
+
+### What didn't work
+- The test output still shows `cmd/XXX`, which confirms there are more template placeholders to remove in the next Phase 0 slice.
+
+### What I learned
+- The right first implementation slice was identity cleanup, not code movement. That reduced ambiguity immediately without forcing any extraction decisions yet.
+
+### What was tricky to build
+- The main judgment call was how much template cleanup to include in the first slice. I deliberately stopped once the repository had the correct identity and a passing test run, because the remaining placeholder command/release/dev-tooling cleanup is a separate checkpoint worth reviewing on its own.
+
+### What warrants a second pair of eyes
+- Review whether the chosen Go version (`1.26.1`) is the right long-term baseline for the new module, given that the source substrate currently lives in a `pinocchio` repo using Go 1.26.x.
+
+### What should be done in the future
+- Finish the remaining Phase 0 cleanup by removing `cmd/XXX` and the remaining template placeholders from the Makefile/release metadata.
+- Re-run focused repo validation after that second cleanup slice and then begin the actual substrate move.
+
+### Code review instructions
+- Review these files first:
+  - `sessionstream/go.mod`
+  - `sessionstream/README.md`
+  - `sessionstream/AGENT.md`
+  - `sessionstream/doc.go`
+  - deleted: `sessionstream/pkg/doc.go`
+- Validate with:
+
+```bash
+cd sessionstream && go test ./...
+```
+
+### Technical details
+- Files changed in this step:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/go.mod`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/README.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/AGENT.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/doc.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/doc.go` (deleted)
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`

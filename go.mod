@@ -1,3 +1,3 @@
-module github.com/go-go-golems/XXX
+module github.com/go-go-golems/sessionstream
 
-go 1.25
+go 1.26.1

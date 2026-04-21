@@ -1,67 +1,53 @@
-# Agent Guidelines for go-go-golems go projects
+# Agent Guidelines for sessionstream
 
-## Build Commands
+## Repository purpose
 
-- Run a binary in XXX/YYY/FOOO: `go run ./XXX/YYY/FOOO` . Use this instead of build + ./XXX.
-- Build: `go build ./...`
+`sessionstream` is a framework/library repository.
+
+The main architectural rule is:
+
+- keep the repository focused on the generic session-based streaming substrate,
+- do not pull downstream product behavior into the framework just because it currently exists in the source repository we are extracting from.
+
+If a feature is clearly pinocchio-specific, keep it downstream.
+
+## Build commands
+
 - Test: `go test ./...`
-- Run single test: `go test ./pkg/path/to/package -run TestName`
-- Generate: `go generate ./...`
-- Lint: `golangci-lint run -v` or `make lint`
+- Build: `go build ./...`
+- Run a single test: `go test ./path/to/pkg -run TestName -count=1`
 - Format: `go fmt ./...`
+- Lint: `golangci-lint run -v` or `make lint`
 
-IMPORTANT: To run a server and do some interaction with it, use tmux, this makes it very easy to kill a server.
-Use capture-pane to read the output.
+## Repository structure
 
-## Project Structure
+- root package: the generic `sessionstream` substrate
+- `hydration/`: optional store implementations
+- `transport/`: optional transport adapters
+- `examples/`: small framework-owned examples only
+- `cmd/`: framework-owned tools/apps only
+- `ttmp/`: repo-local ticket documentation and diaries
 
-- `cmd/`: CLI commands and entry points
-- `pkg/`: Library code organized by domain
-- `examples/`: Example configurations and usage
-- `doc/`: Documentation
-- `ttmp/YYYY-MM-DD/`: this is where all temporary documentation as well as debugging logs and other reports go
+## Documentation workflow
 
-<runningProcessesGuidelines>
-- When testing TUIs, use tmux and capture-pane to interact with the UI.
-- When using tmux, try to batch as many commands as possible when using send-keys.
-- When running long-running processes (servers, etc...), use tmux to more easily interact and kill them.
-- Kill a process using port $PORT: `lsof-who -p $PORT -k`. When building a web server, ALWAYS use this command to kill the process.
-</runningProcessesGuidelines>
+- Tickets for this repository live under `sessionstream/ttmp`.
+- Keep design docs, tasks, changelogs, and diaries up to date as work progresses.
+- Prefer focused, evidence-backed tickets over vague umbrella notes.
 
-<goGuidelines>
-- When implementing go interfaces, use the var _ Interface = &Foo{} to make sure the interface is always implemented correctly.
-- When building web applications, use bootstrap CSS unless otherwise indicated.
-- Always use a context argument when appropriate.
-- Use cobra for command-line applications.
-- Use the "defaults" package name, instead of "default" package name, as it's reserved in go.
-- Use github.com/pkg/errors for wrapping errors.
-- When starting goroutines, use errgroup.
+## Design guardrails
 
-- Only use the toplevel go.mod, don't create new ones.
-- When writing a new experiment / app, add zerolog logging to help debug and figure out how it works, add --log-level flag to set the log level.
-- When using go:embed, import embed as `_ "embed"`
-- When using build tagged features, make sure the software compiles without the tag as well
-</goGuidelines>
+- Do not add backwards-compatibility layers unless explicitly requested.
+- Do not import downstream product packages into the framework if a generic seam would do.
+- Prefer small interfaces and clean ownership boundaries.
+- If a feature cannot be made honestly generic, leave it in the consumer repo.
 
-<libraryGuidelines>
-- when interfacing with the google gemini/genai APIs, use the new https://pkg.go.dev/google.golang.org/genai package
-</libraryGuidelines>
+## Go guidelines
 
-<webGuidelines>
-- Use bun, react and rtk-query. Use typescript.
-- Use bootstrap for styling.
-- Store css, html and js in different files in a static directory.
-- Use go:embed to serve static files.
-- Always serve static files under /static/ URL paths, never directly under functional paths like /admin/
-</webGuidelines>
+- Use contexts when appropriate.
+- Use `var _ Interface = (*Type)(nil)` assertions for interface implementations where helpful.
+- Use `github.com/pkg/errors` only if the repo already standardizes on it; otherwise prefer the standard library for new code unless consistency requires otherwise.
+- When adding goroutines, prefer `errgroup` for coordinated lifecycle management.
 
-<debuggingGuidelines>
-If me or you the LLM agent seem to go down too deep in a debugging/fixing rabbit hole in our conversations, remind me to take a breath and think about the bigger picture instead of hacking away. Say: "I think I'm stuck, let's TOUCH GRASS".  IMPORTANT: Don't try to fix errors by yourself more than twice in a row. Then STOP. Don't do anything else.
+## Debugging guideline
 
-</debuggingGuidelines>
-
-<generalGuidelines>
-Don't add backwards compatibility layers or adapters unless explicitly asked. If you think there is a need for a backwards compatibility or adapting to an existing interface, STOP AND ASK ME IF THAT IS NECESSARY. Usually, I don't need backwards compatibility.
-
-If it looks like your edits aren't applied, stop immediately and say "STOPPING BECAUSE EDITING ISN'T WORKING".
-</generalGuidelines>
+If the work starts turning into repeated patching without a clear design, stop and reassess the boundary first.

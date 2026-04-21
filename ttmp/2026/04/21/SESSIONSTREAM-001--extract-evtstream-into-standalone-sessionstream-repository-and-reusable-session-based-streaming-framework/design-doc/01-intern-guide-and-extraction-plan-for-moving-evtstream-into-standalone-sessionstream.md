@@ -20,7 +20,7 @@ RelatedFiles:
     - Path: ../../../../../../../pinocchio/cmd/web-chat/app/server.go
       Note: Current canonical downstream consumer assembly of the substrate
     - Path: ../../../../../../../pinocchio/pkg/evtstream/apps/chat/chat.go
-      Note: Main app-grade chat package and the key pinocchio coupling seam that must be refactored
+      Note: Main real chat app package whose current pinocchio coupling is evidence that it should stay downstream rather than move wholesale into sessionstream
     - Path: ../../../../../../../pinocchio/pkg/evtstream/doc.go
       Note: Core statement of intent for the generic substrate
     - Path: ../../../../../../../pinocchio/pkg/evtstream/hub.go
@@ -30,9 +30,9 @@ RelatedFiles:
     - Path: go.mod
       Note: Destination module skeleton currently still has the template module path and must be cleaned during extraction bootstrap
 ExternalSources: []
-Summary: Detailed analysis and implementation guide for extracting pinocchio/pkg/evtstream and cmd/evtstream-systemlab into the standalone sessionstream repository while preserving a clean generic substrate and leaving pinocchio-specific adapters behind.
-LastUpdated: 2026-04-21T15:40:00-04:00
-WhatFor: Give a new intern enough architectural context and a concrete migration plan to move evtstream into sessionstream without dragging pinocchio-specific runtime concerns into the new module.
+Summary: Detailed analysis and implementation guide for extracting the generic evtstream substrate into sessionstream while keeping the real pinocchio chat app downstream, moving agentmode ownership to cmd/web-chat or another pinocchio-owned adapter layer, and carrying only framework-grade examples into the new repository.
+LastUpdated: 2026-04-21T16:05:00-04:00
+WhatFor: Give a new intern enough architectural context and a concrete migration plan to move the true sessionstream substrate into the new repository without over-generalizing the real pinocchio chat app or dragging pinocchio-specific runtime and middleware concerns into the module.
 WhenToUse: Use when planning, reviewing, or executing the standalone sessionstream extraction and when onboarding new contributors to the session-based streaming substrate.
 ---
 
@@ -43,7 +43,13 @@ WhenToUse: Use when planning, reviewing, or executing the standalone sessionstre
 
 `evtstream` is already very close to being a standalone library. The package root explicitly describes itself as a reusable substrate for event-streaming LLM and agent applications, centered on a single canonical routing key (`SessionId`), typed commands and backend events, sibling UI and timeline projections, and small storage/transport interfaces (`pinocchio/pkg/evtstream/doc.go:1-10`). The core `Hub` type is already the right kind of boundary object for an extracted module: it owns schema registration, hydration, sessions, command dispatch, projections, fanout, and optional bus consumption without knowing anything about webchat routes or browser-specific compatibility concerns (`pinocchio/pkg/evtstream/hub.go:21-41`, `pinocchio/pkg/evtstream/hub.go:90-107`, `pinocchio/pkg/evtstream/hub.go:145-167`).
 
-The extraction is therefore **not** a rewrite project. It is primarily a boundary-hardening and packaging project. Most of the substrate can move into `sessionstream` with light import-path rewrites. The main work is isolating the places where `evtstream` still knows about `pinocchio`: specifically the app-grade chat package (`pinocchio/pkg/evtstream/apps/chat`) and the current canonical runtime integration used by `cmd/web-chat`. Systemlab should move with the substrate as a separate app because it was explicitly designed to exercise only the public seams of `evtstream` and not legacy `pkg/webchat` internals (`pinocchio/cmd/evtstream-systemlab/README.md:3-24`).
+The extraction is therefore **not** a rewrite project. It is primarily a boundary-hardening and packaging project. Most of the substrate can move into `sessionstream` with light import-path rewrites. The key refinement to the earlier plan is that we should **not** force the current real LLM chat app into the new module just because it currently lives under `pkg/evtstream/apps/chat`. That package is not merely a generic example; it carries real pinocchio runtime and middleware assumptions. The cleaner cut is:
+
+- move the true sessionstream substrate into `sessionstream`,
+- move framework-grade examples into `sessionstream`,
+- keep the real product-grade chat app in `pinocchio`,
+- move `agentmode` ownership fully to `cmd/web-chat` or another pinocchio-owned adapter layer,
+- and let `pinocchio` build its chat product on top of `sessionstream` rather than trying to make `sessionstream` own the whole app.
 
 The recommended outcome is:
 
@@ -53,20 +59,19 @@ sessionstream/
   <root package files>       generic substrate
   hydration/...              optional stores
   transport/...              optional transports
-  apps/chat                  generic chat app package (after de-pinocchio refactor)
-  examples/...               examples that teach consumption patterns
-  cmd/evtstream-systemlab    boundary exerciser and textbook app
+  examples/chatdemo          generic demo/example chat app
+  cmd/systemlab              framework-oriented labs and documentation app
 
 pinocchio/
-  cmd/web-chat               product app consuming sessionstream
-  pkg/inference/runtime      pinocchio-specific runtime composition
-  pkg/middlewares/agentmode  pinocchio-specific middleware and structured parsing
-  package(s) that adapt pinocchio runtime events into sessionstream chat contracts
+  pkg/sessionchat or equivalent   real pinocchio chat app built on sessionstream
+  cmd/web-chat                    product routes, frontend, and adapters
+  pkg/inference/runtime           pinocchio-specific runtime composition
+  pkg/middlewares/agentmode       pinocchio-specific middleware and structured parsing
 ```
 
 The most important design rule is simple:
 
-> `sessionstream` must own the generic session-streaming substrate; `pinocchio` must own the pinocchio-specific runtime, middleware, and application edge behavior.
+> `sessionstream` must own the generic session-streaming substrate and framework-grade examples; `pinocchio` must own the real LLM chat product, runtime composition, middleware behavior, and application edge.
 
 ## Problem statement
 
@@ -82,17 +87,18 @@ Today the package imports look like this:
 
 That import path says “this belongs to pinocchio,” even though the package documentation says the opposite (`pinocchio/pkg/evtstream/doc.go:1-10`). A dedicated repository and module will make the public boundary real instead of merely aspirational.
 
-### Problem 2: the substrate is generic, but one important app package is not yet generic enough
+### Problem 2: the current real chat app is product code, not clean framework code
 
-The extraction candidate is not just the root package. It also includes app-grade support code. The difficulty is that the current chat app package reaches into pinocchio runtime and middleware packages:
+The extraction candidate is not just the root package. It also includes app-grade support code. The earlier temptation was to move `pkg/evtstream/apps/chat` into `sessionstream` and generalize it there. On closer inspection, that is the wrong default. The current chat package reaches into pinocchio runtime and middleware packages:
 
 - `pinocchio/pkg/evtstream/apps/chat/service.go:8-18` imports `pkg/inference/runtime`
 - `pinocchio/pkg/evtstream/apps/chat/chat.go:14-17` imports both `pkg/inference/runtime` and `pkg/middlewares/agentmode`
 
-That means `apps/chat` is only *partially* standalone today. The extraction plan must either:
+That means the current package is not just “a chat example with a little wiring.” It is part of the real pinocchio application stack. The better extraction plan is:
 
-1. make `apps/chat` generic before or during the move, or
-2. leave the pinocchio-specific runtime integration in `pinocchio` and keep only the generic chat domain logic in `sessionstream`.
+1. keep the real chat app in `pinocchio`,
+2. move `agentmode` ownership out of the shared app package and into `cmd/web-chat` or another pinocchio-owned adapter package,
+3. extract only a truly generic demo/example chat app into `sessionstream` if we want an application-level teaching example in the new repo.
 
 ### Problem 3: Systemlab conceptually belongs with the substrate, not with pinocchio
 
@@ -119,10 +125,12 @@ That is good news because it shows `cmd/web-chat` is already a consumer. But it 
 This ticket is about planning and documenting how to:
 
 1. move the generic `evtstream` substrate into the standalone `sessionstream` repository,
-2. move Systemlab with it as a separate app,
-3. refactor the chat app package so the extracted repository does not depend on `pinocchio/pkg/inference/runtime` or `pinocchio/pkg/middlewares/agentmode`,
-4. switch `pinocchio` to consume `sessionstream` as a downstream dependency,
-5. provide onboarding-quality documentation for a new engineer executing the move.
+2. move the framework-oriented Systemlab material with it as a separate companion app, while allowing pinocchio-specific migration labs to remain downstream if they stop being framework-generic,
+3. keep the real chat app in `pinocchio` and rebase it on `sessionstream` instead of extracting it wholesale,
+4. move `agentmode` ownership out of the shared chat package and into `cmd/web-chat` or another pinocchio-owned adapter layer,
+5. add a small demo/example chat app to `sessionstream` if we want an app-level teaching example there,
+6. switch `pinocchio` to consume `sessionstream` as a downstream dependency,
+7. provide onboarding-quality documentation for a new engineer executing the move.
 
 ### Explicitly out of scope
 
@@ -208,7 +216,7 @@ It accepts a generic `SnapshotProvider`, manages connection subscriptions, emits
 
 This package belongs in `sessionstream/transport/ws` with only an import-path rewrite.
 
-### Layer 4: app-grade chat package (`pkg/evtstream/apps/chat`)
+### Layer 4: the current app-grade chat package (`pkg/evtstream/apps/chat`) should become pinocchio-owned
 
 This package is the most interesting and the most delicate.
 
@@ -218,9 +226,9 @@ It does three distinct jobs today:
 2. installs chat-specific command handlers and projections into a generic hub (`pinocchio/pkg/evtstream/apps/chat/chat.go:102-150`),
 3. runs either a demo inference flow or a pinocchio runtime-backed inference flow (`pinocchio/pkg/evtstream/apps/chat/chat.go:190-220` and later sections of the same file).
 
-The service layer also embeds `*infruntime.ComposedRuntime` directly in `PromptRequest` (`pinocchio/pkg/evtstream/apps/chat/service.go:13-18`). That is a pinocchio-specific contract, not a reusable sessionstream contract.
+The service layer also embeds `*infruntime.ComposedRuntime` directly in `PromptRequest` (`pinocchio/pkg/evtstream/apps/chat/service.go:13-18`). That is a pinocchio-specific contract, not a reusable sessionstream contract. The package also currently reaches into `agentmode`, which is a live pinocchio middleware behavior, not a framework-level abstraction.
 
-So the package is architecturally valuable, but not extraction-ready in its current exact form.
+So the package is architecturally valuable, but the more honest ownership decision is to treat it as the seed of a pinocchio-owned chat app built on sessionstream, not as a package that must be extracted into the framework repo unchanged. In practice, that likely means leaving it in `pinocchio` and later renaming it to reflect its downstream ownership more clearly.
 
 ### Layer 5: Systemlab (`cmd/evtstream-systemlab`)
 
@@ -270,12 +278,12 @@ The extraction should be guided by a package classification, not by a giant blin
 | `pkg/evtstream/hydration/memory` | generic store | high | move almost unchanged |
 | `pkg/evtstream/hydration/sqlite` | generic store | high | move almost unchanged |
 | `pkg/evtstream/transport/ws` | generic websocket transport | high | move almost unchanged |
-| `pkg/evtstream/examples/chat` | example consumer | medium-high | move after import rewrites |
-| `cmd/evtstream-systemlab` | companion app consuming public seams | high | move with module |
-| `pkg/evtstream/apps/chat` | useful app package, but pinocchio-coupled | medium | refactor during move |
+| `pkg/evtstream/examples/chat` | example consumer | medium-high | move after import rewrites; expand into a clearly generic demo if useful |
+| `cmd/evtstream-systemlab` | companion app consuming public seams | high | move framework-oriented phases with the module; split out pinocchio-specific migration labs if needed |
+| `pkg/evtstream/apps/chat` | real pinocchio chat app seed, not yet a framework package | low as an extraction candidate | keep in pinocchio and rebase on sessionstream instead of moving wholesale |
 | `cmd/web-chat/app` | product-specific edge/server | not for move | keep in pinocchio |
 | `pkg/inference/runtime` | pinocchio runtime composition | not for move | keep in pinocchio |
-| `pkg/middlewares/agentmode` | pinocchio middleware/runtime behavior | not for move | keep in pinocchio |
+| `pkg/middlewares/agentmode` | pinocchio middleware/runtime behavior | not for move | keep in pinocchio and push ownership outward toward cmd/web-chat adapters |
 
 ### What is already clean enough to move with light touch
 
@@ -291,14 +299,18 @@ These should be migrated early because they are low-risk and they establish the 
 
 ### What needs deliberate refactoring first
 
-The critical coupling is inside `apps/chat`.
+The critical coupling is inside the current chat app package, but the revised conclusion is different from the earlier version of this document.
 
 The evidence is straightforward:
 
 - `PromptRequest.Runtime *infruntime.ComposedRuntime` in `service.go` (`pinocchio/pkg/evtstream/apps/chat/service.go:13-18`)
 - imports of `pkg/inference/runtime` and `pkg/middlewares/agentmode` in `chat.go` (`pinocchio/pkg/evtstream/apps/chat/chat.go:14-17`)
 
-That means the extracted repo would currently have to depend on pinocchio, which defeats the point. So `apps/chat` must be de-pinocchioed.
+That means the extracted repo would currently have to depend on pinocchio, which defeats the point. Rather than forcing `apps/chat` to become framework-owned, the better move is:
+
+1. keep the real chat app downstream in `pinocchio`,
+2. move `agentmode` ownership out of the shared app package and into `cmd/web-chat` or another pinocchio-owned adapter,
+3. introduce a smaller demo/example chat app in `sessionstream` if we need a framework-owned application example.
 
 ### What should stay in pinocchio
 
@@ -349,18 +361,13 @@ sessionstream/
     ws/
       server.go
 
-  apps/
-    chat/
-      service.go
-      engine.go or chat.go
-
   examples/
-    chat/
+    chatdemo/
       chat.go
 
   cmd/
-    evtstream-systemlab/
-      ...
+    systemlab/
+      ... framework-oriented labs ...
 
   ttmp/
     ... docmgr tickets for the repo itself ...
@@ -401,59 +408,38 @@ The root package should continue to own only generic session-streaming concepts:
 
 Anything that smells like “this is specifically how pinocchio does inference” should not live here.
 
-### Strategy B: `apps/chat` stays, but becomes generic
+### Strategy B: keep the real chat app in pinocchio, provide only a demo chat app in sessionstream
 
-A generic chat package is still valuable. It proves the substrate can support a real application domain and gives downstream consumers a starting point.
+A chat-shaped application example is still valuable. It proves the substrate can support a real domain and gives downstream consumers a starting point. The key refinement is that we should not confuse a demo/example chat app with the real pinocchio chat product.
 
-However, it should stop depending directly on pinocchio runtime types.
-
-Recommended shape:
-
-```go
-type PromptRequest struct {
-    Prompt         string
-    IdempotencyKey string
-    Runtime        RuntimeHandle // generic interface, not pinocchio type
-}
-
-type RuntimeHandle interface {
-    Run(ctx context.Context, req PromptExecutionRequest, sink AssistantStreamSink) error
-}
-
-type AssistantStreamSink interface {
-    OnStarted(meta MessageMeta)
-    OnDelta(text string)
-    OnStopped(err error)
-    OnFinished(text string)
-    OnCustomEvent(name string, payload map[string]any)
-}
-```
-
-Pinocchio can then provide an adapter implementation that wraps:
-
-- `*infruntime.ComposedRuntime`
-- agentmode structured sink wrappers
-- pinocchio-specific middleware events
-
-This splits the system correctly:
+Recommended split:
 
 ```text
-sessionstream/apps/chat
-  -> generic chat domain contracts and projections
+sessionstream/examples/chatdemo
+  -> minimal generic chat example
+  -> user/assistant message flow
+  -> fake or pluggable demo engine
+  -> no pinocchio runtime imports
 
-pinocchio adapters
-  -> translate pinocchio runtime behavior into the generic chat RuntimeHandle
+pinocchio/pkg/sessionchat (or similar)
+  -> real chat app built on sessionstream
+  -> runtime-backed inference
+  -> pinocchio-specific adapters
+  -> custom events needed by cmd/web-chat
 ```
 
-### Strategy C: pinocchio custom middleware stays downstream
+The demo app in `sessionstream` should be intentionally modest: enough to teach the substrate and prove the API, but not so ambitious that it inherits product-specific assumptions from pinocchio.
 
-The current `agentmode` behavior is real and valuable, but it is not generic sessionstream core behavior. It is a pinocchio feature implemented through middleware plus sink decoration.
+### Strategy C: move `agentmode` ownership outward to the application edge
+
+The current `agentmode` behavior is real and valuable, but it is not generic sessionstream core behavior. It is a pinocchio feature implemented through middleware plus sink decoration. It should therefore not remain embedded in a framework-owned chat package.
 
 So the correct ownership is:
 
-- generic preview/commit custom-event pattern can be documented in `sessionstream`
-- actual `agentmode` middleware implementation stays in `pinocchio`
-- pinocchio emits sessionstream-compatible custom events through adapters
+- generic preview/commit custom-event patterns can be documented in `sessionstream`,
+- actual `agentmode` middleware implementation stays in `pinocchio`,
+- ownership of wiring `agentmode` into the real chat product should move to `cmd/web-chat` or another pinocchio-owned adapter layer,
+- the downstream chat app can then publish sessionstream-compatible custom events without forcing the framework repo to know what `agentmode` is.
 
 ## Detailed migration plan
 
@@ -505,51 +491,54 @@ Validation target:
 - the new `sessionstream` repo builds and tests for the moved packages,
 - no moved package imports `github.com/go-go-golems/pinocchio/...`.
 
-### Phase 2: move Systemlab with import rewrites only
+### Phase 2: move the framework-oriented Systemlab material
 
-Goal: relocate the teaching and validation app into the same ecosystem as the substrate.
+Goal: relocate the teaching and validation app content that is genuinely about the framework into the same ecosystem as the substrate.
 
 Move:
 
-- `cmd/evtstream-systemlab/*`
-- chapters
-- static assets
-- README
+- framework-oriented `cmd/evtstream-systemlab/*` pieces,
+- generic chapters,
+- static assets,
+- README,
+- generic labs for substrate behavior.
 
 Important note:
 
-Most of Systemlab is already a clean consumer of public `evtstream` seams. That is why it is a high-confidence move. The one caveat is Phase 6, which intentionally probes a live `cmd/web-chat` server over HTTP (`pinocchio/cmd/evtstream-systemlab/phase6_lab.go:112-196`). That is okay. It is still an external probe, not an import-time dependency on pinocchio internals.
+Most of Systemlab is already a clean consumer of public `evtstream` seams. That is why it is still a high-confidence move. The caveat is the current Phase 6 migration lab, which is specifically about probing a live `cmd/web-chat` application over HTTP (`pinocchio/cmd/evtstream-systemlab/phase6_lab.go:112-196`). That lab may remain downstream in pinocchio if we decide it is no longer framework-oriented enough to live in `sessionstream`.
 
-### Phase 3: refactor `apps/chat` into a truly standalone app package
+### Phase 3: keep the real chat app in pinocchio and rebase it on sessionstream
 
-Goal: remove direct pinocchio dependencies from the moved chat package.
-
-This is the highest-leverage design step.
+Goal: make pinocchio the owner of the product-grade chat app while letting sessionstream stay focused on the substrate and lighter-weight examples.
 
 Recommended sub-steps:
 
-1. replace `*infruntime.ComposedRuntime` in `PromptRequest` with a generic execution interface,
-2. move pinocchio-specific runtime execution into an adapter package in `pinocchio`,
-3. preserve the existing command/event/UI/timeline schema names if possible,
-4. keep the preview/commit custom-event pattern, but do not hard-code pinocchio middleware packages into `sessionstream`.
+1. stop treating `pkg/evtstream/apps/chat` as a package that must be moved into `sessionstream`,
+2. move `agentmode` ownership out of the shared chat package and into `cmd/web-chat` or another pinocchio-owned adapter layer,
+3. rebase the real downstream chat app on `sessionstream` hub/store/transport APIs,
+4. preserve the existing command/event/UI/timeline schema names where doing so reduces migration churn,
+5. add a small generic `examples/chatdemo` package to `sessionstream` if we want a framework-owned application example.
 
 Pseudocode target:
 
 ```text
-sessionstream/apps/chat
+pinocchio real chat app
   handleStartInference()
     -> accept prompt
-    -> publish user accepted event
-    -> if request has RuntimeHandle
-         RuntimeHandle.Run(ctx, prompt, sink)
+    -> publish user accepted event through sessionstream
+    -> if request has runtime adapter
+         runtime adapter.Run(ctx, prompt, sink)
        else
          run demo inference
 
-pinocchio runtime adapter
-  Run(ctx, prompt, sink)
-    -> build geppetto session from pinocchio runtime
-    -> feed deltas into sink
-    -> translate agentmode custom signals into sink.OnCustomEvent(...)
+cmd/web-chat / pinocchio adapter layer
+  -> wraps pinocchio runtime
+  -> applies agentmode sink decoration
+  -> translates agentmode custom signals into downstream chat events
+
+sessionstream/examples/chatdemo
+  -> runs a generic fake/pluggable demo engine
+  -> proves the substrate API without pinocchio dependencies
 ```
 
 ### Phase 4: switch pinocchio to consume sessionstream
@@ -561,7 +550,8 @@ Tasks:
 1. add the new module to `pinocchio/go.mod` or `go.work`,
 2. rewrite imports in:
    - `cmd/web-chat/app/server.go`
-   - `cmd/evtstream-systemlab` if it still exists temporarily during transition
+   - the downstream real chat app package in `pinocchio` that is rebased on sessionstream
+   - `cmd/evtstream-systemlab` only for any phases that remain temporarily in pinocchio during transition
    - any examples/tests still using `pinocchio/pkg/evtstream`
 3. add temporary local `replace` directives while the new repo is under active development,
 4. ensure `cmd/web-chat` still passes focused tests and browser validation.
@@ -650,20 +640,21 @@ If the extraction touches Systemlab during a staged move, also validate the relo
 1. generic hub tests still pass,
 2. hydration store tests still pass,
 3. websocket transport tests still pass,
-4. Systemlab still runs and teaches the same phases,
+4. the framework-oriented Systemlab phases still run and teach the same substrate concepts,
 5. `cmd/web-chat` still creates sessions, submits prompts, hydrates snapshots, and receives websocket updates,
-6. runtime-backed inference still works through the pinocchio adapter,
-7. custom preview/commit events (such as agentmode) still render correctly in the consumer app.
+6. runtime-backed inference still works through the downstream pinocchio chat app and adapter layer,
+7. custom preview/commit events (such as agentmode) still render correctly in the consumer app after their ownership moves outward.
 
 ## Risks and mitigations
 
-### Risk 1: dragging pinocchio into the new module through `apps/chat`
+### Risk 1: dragging the real pinocchio chat product into the new module by over-generalizing it
 
 Mitigation:
 
-- treat `apps/chat` as the main refactor seam,
+- do not force the current real chat app into `sessionstream`,
 - add an explicit “no `pinocchio/...` imports in sessionstream” check,
-- move runtime adapters downstream.
+- keep runtime and middleware adapters downstream,
+- provide only a clearly generic demo/example chat app in `sessionstream`.
 
 ### Risk 2: dual ownership during a long transition
 
@@ -699,24 +690,28 @@ Rejected because it keeps the module boundary soft and makes downstream reuse fe
 
 Rejected because `cmd/web-chat` is a product application with pinocchio-specific runtime policy and application-edge behavior. Moving it would blur the framework boundary.
 
-### Alternative C: extract only the root substrate and leave Systemlab behind
+### Alternative C: extract only the root substrate and leave all of Systemlab behind
 
-Rejected because Systemlab was designed specifically to exercise the public substrate boundary. It belongs beside the framework as a consumer app.
+Rejected as a blanket rule because the framework-oriented Systemlab phases clearly belong beside the framework. However, the current Phase 6 migration lab may be better kept downstream in pinocchio because it is specifically about the pinocchio web-chat cutover.
 
-### Alternative D: move `apps/chat` unchanged and let sessionstream depend on pinocchio
+### Alternative D: move the current `apps/chat` package unchanged and let sessionstream depend on pinocchio
 
 Rejected because that would invert the dependency direction and make the new repo less reusable than the current intent demands.
+
+### Alternative E: fully generalize the real LLM chat product before extraction
+
+Rejected because that would encourage over-design. We do not yet have evidence that the whole product-grade chat stack is reusable outside pinocchio. It is safer to extract the proven substrate and keep the real chat product downstream.
 
 ## Open questions
 
 1. Should the extracted repo use root package files directly, or keep a small `pkg/` directory to match go-go-golems template conventions?
    - Recommendation: root package for ergonomics, but this is a repo-level style call.
-2. Should `apps/chat` remain in the first extraction cut, or should it be split into “generic chat” and “pinocchio runtime adapter” as two sequential tickets?
-   - Recommendation: do the split during the extraction program, but allow two commits/phases.
+2. Should the current `pkg/evtstream/apps/chat` package stay where it is under that name, or be renamed in pinocchio once it is clearly downstream-owned?
+   - Recommendation: keep the behavior in pinocchio, but strongly consider renaming later to something like `pkg/sessionchat` so ownership is obvious.
 3. Should Systemlab keep the Phase 6 web-chat migration lab after the move?
-   - Recommendation: yes, because it is a valuable external-consumer regression lab, and it reaches the consumer over HTTP rather than by private imports.
-4. Should examples move in the first cut or after the core stabilizes?
-   - Recommendation: move them with the substrate if they remain lightweight and generic; otherwise stage them one phase later.
+   - Recommendation: probably split it: keep generic framework labs in `sessionstream`, and keep the pinocchio-specific migration lab downstream if that proves cleaner.
+4. How ambitious should `sessionstream/examples/chatdemo` be?
+   - Recommendation: keep it intentionally small and obviously generic rather than trying to mirror the full pinocchio chat product.
 
 ## Concrete implementation checklist for a new intern
 
@@ -739,6 +734,8 @@ App-grade chat and consumer wiring:
 - `pinocchio/cmd/web-chat/app/runtime.go`
 - `pinocchio/cmd/web-chat/agentmode_sink.go`
 
+Read those with the revised ownership question in mind: these files explain why the real chat product should stay downstream even though the substrate itself should move.
+
 Systemlab:
 
 - `pinocchio/cmd/evtstream-systemlab/README.md`
@@ -757,16 +754,19 @@ Destination repo bootstrap:
 
 1. bootstrap the destination repo,
 2. move pure substrate packages,
-3. move Systemlab,
-4. refactor `apps/chat` to remove pinocchio imports,
-5. switch pinocchio to consume the external module,
-6. delete the old in-tree substrate copy.
+3. move the framework-oriented Systemlab pieces,
+4. keep the real chat app in pinocchio and rebase it on sessionstream,
+5. move `agentmode` ownership outward to `cmd/web-chat` or another pinocchio-owned adapter,
+6. add a generic demo chat example to sessionstream if helpful,
+7. switch pinocchio to consume the external module,
+8. delete the old in-tree substrate copy.
 
 ### Do not do these things
 
 - do not move `cmd/web-chat` into the framework repo,
 - do not preserve legacy webchat compatibility routes in the new module,
 - do not import `pinocchio/pkg/inference/runtime` from `sessionstream`,
+- do not import `agentmode` into a framework-owned chat package,
 - do not let Systemlab import consumer internals just because they are convenient during the move.
 
 ## Reference snippets
@@ -777,23 +777,26 @@ From `cmd/web-chat/app/server.go` the current pattern is effectively:
 
 ```text
 reg := sessionstream.NewSchemaRegistry()
-chatapp.RegisterSchemas(reg)
+chat layer registers schemas
 store := memory or sqlite hydration store
 ws := transport/ws.NewServer(snapshotProvider)
 hub := sessionstream.NewHub(...)
-chatapp.Install(hub, engine)
-service := chatapp.NewService(hub, engine)
+chat layer installs handlers and projections
+service := chat service facade
 ```
 
-That pattern should survive the extraction almost unchanged; only the import paths and the runtime adapter boundary should differ.
+That pattern should survive the extraction almost unchanged. The important change is ownership: the framework owns the hub/store/transport pieces, while the real chat layer remains downstream in pinocchio.
 
 ### Desired downstream relationship
 
 ```text
+sessionstream
+  -> Hub / store / transport / generic example apps
+
 pinocchio runtime + middleware
-  -> pinocchio adapter
-      -> sessionstream/apps/chat
-          -> sessionstream Hub / store / transport
+  -> pinocchio chat app
+      -> cmd/web-chat adapter layer
+          -> sessionstream substrate
 ```
 
 This is the key mental model for the whole project.
@@ -822,6 +825,8 @@ This is the key mental model for the whole project.
 - `pinocchio/cmd/web-chat/app/server.go:88-121`
 - `pinocchio/cmd/web-chat/app/runtime.go:8-12`
 - `pinocchio/cmd/web-chat/agentmode_sink.go:11-17`
+
+These references now support the revised conclusion that the substrate should move, but the real chat product and `agentmode` ownership should remain downstream in pinocchio.
 - `sessionstream/go.mod:1-2`
 - `sessionstream/.ttmp.yaml:1-5`
 

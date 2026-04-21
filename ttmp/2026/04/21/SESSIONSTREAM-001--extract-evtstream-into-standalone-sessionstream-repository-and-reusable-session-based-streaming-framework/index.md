@@ -16,7 +16,7 @@ Intent: long-term
 Owners: []
 RelatedFiles: []
 ExternalSources: []
-Summary: First repository-local planning ticket in sessionstream for extracting pinocchio/pkg/evtstream into a standalone sessionstream module, moving Systemlab with it, and keeping pinocchio-specific runtime adapters downstream.
+Summary: First repository-local planning ticket in sessionstream for extracting the generic evtstream substrate into a standalone sessionstream module while keeping the real pinocchio chat app downstream, moving agentmode ownership outward to pinocchio-owned adapters, and carrying only framework-oriented Systemlab/example material into the new repo.
 LastUpdated: 2026-04-21T15:40:00-04:00
 WhatFor: Track the standalone sessionstream extraction plan and the supporting intern-facing analysis documents in the destination repository itself.
 WhenToUse: Use when orienting contributors to the sessionstream extraction effort, reviewing the plan, or locating the canonical repo-local design docs for the move.
@@ -31,9 +31,10 @@ WhenToUse: Use when orienting contributors to the sessionstream extraction effor
 The ticket’s core recommendation is:
 
 - move the generic `evtstream` substrate into `sessionstream`,
-- move `cmd/evtstream-systemlab` with it as a companion app,
-- keep pinocchio-specific runtime, middleware, and application-edge behavior in `pinocchio`,
-- refactor the current `apps/chat` package so it no longer imports pinocchio packages directly.
+- move the framework-oriented Systemlab material with it as a companion app,
+- keep pinocchio-specific runtime, middleware, and the real chat product in `pinocchio`,
+- move `agentmode` ownership out to `cmd/web-chat` or another pinocchio-owned adapter layer,
+- and provide only a small generic demo/example chat app in `sessionstream` rather than trying to extract the whole real chat stack.
 
 ## Current status
 
@@ -69,10 +70,11 @@ Target relationship after the extraction program:
 sessionstream/
   -> generic session-streaming substrate
   -> optional stores/transports/examples
-  -> Systemlab companion app
+  -> framework-oriented Systemlab companion app
 
 pinocchio/
   -> downstream consumer of sessionstream
+  -> real chat app built on sessionstream
   -> product-specific cmd/web-chat app
   -> pinocchio runtime and middleware adapters
 ```

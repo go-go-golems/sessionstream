@@ -21,10 +21,40 @@
 - [x] Run `docmgr doctor --ticket SESSIONSTREAM-001 --stale-after 30` and resolve any warnings.
 - [x] Upload the final bundle to reMarkable under `/ai/2026/04/21/SESSIONSTREAM-001`.
 
-## Future implementation follow-ups (not done in this ticket)
+## Future implementation follow-ups
 
-- [ ] Replace the template `sessionstream/go.mod` module path with `github.com/go-go-golems/sessionstream` and clean the template placeholders in repo metadata.
-- [ ] Move the pure substrate packages (`evtstream` root, hydration, transport) into the new repo with import-path rewrites.
-- [ ] Move `cmd/evtstream-systemlab` into the new repo as a companion app.
-- [ ] Refactor `apps/chat` so it no longer imports `pinocchio/pkg/inference/runtime` or `pinocchio/pkg/middlewares/agentmode` directly.
-- [ ] Switch `pinocchio` to consume the external `sessionstream` module and retire the old in-tree `pkg/evtstream` copy after stabilization.
+### Phase 0 — bootstrap the sessionstream repository
+
+- [x] Replace the template `sessionstream/go.mod` module path with `github.com/go-go-golems/sessionstream`.
+- [x] Replace the placeholder/template repository docs and agent guidance (`README.md`, `AGENT.md`, package doc stubs) with sessionstream-specific content.
+- [ ] Clean the template placeholders out of repo metadata and dev tooling (`Makefile`, release config, placeholder command stubs, CI references as needed).
+- [ ] Validate the bootstrapped repo with focused checks (`go test ./...`, any repo-local lint/build checks that still apply).
+
+### Phase 1 — extract the pure substrate
+
+- [ ] Move the root `evtstream` substrate files into `sessionstream` with import-path rewrites.
+- [ ] Move `hydration/memory` into `sessionstream`.
+- [ ] Move `hydration/sqlite` into `sessionstream`.
+- [ ] Move `transport` and `transport/ws` into `sessionstream`.
+- [ ] Add a boundary check ensuring the moved substrate no longer imports `github.com/go-go-golems/pinocchio/...`.
+- [ ] Validate the moved substrate in `sessionstream` with `go test ./...`.
+
+### Phase 2 — move framework-oriented examples and Systemlab
+
+- [ ] Add a small generic demo/example chat app to `sessionstream` if a framework-owned application example is still desired.
+- [ ] Move the framework-oriented Systemlab pieces into the new repo.
+- [ ] Decide whether the current Phase 6 pinocchio migration lab should stay downstream instead of moving with the framework-oriented Systemlab phases.
+- [ ] Validate the moved example/Systemlab code in `sessionstream`.
+
+### Phase 3 — keep the real chat app downstream in pinocchio
+
+- [ ] Keep the real chat app in `pinocchio` and rebase it on `sessionstream` instead of extracting `pkg/evtstream/apps/chat` wholesale.
+- [ ] Move `agentmode` ownership out of the shared chat package and into `cmd/web-chat` or another pinocchio-owned adapter layer.
+- [ ] Update the downstream chat app so it publishes the needed sessionstream-compatible events without making the framework repo depend on `agentmode`.
+
+### Phase 4 — switch pinocchio to consume sessionstream
+
+- [ ] Switch `pinocchio` to consume the external `sessionstream` module.
+- [ ] Update downstream imports/tests in `pinocchio`.
+- [ ] Retire the old in-tree `pkg/evtstream` copy after stabilization.
+- [ ] Re-run focused `cmd/web-chat` backend/frontend validation after the consumer cutover.
