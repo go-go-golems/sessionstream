@@ -3,7 +3,7 @@ package transport
 import (
 	"context"
 
-	sessionstream "github.com/go-go-golems/sessionstream"
+	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 )
 
 // Transport is the public wire seam used by the substrate.

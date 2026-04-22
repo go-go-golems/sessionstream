@@ -15,8 +15,8 @@ The goal of this repository is to host the reusable parts of that architecture:
 
 This repository is intended to own the framework layer:
 
-- the core sessionstream package,
-- generic stores and transports,
+- the core sessionstream package under `pkg/sessionstream`,
+- generic stores and transports under `pkg/sessionstream/...`,
 - small demo/example applications that prove the substrate API,
 - framework-oriented Systemlab content,
 - repository-local design and implementation tickets under `ttmp/`.
@@ -63,4 +63,4 @@ docmgr status --summary-only
 1. bootstrap the repository cleanly,
 2. move the generic substrate out of `pinocchio`,
 3. move framework-oriented examples and labs,
-4. switch downstream consumers to import `github.com/go-go-golems/sessionstream`.
+4. keep downstream consumers importing the library from `github.com/go-go-golems/sessionstream/pkg/sessionstream` and sibling `pkg/sessionstream/...` subpackages.

@@ -7,7 +7,7 @@ import (
 	"math"
 	"sort"
 
-	sessionstream "github.com/go-go-golems/sessionstream"
+	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 	_ "github.com/mattn/go-sqlite3"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"

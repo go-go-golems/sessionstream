@@ -9,10 +9,10 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
-	sessionstream "github.com/go-go-golems/sessionstream"
-	storememory "github.com/go-go-golems/sessionstream/hydration/memory"
-	storesqlite "github.com/go-go-golems/sessionstream/hydration/sqlite"
-	wstransport "github.com/go-go-golems/sessionstream/transport/ws"
+	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
+	storesqlite "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite"
+	wstransport "github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 

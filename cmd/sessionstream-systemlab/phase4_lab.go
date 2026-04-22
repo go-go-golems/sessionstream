@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	sessionstream "github.com/go-go-golems/sessionstream"
 	chatdemo "github.com/go-go-golems/sessionstream/examples/chatdemo"
-	storememory "github.com/go-go-golems/sessionstream/hydration/memory"
-	wstransport "github.com/go-go-golems/sessionstream/transport/ws"
+	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
+	wstransport "github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws"
 )
 
 type phase4RunRequest struct {

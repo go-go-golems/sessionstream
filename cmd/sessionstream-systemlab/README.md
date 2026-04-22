@@ -13,7 +13,7 @@ Goals:
 
 Systemlab may:
 
-- import `github.com/go-go-golems/sessionstream` public packages,
+- import `github.com/go-go-golems/sessionstream/pkg/sessionstream` public packages and sibling `pkg/sessionstream/...` subpackages,
 - expose its own HTTP endpoints and UI shell,
 - exercise the same public seams later transports will use.
 

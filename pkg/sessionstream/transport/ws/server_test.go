@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	sessionstream "github.com/go-go-golems/sessionstream"
-	storememory "github.com/go-go-golems/sessionstream/hydration/memory"
+	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	sessionstream "github.com/go-go-golems/sessionstream"
+	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"

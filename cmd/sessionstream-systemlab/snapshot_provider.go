@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	sessionstream "github.com/go-go-golems/sessionstream"
+	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 )
 
 type hydrationSnapshotProvider struct {

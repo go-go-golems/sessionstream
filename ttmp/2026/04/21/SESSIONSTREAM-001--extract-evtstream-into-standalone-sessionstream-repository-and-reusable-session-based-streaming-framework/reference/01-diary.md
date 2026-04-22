@@ -1653,3 +1653,90 @@ cd pinocchio/cmd/web-chat/web && npm run check
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/tasks.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/changelog.md`
   - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework/reference/01-diary.md`
+
+## Step 10: Reorganize the extracted library under `pkg/sessionstream`
+
+After the extraction was complete, the repository root still felt messy in practice because all of the reusable framework files lived directly beside repo-level scaffolding such as `README.md`, `Makefile`, `ttmp/`, `examples/`, and `cmd/`. The user explicitly asked to clean that up by moving the library into a `pkg/` subtree. I treated that as a real repository-shape change, not just cosmetic renaming, because it changes every public import path used by examples, Systemlab, and downstream `pinocchio` consumers.
+
+The implementation itself was mechanically simple but broad: move the root substrate files and the library-owned subpackages under `pkg/sessionstream`, then update every affected import in `sessionstream` and `pinocchio`, and finally revalidate both repos with focused `GOWORK=off` checks. I also updated the repo docs and this ticket so the architectural documentation matches the new reality rather than the earlier “root package” recommendation.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Reorganize eventstream to have the go library files in a pkg/ subdirectory. it's a mess right now"
+
+**Assistant interpretation:** Move the extracted `sessionstream` reusable Go library code out of the repository root into a clearer `pkg/` layout, update imports in the framework repo and downstream consumers, and keep the repository/docs coherent after the move.
+
+**Inferred user intent:** Improve repository navigability now that the extraction is real and the flat top-level library layout has become annoying in day-to-day work.
+
+**Commit (code):** N/A
+
+### What I did
+- Moved the extracted root substrate files into `sessionstream/pkg/sessionstream/`.
+- Moved the library-owned subpackages into:
+  - `sessionstream/pkg/sessionstream/hydration/...`
+  - `sessionstream/pkg/sessionstream/transport/...`
+- Updated Go imports in both repositories so the new public package paths are used consistently.
+- Updated the main repo docs and the active `SESSIONSTREAM-001` ticket docs to describe the new package layout.
+- Re-ran formatting and focused validation.
+
+### Why
+- The flat repository root was mixing reusable library code with repo scaffolding, documentation, examples, and commands.
+- Once the code lives in its own repo, the old “keep the package at the root for import elegance” argument becomes less persuasive if the repository becomes hard to scan.
+- The new `pkg/sessionstream/...` layout makes it visually obvious where framework code lives.
+
+### What worked
+- The move itself was straightforward once I treated it as three groups:
+  1. root substrate files,
+  2. hydration/transport subpackages,
+  3. downstream imports.
+- The import-path rewrite propagated cleanly through:
+  - `sessionstream/examples/chatdemo`
+  - `sessionstream/cmd/sessionstream-systemlab`
+  - `pinocchio/pkg/chatapp`
+  - `pinocchio/cmd/web-chat`
+- The repository docs were easy to refresh once the code movement was done.
+
+### What didn't work
+- N/A in the move itself.
+
+### What I learned
+- The root-package-vs-`pkg/` decision is not purely about Go import aesthetics. Repository ergonomics matter too, especially once the repo contains substantial non-library content like tickets, labs, and examples.
+- This repository now reads more cleanly with `pkg/sessionstream` as the obvious home for reusable code.
+
+### What was tricky to build
+- The sharp edge was not the move command itself; it was the fact that this is a public-path change for all local consumers. If I had updated only the framework repo and forgotten downstream `pinocchio`, the branch would have been left in a half-broken state.
+- I handled that by immediately doing a two-repo import rewrite and then validating both repos with focused checks rather than assuming `go.work` would hide missing imports.
+
+### What warrants a second pair of eyes
+- Review whether there are any additional markdown/help references outside the files I updated that still teach the old root import path.
+- Review whether we want to keep the package name and directory name exactly as `pkg/sessionstream`, or whether future repo cleanup should introduce additional namespace subdivision.
+
+### What should be done in the future
+- If/when the module is published/tagged, ensure any external consumers are updated to the new `pkg/sessionstream` import paths.
+- If this layout sticks, refresh any remaining long-form onboarding material that still assumes the old root package layout.
+
+### Code review instructions
+- Review in this order:
+  1. `sessionstream/pkg/sessionstream/**`
+  2. `sessionstream/examples/chatdemo/**`
+  3. `sessionstream/cmd/sessionstream-systemlab/**`
+  4. `pinocchio/pkg/chatapp/**`
+  5. `pinocchio/cmd/web-chat/**`
+  6. updated docs in `sessionstream/README.md` and `SESSIONSTREAM-001`
+- Validate with:
+
+```bash
+cd sessionstream && GOWORK=off go test ./... && GOWORK=off go build ./... && make check
+cd pinocchio && GOWORK=off go test ./pkg/chatapp ./cmd/web-chat/... -count=1
+```
+
+### Technical details
+- Files/directories moved or updated in this step include:
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/sessionstream/`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/sessionstream/hydration/`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/sessionstream/transport/`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/examples/chatdemo/chat.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/lab_environment.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/README.md`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/pkg/chatapp/chat.go`
+  - `/home/manuel/workspaces/2026-04-07/extract-webchat/pinocchio/cmd/web-chat/app/server.go`

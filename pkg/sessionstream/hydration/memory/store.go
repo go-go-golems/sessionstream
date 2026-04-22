@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	sessionstream "github.com/go-go-golems/sessionstream"
+	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -373,21 +373,24 @@ sessionstream/
     ... docmgr tickets for the repo itself ...
 ```
 
-### Why root package instead of `pkg/sessionstream`
+### Package layout note: moved to `pkg/sessionstream`
 
-A standalone library repo should feel natural to import:
+The original extraction plan argued for keeping the reusable Go library at the repository root. After living with the extracted repository structure, that layout proved noisy: the module root mixed library source files, repository scaffolding, ticket docs, and companion apps in one flat top-level view.
 
-```go
-import "github.com/go-go-golems/sessionstream"
-```
-
-That is simpler and more idiomatic than:
+The repository has now been reorganized so the reusable Go library lives under:
 
 ```go
 import "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 ```
 
-The current `pkg/evtstream` location made sense inside the larger pinocchio repo. It is no longer necessary once `sessionstream` is its own repository.
+with sibling subpackages such as:
+
+```go
+import storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
+import wstransport "github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws"
+```
+
+This is slightly more verbose than a root-package import, but it makes the repository itself much easier to navigate: top-level directories now clearly separate repo concerns (`cmd/`, `examples/`, `ttmp/`, etc.) from the reusable framework code (`pkg/sessionstream/...`). For this repository, that structural clarity is worth the extra import path segment.
 
 ## Proposed package strategy
 

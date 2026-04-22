@@ -11,8 +11,8 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
-	sessionstream "github.com/go-go-golems/sessionstream"
-	storememory "github.com/go-go-golems/sessionstream/hydration/memory"
+	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )

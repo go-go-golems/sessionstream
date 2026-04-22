@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	sessionstream "github.com/go-go-golems/sessionstream"
+	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
