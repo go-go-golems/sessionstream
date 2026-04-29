@@ -52,7 +52,7 @@
 - [x] Record projection, fanout, and store errors into durable error store when the store supports it.
 - [x] Record decode and ordinal errors into durable error store.
 - [x] Persist raw error payloads and metadata in SQLite error records.
-- [ ] Add configurable bus decode nack/ack policy instead of hard-coded record-and-ack behavior.
+- [x] Defer configurable bus decode nack/ack policy to GitHub issue #1.
 - [x] Add initial `Hub.RebuildTimeline` helper that reprojects stored events without UI fanout.
 - [x] Add retry-from-projection-cursor helper (`Hub.RetryTimeline`).
 - [x] Add scratch rebuild helper (`Hub.RebuildTimelineFromScratch`) for stores that can clear materialized timeline state.

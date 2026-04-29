@@ -1645,3 +1645,81 @@ The new command-frame test sends:
 ```
 
 The expected response is an error frame containing `unknown frame type` and no subscription side effect.
+
+## Step 17: Deferred configurable bus decode ack/nack policy to GitHub issue
+
+I left the flexible bus decode ack/nack implementation out of SESSIONSTREAM-003 and opened a dedicated GitHub issue with the detailed background, desired policy semantics, tests, non-goals, and default-behavior constraints.
+
+This keeps SESSIONSTREAM-003 focused on the replay/store/systemlab remediation while preserving the production-hardening work as a concrete follow-up.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+let's leave the flexible ack nack and open a gh issue for it, with all the detail needed
+```
+
+**Assistant interpretation:** Do not implement configurable ack/nack behavior now; create a detailed GitHub issue and update the ticket bookkeeping to show the item was deferred intentionally.
+
+**Inferred user intent:** Avoid expanding the current remediation scope while ensuring the deferred production-hardening work is not lost.
+
+### What I did
+
+- Created GitHub issue #1: https://github.com/go-go-golems/sessionstream/issues/1
+- Wrote issue details covering:
+  - current record-and-ack behavior;
+  - decode failure causes;
+  - desired configurable policy API shape;
+  - `RecordAndAck`, `RecordAndNack`, and `AckIfRecorded` semantics;
+  - error record expectations;
+  - tests to add;
+  - non-goals;
+  - SESSIONSTREAM-003 default-behavior decision.
+- Updated `tasks.md` to mark the bus decode policy item as deferred to GitHub issue #1.
+
+### Why
+
+The current default is safe for local/dev/systemlab because it avoids poison-message retry loops. Production deployments may still want broker-level retry/DLQ behavior, but that deserves its own focused implementation and tests rather than being added late to this remediation slice.
+
+### What worked
+
+- `gh issue create` succeeded and returned issue #1.
+- The issue body captures enough implementation detail to resume without relying on this chat context.
+
+### What didn't work
+
+No command failure occurred.
+
+### What I learned
+
+The deferred work is mostly about explicit operational policy, not core replay semantics. Keeping it separate helps avoid mixing production broker behavior with the current replay-store remediation.
+
+### What was tricky to build
+
+The important distinction is preserving the current poison-message-safe default while still allowing production users to opt into broker-managed nack/DLQ behavior. The issue therefore makes default preservation a requirement rather than an implementation detail.
+
+### What warrants a second pair of eyes
+
+- Whether the proposed `AckIfRecorded` policy is worth implementing or should be omitted for a smaller API.
+- Whether decode and ordinal errors should share one policy path or have separate policy knobs.
+- Whether the names should use `Ack`/`Nack` terminology or more domain-specific names.
+
+### What should be done in the future
+
+- Implement GitHub issue #1 after SESSIONSTREAM-003 is closed or split.
+- Add policy-specific bus tests with a controllable message/pubsub test double.
+
+### Code review instructions
+
+Review:
+
+- https://github.com/go-go-golems/sessionstream/issues/1
+- `ttmp/2026/04/29/SESSIONSTREAM-003--code-review-and-architecture-audit-for-sessionstream/tasks.md`
+
+Validate ticket docs with:
+
+```bash
+cd sessionstream
+docmgr --root ttmp doctor --ticket SESSIONSTREAM-003 --stale-after 30
+```

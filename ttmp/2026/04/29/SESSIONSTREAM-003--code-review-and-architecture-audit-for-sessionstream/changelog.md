@@ -197,3 +197,13 @@ Step 16: Documented websocket fanout-only boundaries and tested unsupported comm
 - /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/sessionstream/transport/ws/server.go — Fanout-only/advisory sinceOrdinal documentation
 - /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/sessionstream/transport/ws/server_test.go — Unsupported command-frame test
 
+
+## 2026-04-29
+
+Step 17: Deferred configurable bus decode ack/nack policy to GitHub issue #1.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/29/SESSIONSTREAM-003--code-review-and-architecture-audit-for-sessionstream/reference/01-investigation-diary.md — Step 17 records issue deferral
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/29/SESSIONSTREAM-003--code-review-and-architecture-audit-for-sessionstream/tasks.md — Bus decode policy deferred to GitHub issue #1
+
