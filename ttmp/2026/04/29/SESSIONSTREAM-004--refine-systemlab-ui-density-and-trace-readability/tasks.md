@@ -35,6 +35,10 @@
 - [x] Capture after screenshot for `/#phase1` and save under `sources/`.
 - [x] Compare before/after screenshots for information density.
 - [ ] Smoke test phases 1–5 in browser.
+- [x] Render Phase 2 bus/consumer trace as compact rows instead of raw JSON.
+- [x] Render Phase 2 message history as a compact table instead of raw JSON.
+- [x] Render Phase 2 per-session ordinals as compact chips/table instead of raw JSON.
+- [x] Render Phase 2 snapshots as compact cards/tables instead of raw JSON.
 - [x] Run `make lint`.
 - [x] Run `make check`.
 - [ ] Run `docmgr --root ttmp doctor --ticket SESSIONSTREAM-004 --stale-after 30`.

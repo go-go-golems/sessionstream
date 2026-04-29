@@ -15,14 +15,19 @@ RelatedFiles:
         Global styles for rendered trace/session widgets
         Global CSS for rendered trace/session widgets
         Compact trace/session/check badge CSS
+        Compact data table and snapshot card CSS
     - Path: cmd/sessionstream-systemlab/static/index.html
       Note: Components sandbox navigation and page mount
     - Path: cmd/sessionstream-systemlab/static/js/pages/phase1.js
       Note: |-
         Phase 1 rendered trace/session widgets
         Compact Phase 1 UI event row markup
+    - Path: cmd/sessionstream-systemlab/static/js/pages/phase2.js
+      Note: Phase 2 rendered trace/table/snapshot views
     - Path: cmd/sessionstream-systemlab/static/partials/components.html
-      Note: Static density sandbox samples
+      Note: |-
+        Static density sandbox samples
+        Compact data table sandbox sample
     - Path: cmd/sessionstream-systemlab/static/partials/phase1.html
       Note: Phase 1 layout for target panels
 ExternalSources:
@@ -32,6 +37,7 @@ LastUpdated: 2026-04-29T17:05:00-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 
@@ -316,5 +322,127 @@ Browser-measured after values for Phase 1 after submitting the default prompt:
   "traceHeight": 404,
   "sessionHeight": 242,
   "badgeHeight": 22
+}
+```
+
+## Step 3: Rendered Phase 2 raw JSON panels as compact trace rows and tables
+
+I replaced the Phase 2 bottom-panel raw JSON dumps with rendered views. Bus / Consumer Trace now uses compact trace rows with summarized details. Message History now renders as a table, Per-Session Ordinals renders as a small table with ordinal chips, and Snapshots render as compact session cards with entity tables.
+
+This keeps the raw export path available through Export JSON, but the on-page teaching UI now shows the ordering story directly instead of forcing users to read nested JSON.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+Render bus/consumer trace and all the other raw json as syntax highlighted YAML to make it more readable. or even better, if possible, as tables like on phse 1.
+
+http://localhost:8091/#phase2 see phase2 at the bottom./tmp/pi-clipboard-844025e3-37f1-4b23-8e54-6d673c23ee4e.png
+```
+
+**Assistant interpretation:** Inspect the Phase 2 screenshot and replace the bottom raw JSON panels with more readable rendered views, preferably tables/compact rows rather than just YAML.
+
+**Inferred user intent:** Make Phase 2 teach ordering and bus/consumer behavior visually instead of showing large nested JSON blobs.
+
+### What I did
+
+- Read the Phase 2 screenshot from `/tmp/pi-clipboard-844025e3-37f1-4b23-8e54-6d673c23ee4e.png`.
+- Saved it as `sources/phase2-json-before.png`.
+- Reworked `cmd/sessionstream-systemlab/static/js/pages/phase2.js`:
+  - `renderPhase2Trace` renders bus/consumer trace entries as compact rows.
+  - `renderPhase2Messages` renders message history as a table.
+  - `renderPhase2Ordinals` renders per-session ordinals as a table with ordinal chips.
+  - `renderPhase2Snapshots` renders snapshots as compact session cards with entity tables.
+  - added small escaping/formatting helpers for safe HTML rendering.
+- Extended `cmd/sessionstream-systemlab/static/app.css`:
+  - added `.trace-step-detail` for summarized trace details;
+  - added reusable `.table-rendered`, `.data-table`, `.compact-table`, `.ordinal-chip`, and `.snapshot-card` styles;
+  - gave Phase 2 rendered panels max heights and overflow to avoid giant page growth.
+- Added a compact data-table sample to the Components / Density Sandbox page.
+- Ran Systemlab locally on `:18091`, opened `/#phase2`, clicked `Publish B`, and verified:
+  - trace rows render;
+  - message history table renders;
+  - ordinal table renders;
+  - snapshot cards render;
+  - check badges remain compact.
+- Captured `sources/phase2-rendered-tables-after.png`.
+- Ran `make lint` and `make check`.
+
+### Why
+
+The Phase 2 page is specifically about publish vs consume moments and assigned ordinals. Raw nested JSON hides that story. Tables make the important fields visible: session, label, event, published ordinal, assigned ordinal, topic, stream id, partition key, and current snapshot cursor.
+
+### What worked
+
+- The table rendering made message history much easier to scan.
+- The compact detail line in trace rows exposes useful context without expanding each trace into a JSON block.
+- The existing compact badge work carried over cleanly to Phase 2 checks.
+- `make lint` and `make check` passed.
+
+### What didn't work
+
+No build or lint failure occurred. The screenshot capture still shows the full chapter above the panels, so the screenshot is long; the rendered Phase 2 panels are visible near the bottom.
+
+### What I learned
+
+Phase 2 benefits more from tables than YAML. YAML would reduce punctuation noise, but it would still be a nested text blob. The teaching data is tabular by nature.
+
+### What was tricky to build
+
+The metadata fields are verbose (`sessionstream_stream_id`, `sessionstream_partition_key`, etc.), so I added summaries that shorten common prefixes and show only the high-signal values in table cells. Full raw data is still available through Export JSON.
+
+### What warrants a second pair of eyes
+
+- Whether the metadata summaries hide too much detail for advanced debugging.
+- Whether Phase 2 should get a rendered/json toggle like Phase 1 instead of always rendering tables on-page.
+- Whether the table columns should be reordered for the most common teaching flow.
+
+### What should be done in the future
+
+- Consider applying the same table/card approach to Phase 3–5 raw JSON panels.
+- Consider a shared frontend utility module for compact table rendering if more phases adopt it.
+- Add optional expanders for full metadata payloads if users need in-page debugging without Export JSON.
+
+### Code review instructions
+
+Start with:
+
+- `cmd/sessionstream-systemlab/static/js/pages/phase2.js`
+- `cmd/sessionstream-systemlab/static/app.css`
+- `cmd/sessionstream-systemlab/static/partials/components.html`
+
+Compare screenshots:
+
+- `sources/phase2-json-before.png`
+- `sources/phase2-rendered-tables-after.png`
+
+Validate with:
+
+```bash
+cd sessionstream
+make lint
+make check
+docmgr --root ttmp doctor --ticket SESSIONSTREAM-004 --stale-after 30
+```
+
+Manual validation:
+
+1. Run `go run ./cmd/sessionstream-systemlab --addr :18091`.
+2. Open `http://localhost:18091/?v=5#phase2`.
+3. Click `Publish B` or `Burst A`.
+4. Confirm Bus / Consumer Trace, Message History, Per-Session Ordinals, and Snapshots are rendered views instead of raw JSON.
+
+### Technical details
+
+Browser-measured after clicking `Publish B`:
+
+```json
+{
+  "traceRows": 6,
+  "msgRows": 1,
+  "ordRows": 1,
+  "snapCards": 2,
+  "badges": [22, 22, 22, 22]
 }
 ```

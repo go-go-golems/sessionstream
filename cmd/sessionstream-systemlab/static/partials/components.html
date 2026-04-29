@@ -82,11 +82,18 @@
 
 <div class="grid">
   <div class="panel">
-    <h3>JSON Fallback</h3>
-    <pre>{
-  "trace": "JSON views should remain padded and readable",
-  "density": "compact rendered views only"
-}</pre>
+    <h3>Compact Data Table</h3>
+    <pre class="table-rendered">
+      <table class="data-table compact-table">
+        <thead>
+          <tr><th>Session</th><th>Label</th><th>Event</th><th>Assigned</th><th>Metadata</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>s-a</td><td>s-a-01</td><td>OrderedEvent</td><td class="num">1</td><td><code>stream-id=1713560000123-1 · partition-key=s-a</code></td></tr>
+          <tr><td>s-b</td><td>s-b-01</td><td>OrderedEvent</td><td class="num">1</td><td><code>stream-id=1713560000123-2 · partition-key=s-b</code></td></tr>
+        </tbody>
+      </table>
+    </pre>
   </div>
   <div class="panel">
     <h3>Checks</h3>
@@ -95,4 +102,12 @@
     <span class="badge">✓ timelineProduced</span>
     <span class="badge">✓ uiEventsProduced</span>
   </div>
+</div>
+
+<div class="panel">
+  <h3>JSON Fallback</h3>
+  <pre>{
+  "trace": "JSON views should remain padded and readable",
+  "density": "compact rendered views only"
+}</pre>
 </div>
