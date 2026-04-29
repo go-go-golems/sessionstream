@@ -221,3 +221,15 @@ Step 18: Split large Phase 2 and Phase 5 Systemlab files into runtime/actions/pr
 - /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase5_projections.go — Phase 5 projections split
 - /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase5_runtime.go — Phase 5 runtime split
 
+
+## 2026-04-29
+
+Step 19: Fixed lint findings in SQLite snapshot history, close handling tests, and unused Phase 3 renderer.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go — Removed unused markdown renderer
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/sessionstream/hydration/sqlite/store.go — Fixed asOf snapshot err shadowing
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/sessionstream/hydration/sqlite/store_test.go — Checked deferred Close errors
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/sessionstream/transport/ws/server_test.go — Checked deferred websocket Close errors
+

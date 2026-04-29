@@ -28,7 +28,7 @@ func TestServerSubscribeEmptySnapshotThenLive(t *testing.T) {
 	defer httpServer.Close()
 
 	conn := dialWS(t, httpServer.URL)
-	defer conn.Close()
+	defer func() { require.NoError(t, conn.Close()) }()
 
 	hello := readFrame(t, conn)
 	require.Equal(t, frameTypeHello, hello["type"])
@@ -78,7 +78,7 @@ func TestServerReconnectGetsSnapshotThenNextLive(t *testing.T) {
 	require.NoError(t, hub.Submit(context.Background(), sessionstream.SessionId("s-2"), testCommandName, payload2))
 
 	reconnected := dialWS(t, httpServer.URL)
-	defer reconnected.Close()
+	defer func() { require.NoError(t, reconnected.Close()) }()
 	_ = readFrame(t, reconnected) // hello
 	require.NoError(t, reconnected.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-2", "sinceOrdinal": "1"}))
 	snapshot2 := readFrame(t, reconnected)
@@ -101,7 +101,7 @@ func TestServerConnectionsTracksSubscriptions(t *testing.T) {
 	defer httpServer.Close()
 
 	conn := dialWS(t, httpServer.URL)
-	defer conn.Close()
+	defer func() { require.NoError(t, conn.Close()) }()
 	_ = readFrame(t, conn) // hello
 	require.NoError(t, conn.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-3"}))
 	_ = readFrame(t, conn) // snapshot
@@ -118,7 +118,7 @@ func TestServerRejectsCommandFramesAsUnsupported(t *testing.T) {
 	defer httpServer.Close()
 
 	conn := dialWS(t, httpServer.URL)
-	defer conn.Close()
+	defer func() { require.NoError(t, conn.Close()) }()
 	_ = readFrame(t, conn) // hello
 
 	require.NoError(t, conn.WriteJSON(map[string]any{

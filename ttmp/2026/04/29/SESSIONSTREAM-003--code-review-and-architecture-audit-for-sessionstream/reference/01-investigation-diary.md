@@ -1878,3 +1878,108 @@ phase5_projections.go   ~56 lines
 phase5_lab.go           ~55 lines
 phase5_clone.go         ~15 lines
 ```
+
+## Step 19: Fixed lint findings after the Phase 2/5 split
+
+I addressed the `make lint` findings reported after the Systemlab file split. The fixes are small hygiene changes: check deferred close errors in tests, remove an unused Phase 3 render helper, and fix an ineffectual `err` assignment in SQLite snapshot history lookup.
+
+The SQLite fix is the only runtime-adjacent change: the historical snapshot query path had a shadowed `err` in the `asOf > 0` branch. Tests already covered historical snapshots, but lint correctly identified that the query assignment was writing to the inner scoped `err`. I changed the version cursor declaration to avoid shadowing.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+make lint :
+
+s, cgo: 782ns, max_per_file_from_linter: 755ns, invalid_issue: 617ns, filename_unadjuster: 566ns, fixer: 361ns, path_prettifier: 292ns, exclusion_paths: 286ns, diff: 267ns, severity-rules: 152ns 
+INFO [runner] linters took 4.348203939s with stages: goanalysis_metalinter: 4.34645355s 
+pkg/sessionstream/hydration/sqlite/store_test.go:43:22: Error return value of `reopened.Close` is not checked (errcheck)
+    defer reopened.Close()
+                       ^
+pkg/sessionstream/hydration/sqlite/store_test.go:123:19: Error return value of `store.Close` is not checked (errcheck)
+    defer store.Close()
+                    ^
+pkg/sessionstream/transport/ws/server_test.go:31:18: Error return value of `conn.Close` is not checked (errcheck)
+    defer conn.Close()
+                   ^
+pkg/sessionstream/transport/ws/server_test.go:81:25: Error return value of `reconnected.Close` is not checked (errcheck)
+    defer reconnected.Close()
+                          ^
+pkg/sessionstream/transport/ws/server_test.go:104:18: Error return value of `conn.Close` is not checked (errcheck)
+    defer conn.Close()
+                   ^
+pkg/sessionstream/transport/ws/server_test.go:121:18: Error return value of `conn.Close` is not checked (errcheck)
+    defer conn.Close()
+                   ^
+pkg/sessionstream/hydration/sqlite/store.go:174:9: ineffectual assignment to err (ineffassign)
+        rows, err = s.db.QueryContext(ctx, `
+             ^
+cmd/sessionstream-systemlab/phase3_lab.go:390:6: func renderPhase3Markdown is unused (unused)
+func renderPhase3Markdown(resp phase3RunResponse) string {
+```
+
+**Assistant interpretation:** Fix the reported lint failures and re-run validation.
+
+**Inferred user intent:** Keep the cleanup branch green under the project's lint target, not just tests/build.
+
+### What I did
+
+- Replaced unchecked `defer Close()` calls in tests with deferred `require.NoError` wrappers:
+  - `pkg/sessionstream/hydration/sqlite/store_test.go`
+  - `pkg/sessionstream/transport/ws/server_test.go`
+- Fixed the SQLite `Snapshot(asOf)` historical query branch by avoiding `err` shadowing around `uint64ToInt64(asOf)`.
+- Removed unused `renderPhase3Markdown` from `cmd/sessionstream-systemlab/phase3_lab.go`.
+- Removed the now-unused `encoding/json` import from `phase3_lab.go`.
+- Ran `gofmt`.
+- Ran `make lint`, `make check`, and `docmgr doctor`.
+
+### Why
+
+The branch should pass the project's lint target before further commits or final delivery. The lint findings were all concrete and low-risk to fix immediately.
+
+### What worked
+
+- `make lint` passed with `0 issues` after the fixes.
+- `make check` passed after the lint fixes.
+- `docmgr doctor` passed.
+
+### What didn't work
+
+No new failure occurred while fixing lint. The original lint output is preserved above as the trigger for this step.
+
+### What I learned
+
+`ineffassign` caught a subtle shadowing bug in the historical snapshot query path. The code was easy to read as if the outer `err` was updated, but the short declaration for `versionCursor` introduced an inner `err` scope.
+
+### What was tricky to build
+
+The websocket test file had several identical `defer conn.Close()` snippets. I updated all of them consistently to keep `errcheck` satisfied. For the SQLite bug, the fix was to declare `versionCursor` separately and assign both `versionCursor` and the existing outer `err` explicitly.
+
+### What warrants a second pair of eyes
+
+- The `Snapshot(asOf)` branch should be reviewed because the lint fix revealed real shadowing risk in replay/history logic.
+- The test deferred close assertions are acceptable because these tests do not otherwise expect close errors.
+
+### What should be done in the future
+
+- Run `make lint` as part of the normal validation sequence whenever code moves across files.
+- Consider adding `make check` to include lint if the team wants a single strict validation target.
+
+### Code review instructions
+
+Review:
+
+- `pkg/sessionstream/hydration/sqlite/store.go`
+- `pkg/sessionstream/hydration/sqlite/store_test.go`
+- `pkg/sessionstream/transport/ws/server_test.go`
+- `cmd/sessionstream-systemlab/phase3_lab.go`
+
+Validate with:
+
+```bash
+cd sessionstream
+make lint
+make check
+docmgr --root ttmp doctor --ticket SESSIONSTREAM-003 --stale-after 30
+```

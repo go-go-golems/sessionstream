@@ -167,7 +167,8 @@ func (s *Store) Snapshot(ctx context.Context, sid sessionstream.SessionId, asOf 
 	if asOf == 0 {
 		rows, err = s.db.QueryContext(ctx, `SELECT kind, entity_id, 0 AS tombstone, payload_json FROM sessionstream_entities WHERE session_id = ? ORDER BY kind ASC, entity_id ASC`, string(sid))
 	} else {
-		versionCursor, err := uint64ToInt64(asOf)
+		var versionCursor int64
+		versionCursor, err = uint64ToInt64(asOf)
 		if err != nil {
 			return sessionstream.Snapshot{}, err
 		}

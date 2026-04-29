@@ -40,7 +40,7 @@ func TestStorePersistsAcrossReopen(t *testing.T) {
 
 	reopened, err := New(dsn, reg)
 	require.NoError(t, err)
-	defer reopened.Close()
+	defer func() { require.NoError(t, reopened.Close()) }()
 	snap, err := reopened.Snapshot(context.Background(), sessionstream.SessionId("s-2"), 0)
 	require.NoError(t, err)
 	require.Equal(t, uint64(9), snap.Ordinal)
@@ -120,7 +120,7 @@ func TestStoreSnapshotAsOfRespectsTombstones(t *testing.T) {
 func TestNewInMemoryStore(t *testing.T) {
 	store, err := NewInMemory(newTestRegistry(t))
 	require.NoError(t, err)
-	defer store.Close()
+	defer func() { require.NoError(t, store.Close()) }()
 	payload, err := structpb.NewStruct(map[string]any{"text": "hello"})
 	require.NoError(t, err)
 	require.NoError(t, store.Apply(context.Background(), "s-7", 1, []sessionstream.TimelineEntity{{Kind: "TestEntity", Id: "msg-1", Payload: payload}}))

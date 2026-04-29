@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -385,9 +384,4 @@ func clonePhase3RunResponse(in phase3RunResponse) phase3RunResponse {
 	out.Snapshot = cloneMap(in.Snapshot)
 	out.Checks = cloneBoolMap(in.Checks)
 	return out
-}
-
-func renderPhase3Markdown(resp phase3RunResponse) string {
-	body, _ := json.MarshalIndent(resp, "", "  ")
-	return "# Phase 3 Transcript\n\n```json\n" + string(body) + "\n```\n"
 }
