@@ -1,5 +1,6 @@
-import { fetchChapterHTML, fetchPhase5State, resetPhase5, runPhase5 } from "../api.js";
-import { byId, renderChecks, setHTML, setJSON } from "../dom.js";
+import { fetchChapterHTML, fetchPhase5Replay, fetchPhase5State, resetPhase5, runPhase5 } from "../api.js";
+import { byId, renderChecks, setHTML } from "../dom.js";
+import { renderClientFrames, renderError, renderReplayState, renderRestartState, renderTrace } from "../renderers.js";
 
 const client = { socket: null, frames: [] };
 
@@ -26,6 +27,7 @@ export async function initPhase5Page() {
     connectClient();
   });
   document.querySelector('[data-action="phase5-refresh"]')?.addEventListener("click", refreshState);
+  document.querySelector('[data-action="phase5-replay-refresh"]')?.addEventListener("click", refreshReplay);
   document.querySelector('[data-action="phase5-reset"]')?.addEventListener("click", async () => {
     disconnectClient();
     await resetPhase5(mode());
@@ -41,12 +43,13 @@ async function runAction(input) {
   const checksOutput = byId("phase5-checks");
   try {
     const data = await runPhase5(input);
-    setJSON(traceOutput, data.trace || data);
-    setJSON(stateOutput, { preRestart: data.preRestart, postRestart: data.postRestart, connections: data.connections });
+    renderTrace(traceOutput, data.trace || []);
+    renderRestartState(stateOutput, { preRestart: data.preRestart, postRestart: data.postRestart, connections: data.connections });
     renderChecks(checksOutput, data.checks);
+    await refreshReplay();
   } catch (error) {
-    setJSON(traceOutput, { error: error.message });
-    setJSON(stateOutput, { error: error.message });
+    renderError(traceOutput, error);
+    renderError(stateOutput, error);
     renderChecks(checksOutput, {});
   }
 }
@@ -57,13 +60,25 @@ async function refreshState() {
   const checksOutput = byId("phase5-checks");
   try {
     const data = await fetchPhase5State(mode(), sessionId(), textValue());
-    setJSON(traceOutput, data.trace || data);
-    setJSON(stateOutput, { preRestart: data.preRestart, postRestart: data.postRestart, connections: data.connections });
+    renderTrace(traceOutput, data.trace || []);
+    renderRestartState(stateOutput, { preRestart: data.preRestart, postRestart: data.postRestart, connections: data.connections });
     renderChecks(checksOutput, data.checks);
+    await refreshReplay();
   } catch (error) {
-    setJSON(traceOutput, { error: error.message });
-    setJSON(stateOutput, { error: error.message });
+    renderError(traceOutput, error);
+    renderError(stateOutput, error);
     renderChecks(checksOutput, {});
+  }
+}
+
+async function refreshReplay() {
+  const replayOutput = byId("phase5-replay-output");
+  if (!replayOutput) return;
+  try {
+    const data = await fetchPhase5Replay(sessionId(), 25);
+    renderReplayState(replayOutput, data);
+  } catch (error) {
+    renderError(replayOutput, error);
   }
 }
 
@@ -103,7 +118,7 @@ function disconnectClient() {
 }
 
 function renderClient(value) {
-  setJSON(byId("phase5-client-output"), value);
+  renderClientFrames(byId("phase5-client-output"), value);
 }
 
 function readyState(socket) {

@@ -139,10 +139,10 @@ A `HydrationStore` is the persistence seam. In later phases it matters for recon
 
 ## 5. The import-cycle lesson
 
-One of the most useful lessons of Phase 0 came from an actual failure. At one point, the core package tried to default directly to the in-memory store implementation. That seems harmless. It even sounds convenient. But it produces a dependency graph like this:
+One of the most useful lessons of Phase 0 came from an actual failure. At one point, the core package tried to default directly to a concrete store implementation. That seems harmless. It even sounds convenient. But it produces a dependency graph like this:
 
 ```
-sessionstream → hydration/memory → sessionstream
+sessionstream → hydration/sqlite → sessionstream
 ```
 
 That is an import cycle.
@@ -154,16 +154,21 @@ The fix was not some clever Go trick. The fix was to return to the architecture 
 The result:
 
 - `sessionstream` defines the `HydrationStore` interface,
-- `sessionstream/hydration/memory` implements it,
+- `sessionstream/hydration/sqlite` implements it,
 - callers inject implementations with options,
-- the core keeps a root-local noop fallback rather than depending on the memory implementation.
+- the core keeps a root-local noop fallback rather than depending on the SQLite implementation.
 
 ### The right dependency shape
 
 ```go
-store := memory.New()
+reg := sessionstream.NewSchemaRegistry()
+store, err := sqlite.NewInMemory(reg)
+if err != nil {
+    return err
+}
 
 hub, err := sessionstream.NewHub(
+    sessionstream.WithSchemaRegistry(reg),
     sessionstream.WithHydrationStore(store),
 )
 ```
@@ -172,7 +177,7 @@ and **not**:
 
 ```go
 func NewHub(...) {
-    store := memory.New() // wrong: core depending on concrete implementation
+    store, _ := sqlite.NewInMemory(reg) // wrong: core depending on concrete implementation
 }
 ```
 

@@ -61,7 +61,22 @@ func WithUpgrader(u websocket.Upgrader) Option {
 	}
 }
 
-// Server is the Phase 3 websocket transport. It is both an HTTP handler and an sessionstream.UIFanout.
+// Server is a websocket snapshot/fanout adapter. It is both an HTTP handler
+// and a sessionstream.UIFanout: clients may subscribe/unsubscribe to sessions,
+// receive snapshots, and receive live UI events. Command ingress is deliberately
+// out of scope for this adapter.
+//
+// Subscribe always sends a current snapshot followed by future live UI fanout.
+// sinceOrdinal is accepted, stored, echoed, and surfaced to hooks for teaching
+// and diagnostics, but it is advisory for now: this reference adapter does not
+// replay missed UI events from the event store. Replayed event history belongs
+// behind an explicit replay API rather than being hidden inside websocket
+// subscribe semantics.
+//
+// Production callers should wrap this handler with their own authentication,
+// authorization, origin policy, and rate limiting. The default upgrader is
+// intentionally permissive for local labs and examples; use WithUpgrader to
+// install a stricter CheckOrigin policy.
 type Server struct {
 	snapshots SnapshotProvider
 	upgrader  websocket.Upgrader

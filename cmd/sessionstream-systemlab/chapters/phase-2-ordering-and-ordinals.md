@@ -293,7 +293,12 @@ Note: the burst order and displayed order may not match perfectly. The framework
 
 ### Systemlab files
 
-- `cmd/sessionstream-systemlab/phase2_lab.go` — Phase 2 lab setup
+- `cmd/sessionstream-systemlab/phase2_lab.go` — Phase 2 constants and DTOs
+- `cmd/sessionstream-systemlab/phase2_runtime.go` — Phase 2 hub/store/bus setup
+- `cmd/sessionstream-systemlab/phase2_actions.go` — Phase 2 scenario actions and response assembly
+- `cmd/sessionstream-systemlab/phase2_projections.go` — Phase 2 command handler, projections, and bus hooks
+- `cmd/sessionstream-systemlab/phase2_checks.go` — Phase 2 ordering checks
+- `cmd/sessionstream-systemlab/phase2_render.go` — Phase 2 transcript rendering
 - `cmd/sessionstream-systemlab/static/partials/phase2.html` — page layout
 - `cmd/sessionstream-systemlab/static/js/pages/phase2.js` — page behavior
 

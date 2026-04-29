@@ -7,7 +7,7 @@ import (
 	"time"
 
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
-	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
+	storesqlite "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -28,7 +28,7 @@ func TestServerSubscribeEmptySnapshotThenLive(t *testing.T) {
 	defer httpServer.Close()
 
 	conn := dialWS(t, httpServer.URL)
-	defer conn.Close()
+	defer func() { require.NoError(t, conn.Close()) }()
 
 	hello := readFrame(t, conn)
 	require.Equal(t, frameTypeHello, hello["type"])
@@ -78,7 +78,7 @@ func TestServerReconnectGetsSnapshotThenNextLive(t *testing.T) {
 	require.NoError(t, hub.Submit(context.Background(), sessionstream.SessionId("s-2"), testCommandName, payload2))
 
 	reconnected := dialWS(t, httpServer.URL)
-	defer reconnected.Close()
+	defer func() { require.NoError(t, reconnected.Close()) }()
 	_ = readFrame(t, reconnected) // hello
 	require.NoError(t, reconnected.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-2", "sinceOrdinal": "1"}))
 	snapshot2 := readFrame(t, reconnected)
@@ -101,7 +101,7 @@ func TestServerConnectionsTracksSubscriptions(t *testing.T) {
 	defer httpServer.Close()
 
 	conn := dialWS(t, httpServer.URL)
-	defer conn.Close()
+	defer func() { require.NoError(t, conn.Close()) }()
 	_ = readFrame(t, conn) // hello
 	require.NoError(t, conn.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-3"}))
 	_ = readFrame(t, conn) // snapshot
@@ -112,6 +112,29 @@ func TestServerConnectionsTracksSubscriptions(t *testing.T) {
 	require.Equal(t, []string{"s-3"}, infos[0].Subscriptions)
 }
 
+func TestServerRejectsCommandFramesAsUnsupported(t *testing.T) {
+	_, server := newTestHubAndServer(t)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer func() { require.NoError(t, conn.Close()) }()
+	_ = readFrame(t, conn) // hello
+
+	require.NoError(t, conn.WriteJSON(map[string]any{
+		"type":      "command",
+		"sessionId": "s-command",
+		"name":      testCommandName,
+		"payload":   map[string]any{"text": "should not enter through websocket"},
+	}))
+
+	frame := readFrame(t, conn)
+	require.Equal(t, frameTypeError, frame["type"])
+	require.Contains(t, frame["error"], "unknown frame type")
+
+	require.Empty(t, server.Connections()[0].Subscriptions)
+}
+
 func newTestHubAndServer(t *testing.T) (*sessionstream.Hub, *Server) {
 	t.Helper()
 	reg := sessionstream.NewSchemaRegistry()
@@ -120,7 +143,9 @@ func newTestHubAndServer(t *testing.T) (*sessionstream.Hub, *Server) {
 	require.NoError(t, reg.RegisterUIEvent(testUIEventName, &structpb.Struct{}))
 	require.NoError(t, reg.RegisterTimelineEntity(testEntityKind, &structpb.Struct{}))
 
-	store := storememory.New()
+	store, err := storesqlite.NewInMemory(reg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
 	server, err := NewServer(snapshotAdapter{store: store})
 	require.NoError(t, err)
 
@@ -147,7 +172,7 @@ func registerTestFlow(t *testing.T, hub *sessionstream.Hub) {
 	})))
 }
 
-type snapshotAdapter struct{ store *storememory.Store }
+type snapshotAdapter struct{ store *storesqlite.Store }
 
 func (a snapshotAdapter) Snapshot(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
 	return a.store.Snapshot(ctx, sid, 0)

@@ -40,6 +40,7 @@ func (s *systemlabServer) routes() http.Handler {
 	mux.HandleFunc("/api/phase4/ws", s.handlePhase4WS)
 	mux.HandleFunc("/api/phase5/run", s.handlePhase5Run)
 	mux.HandleFunc("/api/phase5/state", s.handlePhase5State)
+	mux.HandleFunc("/api/phase5/replay", s.handlePhase5ReplayInspect)
 	mux.HandleFunc("/api/phase5/ws", s.handlePhase5WS)
 	chaptersSub, _ := fs.Sub(appFS, "chapters")
 	mux.Handle("/chapters/", http.StripPrefix("/chapters/", http.FileServer(http.FS(chaptersSub))))

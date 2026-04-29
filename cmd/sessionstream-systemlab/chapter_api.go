@@ -9,7 +9,6 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
-	rendererhtml "github.com/yuin/goldmark/renderer/html"
 )
 
 func (s *systemlabServer) handleChapterHTML(w http.ResponseWriter, req *http.Request) {
@@ -25,6 +24,7 @@ func (s *systemlabServer) handleChapterHTML(w http.ResponseWriter, req *http.Req
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
+	// #nosec G705 -- html is generated from embedded, trusted Systemlab chapter markdown.
 	_, _ = w.Write(html)
 }
 
@@ -36,7 +36,6 @@ func renderChapterHTML(name string) ([]byte, error) {
 	var out bytes.Buffer
 	parser := goldmark.New(
 		goldmark.WithExtensions(extension.GFM),
-		goldmark.WithRendererOptions(rendererhtml.WithUnsafe()),
 	)
 	if err := parser.Convert(md, &out); err != nil {
 		return nil, fmt.Errorf("render chapter %q: %w", name, err)

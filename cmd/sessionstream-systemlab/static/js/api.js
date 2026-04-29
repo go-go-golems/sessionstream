@@ -119,6 +119,14 @@ export async function resetPhase5(mode) {
   return parseJSON(resp, "reset phase 5 lab");
 }
 
+export async function fetchPhase5Replay(sessionId, limit = 25) {
+  const params = new URLSearchParams();
+  if (sessionId) params.set("sessionId", sessionId);
+  if (limit !== undefined && limit !== null) params.set("limit", String(limit));
+  const resp = await fetch(`/api/phase5/replay?${params.toString()}`);
+  return parseJSON(resp, "load phase 5 replay state");
+}
+
 async function parseJSON(resp, action) {
   const data = await resp.json();
   if (!resp.ok) {

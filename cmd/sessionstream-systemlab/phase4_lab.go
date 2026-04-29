@@ -8,7 +8,7 @@ import (
 
 	chatdemo "github.com/go-go-golems/sessionstream/examples/chatdemo"
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
-	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
+	storesqlite "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite"
 	wstransport "github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws"
 )
 
@@ -31,7 +31,7 @@ type phase4RunResponse struct {
 
 type phase4State struct {
 	hub     *sessionstream.Hub
-	store   *storememory.Store
+	store   *storesqlite.Store
 	ws      *wstransport.Server
 	engine  *chatdemo.Engine
 	service *chatdemo.Service
@@ -41,33 +41,19 @@ type phase4State struct {
 
 func (e *labEnvironment) newPhase4State() (*phase4State, error) {
 	state := &phase4State{}
-	store := storememory.New()
 	reg := sessionstream.NewSchemaRegistry()
 	if err := chatdemo.RegisterSchemas(reg); err != nil {
 		return nil, err
 	}
-	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithHooks(wstransport.Hooks{
-		OnConnect: func(cid sessionstream.ConnectionId) {
-			e.appendPhase4Trace("transport", "phase 4 websocket connected", map[string]any{"connectionId": string(cid)})
-		},
-		OnDisconnect: func(cid sessionstream.ConnectionId) {
-			e.appendPhase4Trace("transport", "phase 4 websocket disconnected", map[string]any{"connectionId": string(cid)})
-		},
-		OnSubscribe: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, since uint64) {
-			e.appendPhase4Trace("transport", "phase 4 subscribed", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "sinceOrdinal": fmt.Sprintf("%d", since)})
-		},
-		OnSnapshotSent: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, snap sessionstream.Snapshot) {
-			e.appendPhase4Trace("transport", "phase 4 snapshot sent", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "ordinal": fmt.Sprintf("%d", snap.Ordinal), "entityCount": len(snap.Entities)})
-		},
-		OnUIEventSent: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, ord uint64, event sessionstream.UIEvent) {
-			details := protoStructMap(event.Payload)
-			details["connectionId"] = string(cid)
-			details["sessionId"] = string(sid)
-			details["ordinal"] = fmt.Sprintf("%d", ord)
-			details["uiEvent"] = event.Name
-			e.appendPhase4Trace("transport", "phase 4 ui event sent", details)
-		},
-	}))
+	store, err := storesqlite.NewInMemory(reg)
+	if err != nil {
+		return nil, err
+	}
+	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithHooks(newWebsocketTraceHooks(websocketTraceOptions{
+		Phase:            4,
+		AppendTrace:      e.appendPhase4Trace,
+		IncludeUIPayload: true,
+	})))
 	if err != nil {
 		return nil, err
 	}
@@ -210,8 +196,7 @@ func (e *labEnvironment) appendPhase4Trace(kind, message string, details map[str
 	if e.phase4 == nil {
 		return
 	}
-	step := len(e.phase4.trace) + 1
-	e.phase4.trace = append(e.phase4.trace, traceEntry{Step: step, Kind: kind, Message: message, Details: cloneMap(details)})
+	appendTraceEntry(&e.phase4.trace, kind, message, details)
 }
 
 func phase4SnapshotBeforeLive(trace []traceEntry) bool {
@@ -286,10 +271,7 @@ func phase4StopCoherent(trace []traceEntry, snapshot map[string]any) bool {
 
 func clonePhase4RunResponse(in phase4RunResponse) phase4RunResponse {
 	out := in
-	out.Trace = make([]traceEntry, 0, len(in.Trace))
-	for _, entry := range in.Trace {
-		out.Trace = append(out.Trace, traceEntry{Step: entry.Step, Kind: entry.Kind, Message: entry.Message, Details: cloneMap(entry.Details)})
-	}
+	out.Trace = cloneTraceEntries(in.Trace)
 	out.Connections = append([]wstransport.ConnectionInfo(nil), in.Connections...)
 	out.Snapshot = cloneMap(in.Snapshot)
 	out.Checks = cloneBoolMap(in.Checks)

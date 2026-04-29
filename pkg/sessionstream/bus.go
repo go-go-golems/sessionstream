@@ -12,14 +12,14 @@ import (
 )
 
 const (
-	// DefaultEventBusTopic is the default Watermill topic used by evtstream.
-	DefaultEventBusTopic = "evtstream.events"
+	// DefaultEventBusTopic is the default Watermill topic used by sessionstream.
+	DefaultEventBusTopic = "sessionstream.events"
 
-	MetadataKeyEventName    = "evtstream_event_name"
-	MetadataKeySessionID    = "evtstream_session_id"
-	MetadataKeyPartitionKey = "evtstream_partition_key"
-	MetadataKeyPublishedOrd = "evtstream_published_ordinal"
-	MetadataKeyStreamID     = "evtstream_stream_id"
+	MetadataKeyEventName    = "sessionstream_event_name"
+	MetadataKeySessionID    = "sessionstream_session_id"
+	MetadataKeyPartitionKey = "sessionstream_partition_key"
+	MetadataKeyPublishedOrd = "sessionstream_published_ordinal"
+	MetadataKeyStreamID     = "sessionstream_stream_id"
 )
 
 // PartitionKeyForSession returns the partition key that backends should use to preserve
@@ -36,7 +36,7 @@ type busConfig struct {
 	observer       BusObserver
 }
 
-// BusOption configures evtstream's Watermill integration.
+// BusOption configures sessionstream's Watermill integration.
 type BusOption func(*busConfig) error
 
 // BusMessageMutator can attach backend-specific metadata before publish.

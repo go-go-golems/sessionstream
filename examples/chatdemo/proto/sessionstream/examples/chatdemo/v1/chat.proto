@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package sessionstream.examples.chatdemo.v1;
+
+option go_package = "github.com/go-go-golems/sessionstream/examples/chatdemo/gen/sessionstream/examples/chatdemo/v1;chatdemov1";
+
+message StartInferenceCommand {
+  string prompt = 1;
+}
+
+message StopInferenceCommand {}
+
+message UserMessageAcceptedEvent {
+  string message_id = 1;
+  string role = 2;
+  string content = 3;
+  bool streaming = 4;
+}
+
+message InferenceStartedEvent {
+  string message_id = 1;
+  string prompt = 2;
+  string role = 3;
+  string content = 4;
+  string status = 5;
+  bool streaming = 6;
+}
+
+message TokensDeltaEvent {
+  string message_id = 1;
+  string role = 2;
+  string chunk = 3;
+  string text = 4;
+  string content = 5;
+  string status = 6;
+  bool streaming = 7;
+}
+
+message InferenceFinishedEvent {
+  string message_id = 1;
+  string role = 2;
+  string text = 3;
+  string content = 4;
+  string status = 5;
+  bool streaming = 6;
+}
+
+message InferenceStoppedEvent {
+  string message_id = 1;
+  string role = 2;
+  string text = 3;
+  string content = 4;
+  string status = 5;
+  bool streaming = 6;
+}
+
+message ChatMessageUpdate {
+  string message_id = 1;
+  string role = 2;
+  string prompt = 3;
+  string chunk = 4;
+  string text = 5;
+  string content = 6;
+  string status = 7;
+  bool streaming = 8;
+  string ordinal = 9;
+}
+
+message ChatMessageEntity {
+  string message_id = 1;
+  string role = 2;
+  string prompt = 3;
+  string text = 4;
+  string content = 5;
+  string status = 6;
+  bool streaming = 7;
+}

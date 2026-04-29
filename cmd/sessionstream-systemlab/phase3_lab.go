@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
-	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
+	storesqlite "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite"
 	wstransport "github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -42,7 +41,7 @@ type phase3RunResponse struct {
 
 type phase3State struct {
 	hub         *sessionstream.Hub
-	store       *storememory.Store
+	store       *storesqlite.Store
 	ws          *wstransport.Server
 	trace       []traceEntry
 	sessionMeta map[string]map[string]any
@@ -52,7 +51,6 @@ type phase3State struct {
 
 func (e *labEnvironment) newPhase3State() (*phase3State, error) {
 	state := &phase3State{sessionMeta: map[string]map[string]any{}}
-	store := storememory.New()
 	reg := sessionstream.NewSchemaRegistry()
 	for _, err := range []error{
 		reg.RegisterCommand(phase3CommandName, &structpb.Struct{}),
@@ -69,30 +67,16 @@ func (e *labEnvironment) newPhase3State() (*phase3State, error) {
 		}
 	}
 
-	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithHooks(wstransport.Hooks{
-		OnConnect: func(cid sessionstream.ConnectionId) {
-			e.appendPhase3Trace("transport", "phase 3 websocket connected", map[string]any{"connectionId": string(cid)})
-		},
-		OnDisconnect: func(cid sessionstream.ConnectionId) {
-			e.appendPhase3Trace("transport", "phase 3 websocket disconnected", map[string]any{"connectionId": string(cid)})
-		},
-		OnSubscribe: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, since uint64) {
-			e.appendPhase3Trace("transport", "phase 3 subscribed", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "sinceOrdinal": fmt.Sprintf("%d", since)})
-		},
-		OnUnsubscribe: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId) {
-			e.appendPhase3Trace("transport", "phase 3 unsubscribed", map[string]any{"connectionId": string(cid), "sessionId": string(sid)})
-		},
-		OnSnapshotSent: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, snap sessionstream.Snapshot) {
-			e.appendPhase3Trace("transport", "phase 3 snapshot sent", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "ordinal": fmt.Sprintf("%d", snap.Ordinal), "entityCount": len(snap.Entities)})
-		},
-		OnUIEventSent: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, ord uint64, event sessionstream.UIEvent) {
-			e.appendPhase3Trace("transport", "phase 3 ui event sent", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "ordinal": fmt.Sprintf("%d", ord), "uiEvent": event.Name})
-		},
-		OnClientFrame: func(cid sessionstream.ConnectionId, frame map[string]any) {
-			frame["connectionId"] = string(cid)
-			e.appendPhase3Trace("client-frame", "phase 3 client frame received", frame)
-		},
-	}))
+	store, err := storesqlite.NewInMemory(reg)
+	if err != nil {
+		return nil, err
+	}
+
+	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithHooks(newWebsocketTraceHooks(websocketTraceOptions{
+		Phase:             3,
+		AppendTrace:       e.appendPhase3Trace,
+		RecordClientFrame: true,
+	})))
 	if err != nil {
 		return nil, err
 	}
@@ -316,8 +300,7 @@ func (e *labEnvironment) appendPhase3Trace(kind, message string, details map[str
 }
 
 func (e *labEnvironment) phase3AppendTraceLocked(kind, message string, details map[string]any) {
-	step := len(e.phase3.trace) + 1
-	e.phase3.trace = append(e.phase3.trace, traceEntry{Step: step, Kind: kind, Message: message, Details: cloneMap(details)})
+	appendTraceEntry(&e.phase3.trace, kind, message, details)
 }
 
 func (e *labEnvironment) nextPhase3MessageID() string {
@@ -396,28 +379,9 @@ func phase3ClientConvergence(trace []traceEntry, sessionID string, ordinal uint6
 
 func clonePhase3RunResponse(in phase3RunResponse) phase3RunResponse {
 	out := in
-	out.Trace = make([]traceEntry, 0, len(in.Trace))
-	for _, entry := range in.Trace {
-		out.Trace = append(out.Trace, traceEntry{Step: entry.Step, Kind: entry.Kind, Message: entry.Message, Details: cloneMap(entry.Details)})
-	}
+	out.Trace = cloneTraceEntries(in.Trace)
 	out.Connections = append([]wstransport.ConnectionInfo(nil), in.Connections...)
 	out.Snapshot = cloneMap(in.Snapshot)
 	out.Checks = cloneBoolMap(in.Checks)
 	return out
-}
-
-func renderPhase3Markdown(resp phase3RunResponse) string {
-	body, _ := json.MarshalIndent(resp, "", "  ")
-	return "# Phase 3 Transcript\n\n```json\n" + string(body) + "\n```\n"
-}
-
-func currentEntityMapForKind(view sessionstream.TimelineView, kind, id string) map[string]any {
-	entity, ok := view.Get(kind, id)
-	if !ok || entity.Payload == nil {
-		return map[string]any{}
-	}
-	if pb, ok := entity.Payload.(*structpb.Struct); ok {
-		return cloneMap(pb.AsMap())
-	}
-	return map[string]any{}
 }

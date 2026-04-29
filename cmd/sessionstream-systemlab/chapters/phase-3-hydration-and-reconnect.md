@@ -120,7 +120,12 @@ The transport should not:
 - invent application semantics
 - assign ordinals
 - interpret command meanings
+- accept command frames
 - become the place where business logic lives
+
+The websocket protocol accepts `subscribe`, `unsubscribe`, and `ping` frames. Command ingress is intentionally not implemented in this adapter. Submit commands through the backend API or runtime boundary, then let the normal command handler → event → projection path produce UI fanout.
+
+`subscribe` includes a `sinceOrdinal` field for teaching and diagnostics. Today it is advisory: the server parses, stores, echoes, and traces it, but subscribe still means "send the current snapshot, then future live UI events." It does not replay missed UI events from the event log. If replay is needed, use an explicit replay API so recovery behavior remains visible and testable.
 
 ---
 
@@ -136,9 +141,10 @@ Here is what the framework guarantees when a client subscribes:
 Here is what the framework does not guarantee:
 
 - That multiple connections see identical delivery timing.
+- That websocket subscribe replays every missed UI event.
 - That the client never misses an event (the client must handle that).
 
-The framework establishes the correct sequence. The transport delivers it. The client handles delivery confirmation.
+The framework establishes the correct sequence. The transport delivers it. The client handles delivery confirmation. The reference websocket adapter is intentionally small: production deployments should add authentication, authorization, strict origin checks, rate limiting, and operational backpressure policy around it.
 
 ---
 
@@ -223,7 +229,7 @@ This forces you to think about:
 - `sessionstream/transport/transport.go` — transport interface
 - `sessionstream/fanout.go` — UI event fanout
 - `sessionstream/hydration.go` — hydration store interface
-- `sessionstream/hydration/memory/store.go` — in-memory store
+- `sessionstream/hydration/sqlite/store.go` — SQLite-backed store, using in-memory SQLite for local reconnect labs
 
 ### Systemlab files
 
@@ -234,4 +240,4 @@ This forces you to think about:
 ### Tests
 
 - `sessionstream/transport/transport_test.go`
-- `sessionstream/hydration/memory/store_test.go`
+- `sessionstream/hydration/sqlite/store_test.go`

@@ -10,10 +10,9 @@ type ConnectionId string
 
 // Command is the typed request shape entering the substrate.
 type Command struct {
-	Name         string
-	Payload      proto.Message
-	SessionId    SessionId
-	ConnectionId ConnectionId
+	Name      string
+	Payload   proto.Message
+	SessionId SessionId
 }
 
 // Event is the canonical backend event carried through the substrate.
