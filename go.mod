@@ -1,6 +1,8 @@
 module github.com/go-go-golems/sessionstream
 
-go 1.26.1
+go 1.25
+
+toolchain go1.26.2
 
 require (
 	github.com/ThreeDotsLabs/watermill v1.5.1
