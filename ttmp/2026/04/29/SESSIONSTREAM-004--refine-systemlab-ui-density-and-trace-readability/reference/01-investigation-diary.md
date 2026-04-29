@@ -14,8 +14,15 @@ RelatedFiles:
       Note: |-
         Global styles for rendered trace/session widgets
         Global CSS for rendered trace/session widgets
+        Compact trace/session/check badge CSS
+    - Path: cmd/sessionstream-systemlab/static/index.html
+      Note: Components sandbox navigation and page mount
     - Path: cmd/sessionstream-systemlab/static/js/pages/phase1.js
-      Note: Phase 1 rendered trace/session widgets
+      Note: |-
+        Phase 1 rendered trace/session widgets
+        Compact Phase 1 UI event row markup
+    - Path: cmd/sessionstream-systemlab/static/partials/components.html
+      Note: Static density sandbox samples
     - Path: cmd/sessionstream-systemlab/static/partials/phase1.html
       Note: Phase 1 layout for target panels
 ExternalSources:
@@ -25,6 +32,7 @@ LastUpdated: 2026-04-29T17:05:00-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 # Investigation Diary
@@ -158,4 +166,155 @@ Observed high-priority selectors:
 .ui-event-icon
 .ui-event-name
 .ui-event-detail
+```
+
+## Step 2: Implemented compact Phase 1 trace, UI event, and check badges
+
+I implemented the first pass of the density refinement. The Phase 1 rendered Trace panel now uses compact grid rows for step number, kind badge, and message. The Session + UI Events panel now uses compact timeline rows instead of large empty cards. I also tightened the check badges after the user pointed out that the check bubbles were still too large.
+
+I added a small Components / Density Sandbox page so future CSS/widget iteration can happen against static examples without needing to run a backend scenario every time.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+ok, go at it
+```
+
+**Assistant interpretation:** Start implementing the Systemlab UI density refinement scoped in SESSIONSTREAM-004.
+
+**Inferred user intent:** Improve the actual Phase 1 widgets, not just document the problem.
+
+**Follow-up user prompt (verbatim):**
+
+```text
+you can create test pages if you want to just try out the css, i guess / a component system page
+```
+
+**Assistant interpretation:** Add a static component/sandbox page for CSS/widget iteration if useful.
+
+**Inferred user intent:** Make visual iteration easier and safer by adding a lightweight component showcase.
+
+**Follow-up user prompt (verbatim):**
+
+```text
+the checks bubbles are too large too
+```
+
+**Assistant interpretation:** Tighten the check badge styling as part of the same density pass.
+
+**Inferred user intent:** Apply density improvements consistently to the Checks panel, not only trace/event rows.
+
+### What I did
+
+- Updated `cmd/sessionstream-systemlab/static/app.css`:
+  - made rendered trace/session views content-dense;
+  - changed trace rows to a compact grid layout;
+  - reduced trace row padding and line height;
+  - added explicit styles for `ui-projection` and `timeline-projection` badges;
+  - changed UI event cards to compact timeline rows;
+  - made UI event details inline with truncation for long text;
+  - reduced check badge padding, font size, margins, and height.
+- Updated `cmd/sessionstream-systemlab/static/js/pages/phase1.js`:
+  - changed rendered UI event markup from nested card blocks to inline row bodies.
+- Added `cmd/sessionstream-systemlab/static/partials/components.html`:
+  - static compact trace sample;
+  - static compact session/UI events sample;
+  - JSON fallback sample;
+  - compact checks sample.
+- Updated `cmd/sessionstream-systemlab/static/index.html`:
+  - added `Components / Density Sandbox` navigation;
+  - added `page-components` partial mount.
+- Ran Systemlab locally on `:18091` and interacted with `/#phase1`:
+  - submitted the default prompt;
+  - checked rendered trace/session row counts and panel heights;
+  - verified check badges computed smaller after cache-busting/restarting the local server.
+- Captured screenshots:
+  - `sources/phase1-density-after.png`;
+  - `sources/components-density-sandbox.png`.
+- Ran `make lint` and `make check`.
+
+### Why
+
+The original rendered widgets made short rows look like sparse cards. Systemlab is meant to teach the causal chain, so users should be able to scan command/handler/projection/timeline events and UI events without scrolling through empty vertical space.
+
+### What worked
+
+- The compact trace grid preserves the same content while using much less vertical and horizontal waste.
+- The compact UI event rows make started/appended/finished events visible as a short timeline.
+- Check badges are now smaller: in the browser measurement they dropped from approximately 36px tall to approximately 22px tall.
+- JSON views continue to use the normal `pre` styling.
+- `make lint` and `make check` passed.
+
+### What didn't work
+
+The browser initially appeared to keep old CSS for the badge styles. Restarting the local Systemlab server and loading with a query cache-buster showed the updated CSS correctly.
+
+The Playwright browser session died while trying to recapture the component page after the badge tweak. I retained the component sandbox screenshot that had been captured before the final badge shrink and captured a fresh Phase 1 after screenshot after the badge shrink.
+
+### What I learned
+
+The Systemlab static assets are embedded/served in a way that can make CSS cache/restart behavior matter during visual iteration. For reliable screenshots, restart the local server and use a URL cache-buster such as `/?v=2#phase1`.
+
+### What was tricky to build
+
+The main tradeoff was compactness vs readability. I kept icons and kind badges because they are useful scanning anchors, but changed layout from large card blocks to rows. For UI event details, I used inline text with ellipsis so long values do not reintroduce oversized rows.
+
+### What warrants a second pair of eyes
+
+- Whether inline ellipsis is acceptable for long UI event details or whether details should wrap after a threshold.
+- Whether the Components / Density Sandbox should remain visible in the main nav or be hidden behind a dev/debug affordance later.
+- Whether Phase 2–5 should adopt the same rendered widget helpers instead of using JSON-heavy `pre` outputs.
+
+### What should be done in the future
+
+- Complete a broader browser smoke pass through phases 2–5.
+- Consider factoring Phase 1 render helpers into shared frontend component functions if more pages adopt compact rendered views.
+- Optionally add screenshot-based regression checks later.
+
+### Code review instructions
+
+Start with:
+
+- `cmd/sessionstream-systemlab/static/app.css`
+- `cmd/sessionstream-systemlab/static/js/pages/phase1.js`
+- `cmd/sessionstream-systemlab/static/index.html`
+- `cmd/sessionstream-systemlab/static/partials/components.html`
+
+Then compare screenshots:
+
+- `sources/phase1-whitespace-before.png`
+- `sources/phase1-density-after.png`
+- `sources/components-density-sandbox.png`
+
+Validate with:
+
+```bash
+cd sessionstream
+make lint
+make check
+docmgr --root ttmp doctor --ticket SESSIONSTREAM-004 --stale-after 30
+```
+
+Manual validation:
+
+1. Run `go run ./cmd/sessionstream-systemlab --addr :18091`.
+2. Open `http://localhost:18091/?v=2#phase1`.
+3. Submit the default prompt.
+4. Confirm compact Trace rows, compact Session + UI Events rows, and smaller check badges.
+5. Open `http://localhost:18091/?v=2#components` to inspect static widget samples.
+
+### Technical details
+
+Browser-measured after values for Phase 1 after submitting the default prompt:
+
+```json
+{
+  "traceRows": 10,
+  "eventRows": 4,
+  "traceHeight": 404,
+  "sessionHeight": 242,
+  "badgeHeight": 22
+}
 ```

@@ -148,9 +148,9 @@ function renderSessionRendered(data) {
     html += `
       <div class="ui-event-item">
         <span class="ui-event-icon ${iconClass}">${icon}</span>
-        <div>
-          <div class="ui-event-name">${formatEventName(evt.name)}</div>
-          <div class="ui-event-detail">${formatEventDetail(evt)}</div>
+        <div class="ui-event-body">
+          <span class="ui-event-name">${formatEventName(evt.name)}</span>
+          <span class="ui-event-detail">${formatEventDetail(evt)}</span>
         </div>
       </div>
     `;

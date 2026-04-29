@@ -1,0 +1,98 @@
+<div class="panel">
+  <h2>Systemlab Components — Density Sandbox</h2>
+  <p>Static samples for refining rendered widgets without running a backend scenario. Use this page to tune trace rows, UI event rows, badges, and snapshot cards before applying the same density to phase pages.</p>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Compact Trace</h3>
+    </div>
+    <pre class="trace-rendered">
+      <div class="trace-step">
+        <span class="trace-step-num">1</span>
+        <span class="trace-step-kind command">command</span>
+        <span class="trace-step-message">submit command</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-step-num">2</span>
+        <span class="trace-step-kind handler">handler</span>
+        <span class="trace-step-message">handler invoked</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-step-num">3</span>
+        <span class="trace-step-kind ui-projection">ui-projection</span>
+        <span class="trace-step-message">ui projection emitted event</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-step-num">4</span>
+        <span class="trace-step-kind timeline-projection">timeline-projection</span>
+        <span class="trace-step-message">timeline projection upserted entity</span>
+      </div>
+      <div class="trace-step">
+        <span class="trace-step-num">5</span>
+        <span class="trace-step-kind store">store</span>
+        <span class="trace-step-message">snapshot cursor advanced with a deliberately long message to verify wrapping stays compact and readable</span>
+      </div>
+    </pre>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Compact Session + UI Events</h3>
+    </div>
+    <pre class="session-rendered">
+      <div class="session-header">
+        <div class="session-header-label">Session</div>
+        <div class="session-header-value">lab-session-1</div>
+      </div>
+      <div class="ui-events-list">
+        <div class="ui-event-item">
+          <span class="ui-event-icon started">●</span>
+          <div class="ui-event-body">
+            <span class="ui-event-name">Lab Message Started</span>
+            <span class="ui-event-detail">id: msg-1</span>
+          </div>
+        </div>
+        <div class="ui-event-item">
+          <span class="ui-event-icon appended">→</span>
+          <div class="ui-event-body">
+            <span class="ui-event-name">Lab Message Appended</span>
+            <span class="ui-event-detail">"hello"</span>
+          </div>
+        </div>
+        <div class="ui-event-item">
+          <span class="ui-event-icon appended">→</span>
+          <div class="ui-event-body">
+            <span class="ui-event-name">Lab Message Appended</span>
+            <span class="ui-event-detail">" from systemlab"</span>
+          </div>
+        </div>
+        <div class="ui-event-item">
+          <span class="ui-event-icon finished">✓</span>
+          <div class="ui-event-body">
+            <span class="ui-event-name">Lab Message Finished</span>
+            <span class="ui-event-detail">"hello from systemlab"</span>
+          </div>
+        </div>
+      </div>
+    </pre>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h3>JSON Fallback</h3>
+    <pre>{
+  "trace": "JSON views should remain padded and readable",
+  "density": "compact rendered views only"
+}</pre>
+  </div>
+  <div class="panel">
+    <h3>Checks</h3>
+    <span class="badge">✓ cursorAdvanced</span>
+    <span class="badge">✓ sessionExists</span>
+    <span class="badge">✓ timelineProduced</span>
+    <span class="badge">✓ uiEventsProduced</span>
+  </div>
+</div>
