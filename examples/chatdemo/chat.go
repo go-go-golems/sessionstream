@@ -194,12 +194,17 @@ func (e *Engine) handleStartInference(ctx context.Context, cmd sessionstream.Com
 	}); err != nil {
 		return err
 	}
-	runCtx, cancel := context.WithCancel(context.Background())
+	// The demo stream should continue after the command handler returns; cancellation is
+	// controlled by StopInferenceCommand through the activeRun cancel function. Keep
+	// context values from the command context, but detach from its cancellation.
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	run := &activeRun{messageID: messageID, cancel: cancel, done: make(chan struct{})}
 	if previous := e.swapRun(cmd.SessionId, run); previous != nil {
 		previous.cancel()
 		<-previous.done
 	}
+	// #nosec G118 -- the demo inference goroutine is intentionally detached from
+	// the command handler lifetime; StopInferenceCommand owns cancellation.
 	go e.runDemoInference(runCtx, cmd.SessionId, messageID, prompt, pub, run.done)
 	return nil
 }
