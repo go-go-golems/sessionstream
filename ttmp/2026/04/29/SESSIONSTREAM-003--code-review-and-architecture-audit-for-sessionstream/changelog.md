@@ -186,3 +186,14 @@ Step 15: Extracted shared Systemlab snapshot encoding and websocket hook helpers
 - /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/snapshot_helpers.go — Shared snapshot/protobuf payload encoding
 - /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/ws_hooks.go — Shared websocket trace hook builder
 
+
+## 2026-04-29
+
+Step 16: Documented websocket fanout-only boundaries and tested unsupported command frames.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/chapters/phase-3-hydration-and-reconnect.md — Systemlab websocket boundary prose
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/sessionstream/transport/ws/server.go — Fanout-only/advisory sinceOrdinal documentation
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/pkg/sessionstream/transport/ws/server_test.go — Unsupported command-frame test
+

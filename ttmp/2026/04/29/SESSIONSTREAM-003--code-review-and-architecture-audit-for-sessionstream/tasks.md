@@ -27,7 +27,7 @@
 - [x] Remove or quarantine unused `pkg/sessionstream/transport/transport.go` command-ingress abstraction.
 - [x] Document websocket server as snapshot/fanout-only.
 - [x] Remove `Command.ConnectionId` while websocket command ingress is not implemented.
-- [ ] Update systemlab chapter prose if it still implies command ingress through websocket.
+- [x] Update systemlab chapter prose to state websocket command ingress is unsupported.
 - [ ] Decide whether `ConnectionId` should remain in core package or move under websocket/fanout transport.
 
 ## Phase 2 — Replay store and ordinal correctness
@@ -62,10 +62,10 @@
 ## Phase 4 — Websocket fanout-only semantics
 
 - [x] Make websocket comments explicit: subscribe, snapshot, live UI fanout only.
-- [ ] Rename `sinceOrdinal` or document it as advisory until replay is implemented.
-- [ ] Add a test that command frames are rejected/ignored as unsupported.
-- [ ] Add production-readiness options or document reference-adapter limits.
-- [ ] Decide whether replayed UI events should ever be part of websocket subscribe.
+- [x] Document `sinceOrdinal` as advisory until websocket replay is implemented.
+- [x] Add a test that command frames are rejected as unsupported.
+- [x] Document reference-adapter production limits.
+- [x] Decide that replayed UI events are not part of websocket subscribe for now.
 
 ## Phase 5 — Schema hardening and protobuf example
 

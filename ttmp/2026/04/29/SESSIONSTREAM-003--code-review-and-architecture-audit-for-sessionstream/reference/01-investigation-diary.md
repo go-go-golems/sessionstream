@@ -14,6 +14,8 @@ DocType: reference
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: cmd/sessionstream-systemlab/chapters/phase-3-hydration-and-reconnect.md
+      Note: Teaches fanout-only subscribe semantics
     - Path: cmd/sessionstream-systemlab/phase3_lab.go
       Note: Phase 3 now uses shared websocket trace hooks (commit aaac81d34cadad21820f68b7d335db701c0fc8b8)
     - Path: cmd/sessionstream-systemlab/phase4_lab.go
@@ -24,6 +26,10 @@ RelatedFiles:
       Note: Shared snapshot and protobuf payload encoding helpers (commit aaac81d34cadad21820f68b7d335db701c0fc8b8)
     - Path: cmd/sessionstream-systemlab/ws_hooks.go
       Note: Shared websocket trace hook builder (commit aaac81d34cadad21820f68b7d335db701c0fc8b8)
+    - Path: pkg/sessionstream/transport/ws/server.go
+      Note: Documents fanout-only websocket semantics and advisory sinceOrdinal
+    - Path: pkg/sessionstream/transport/ws/server_test.go
+      Note: Tests unsupported websocket command frames
     - Path: ttmp/2026/04/29/SESSIONSTREAM-003--code-review-and-architecture-audit-for-sessionstream/changelog.md
       Note: Ticket changelog updated during review
     - Path: ttmp/2026/04/29/SESSIONSTREAM-003--code-review-and-architecture-audit-for-sessionstream/design-doc/01-sessionstream-code-review-and-architecture-audit.md
@@ -36,6 +42,7 @@ LastUpdated: 2026-04-29T14:44:36-04:00
 WhatFor: Use this to understand how the review was performed and what evidence was collected.
 WhenToUse: Read before continuing the code review, acting on recommendations, or validating the reMarkable/docmgr delivery.
 ---
+
 
 
 
@@ -1538,3 +1545,103 @@ The snapshot helper encodes snapshots as:
   ]
 }
 ```
+
+## Step 16: Documented websocket fanout-only boundaries and tested unsupported command frames
+
+I continued the cleanup by closing out the websocket fanout-only semantics tasks. The adapter now documents that `sinceOrdinal` is advisory, that subscribe sends a current snapshot plus future live UI events, and that event replay is deliberately not hidden inside websocket subscribe.
+
+I also added a transport test proving websocket command frames are rejected as unsupported. This keeps the command ingress boundary explicit while preserving the reference adapter's role as a snapshot/fanout transport.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+continue
+```
+
+**Assistant interpretation:** Continue working through the remaining SESSIONSTREAM-003 tasks after the Systemlab helper extraction and commits.
+
+**Inferred user intent:** Keep reducing ambiguity in the remaining API/transport cleanup items and maintain the diary/task workflow.
+
+### What I did
+
+- Checked the open task list and selected the websocket fanout-only cleanup items.
+- Updated `pkg/sessionstream/transport/ws/server.go` comments to document:
+  - websocket command ingress is out of scope;
+  - subscribe sends a current snapshot followed by future live UI events;
+  - `sinceOrdinal` is parsed, stored, echoed, and traced, but does not trigger UI replay;
+  - replay should stay behind explicit replay APIs for now;
+  - the default adapter is reference/local-lab oriented and needs auth/origin/rate-limit wrappers in production.
+- Added `TestServerRejectsCommandFramesAsUnsupported` in `pkg/sessionstream/transport/ws/server_test.go`.
+- Updated `cmd/sessionstream-systemlab/chapters/phase-3-hydration-and-reconnect.md` to teach the same boundary:
+  - accepted frames are subscribe/unsubscribe/ping;
+  - command frames are unsupported;
+  - `sinceOrdinal` is advisory;
+  - websocket subscribe does not replay missed UI events.
+- Marked the corresponding Phase 1 and Phase 4 tasks complete.
+
+### Why
+
+The remediation plan removed command ingress from the websocket adapter, but the remaining docs/tests still needed to make that boundary explicit. Without a test, a future change could accidentally turn the reference fanout transport into an implicit command transport.
+
+### What worked
+
+- The existing unknown-frame behavior already rejected `type: "command"`; the new test codifies that behavior.
+- The chapter prose was the right place to teach the `sinceOrdinal` distinction because Phase 3 is where reconnect and subscriptions are introduced.
+
+### What didn't work
+
+No test failure occurred. The only design choice was whether to rename `sinceOrdinal` or document it. I documented it instead because the field remains useful as a client hint/diagnostic hook even though replay is not implemented in subscribe.
+
+### What I learned
+
+The cleanest boundary is: websocket subscribe provides convergence through snapshots plus future fanout; event-log replay is explicit and inspectable elsewhere. That preserves the teaching distinction between hydration, fanout, and replay.
+
+### What was tricky to build
+
+The subtle part is avoiding a half-replay contract. If `sinceOrdinal` looked authoritative but only affected hooks, users might assume missed UI events are replayed. The comments and chapter now explicitly say it is advisory until a real replay protocol exists.
+
+### What warrants a second pair of eyes
+
+- Whether `sinceOrdinal` should be renamed in a future breaking cleanup despite the new documentation.
+- Whether unknown frame errors should close the websocket connection instead of leaving it open after an error frame.
+- Whether production-readiness guidance belongs in package docs as well as the server type comment.
+
+### What should be done in the future
+
+- If websocket replay is ever implemented, add a new explicit protocol contract and tests for replay boundaries.
+- Consider adding package-level transport documentation with a frame table.
+
+### Code review instructions
+
+Start with:
+
+- `pkg/sessionstream/transport/ws/server.go`
+- `pkg/sessionstream/transport/ws/server_test.go`
+- `cmd/sessionstream-systemlab/chapters/phase-3-hydration-and-reconnect.md`
+- `ttmp/2026/04/29/SESSIONSTREAM-003--code-review-and-architecture-audit-for-sessionstream/tasks.md`
+
+Validate with:
+
+```bash
+cd sessionstream
+go test ./pkg/sessionstream/transport/ws ./cmd/sessionstream-systemlab
+make check
+docmgr --root ttmp doctor --ticket SESSIONSTREAM-003 --stale-after 30
+```
+
+### Technical details
+
+The new command-frame test sends:
+
+```json
+{
+  "type": "command",
+  "sessionId": "s-command",
+  "name": "TestStart",
+  "payload": { "text": "should not enter through websocket" }
+}
+```
+
+The expected response is an error frame containing `unknown frame type` and no subscription side effect.

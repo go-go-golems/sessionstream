@@ -112,6 +112,29 @@ func TestServerConnectionsTracksSubscriptions(t *testing.T) {
 	require.Equal(t, []string{"s-3"}, infos[0].Subscriptions)
 }
 
+func TestServerRejectsCommandFramesAsUnsupported(t *testing.T) {
+	_, server := newTestHubAndServer(t)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer conn.Close()
+	_ = readFrame(t, conn) // hello
+
+	require.NoError(t, conn.WriteJSON(map[string]any{
+		"type":      "command",
+		"sessionId": "s-command",
+		"name":      testCommandName,
+		"payload":   map[string]any{"text": "should not enter through websocket"},
+	}))
+
+	frame := readFrame(t, conn)
+	require.Equal(t, frameTypeError, frame["type"])
+	require.Contains(t, frame["error"], "unknown frame type")
+
+	require.Empty(t, server.Connections()[0].Subscriptions)
+}
+
 func newTestHubAndServer(t *testing.T) (*sessionstream.Hub, *Server) {
 	t.Helper()
 	reg := sessionstream.NewSchemaRegistry()
