@@ -23,6 +23,12 @@ topics:
       description: Code cleanup, refactoring, maintainability, and simplification work.
     - slug: code-review
       description: Evidence-backed source code review, architecture audit, and quality assessment.
+    - slug: frontend
+      description: Browser UI, CSS, and client-side interaction work.
+    - slug: ux
+      description: User experience, readability, density, and workflow refinement.
+    - slug: css
+      description: Styling, layout, and visual presentation work.
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
