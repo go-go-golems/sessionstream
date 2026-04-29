@@ -83,11 +83,11 @@
 - [x] Extract initial shared trace append/clone helpers.
 - [x] Extract shared snapshot encoding helpers.
 - [x] Extract shared websocket hook builder.
-- [ ] Split Phase 2 into runtime/actions/projections/checks/render files.
-- [ ] Split Phase 5 into runtime/actions/projections/checks/render files.
+- [x] Split Phase 2 into runtime/actions/projections/checks/render files.
+- [x] Split Phase 5 into runtime/actions/projections/checks/render files.
 - [x] Add Phase 5 chapter prose for replay inspection, event cursor, and timeline cursor.
-- [ ] Update chapter file references after future file moves.
-- [ ] Keep educational phase logic readable and avoid over-abstracting lesson-specific behavior.
+- [x] Update chapter file references after file moves.
+- [x] Keep educational phase logic readable and avoid over-abstracting lesson-specific behavior.
 
 ## Phase 7 — Validation and delivery
 

@@ -16,12 +16,34 @@ Owners: []
 RelatedFiles:
     - Path: cmd/sessionstream-systemlab/chapters/phase-3-hydration-and-reconnect.md
       Note: Teaches fanout-only subscribe semantics
+    - Path: cmd/sessionstream-systemlab/phase2_actions.go
+      Note: Phase 2 scenario actions split
+    - Path: cmd/sessionstream-systemlab/phase2_checks.go
+      Note: Phase 2 checks split
+    - Path: cmd/sessionstream-systemlab/phase2_lab.go
+      Note: Phase 2 constants and DTOs after file split
+    - Path: cmd/sessionstream-systemlab/phase2_projections.go
+      Note: Phase 2 projections and bus hooks split
+    - Path: cmd/sessionstream-systemlab/phase2_render.go
+      Note: Phase 2 transcript rendering split
+    - Path: cmd/sessionstream-systemlab/phase2_runtime.go
+      Note: Phase 2 runtime setup/lifecycle split
     - Path: cmd/sessionstream-systemlab/phase3_lab.go
       Note: Phase 3 now uses shared websocket trace hooks (commit aaac81d34cadad21820f68b7d335db701c0fc8b8)
     - Path: cmd/sessionstream-systemlab/phase4_lab.go
       Note: Phase 4 now uses shared websocket trace hooks (commit aaac81d34cadad21820f68b7d335db701c0fc8b8)
+    - Path: cmd/sessionstream-systemlab/phase5_actions.go
+      Note: Phase 5 scenario actions split
+    - Path: cmd/sessionstream-systemlab/phase5_checks.go
+      Note: Phase 5 checks split
     - Path: cmd/sessionstream-systemlab/phase5_lab.go
-      Note: Phase 5 now uses shared websocket trace hooks (commit aaac81d34cadad21820f68b7d335db701c0fc8b8)
+      Note: |-
+        Phase 5 now uses shared websocket trace hooks (commit aaac81d34cadad21820f68b7d335db701c0fc8b8)
+        Phase 5 constants and DTOs after file split
+    - Path: cmd/sessionstream-systemlab/phase5_projections.go
+      Note: Phase 5 projections split
+    - Path: cmd/sessionstream-systemlab/phase5_runtime.go
+      Note: Phase 5 runtime setup/lifecycle split
     - Path: cmd/sessionstream-systemlab/snapshot_helpers.go
       Note: Shared snapshot and protobuf payload encoding helpers (commit aaac81d34cadad21820f68b7d335db701c0fc8b8)
     - Path: cmd/sessionstream-systemlab/ws_hooks.go
@@ -42,6 +64,7 @@ LastUpdated: 2026-04-29T14:44:36-04:00
 WhatFor: Use this to understand how the review was performed and what evidence was collected.
 WhenToUse: Read before continuing the code review, acting on recommendations, or validating the reMarkable/docmgr delivery.
 ---
+
 
 
 
@@ -1722,4 +1745,136 @@ Validate ticket docs with:
 ```bash
 cd sessionstream
 docmgr --root ttmp doctor --ticket SESSIONSTREAM-003 --stale-after 30
+```
+
+## Step 18: Split large Phase 2 and Phase 5 Systemlab files
+
+I cleaned up the remaining large Systemlab phase files by splitting Phase 2 and Phase 5 into small, lesson-oriented files. The split is mechanical: it does not change scenario behavior, API responses, projection behavior, or frontend contracts.
+
+This finishes the Phase 6 structural cleanup items while preserving the educational flow. The phase entry files now hold constants and DTOs; runtime setup, actions, projections, checks, cloning, and rendering live in separate files with predictable names.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+cleanup phase 2/5 large files
+```
+
+**Assistant interpretation:** Complete the remaining Systemlab Phase 6 cleanup by splitting the large Phase 2 and Phase 5 Go files into smaller, readable files.
+
+**Inferred user intent:** Reduce file-size hotspots without over-abstracting the Systemlab teaching code.
+
+### What I did
+
+- Checked the working tree and current file sizes:
+  - `phase2_lab.go`: 792 lines before split.
+  - `phase5_lab.go`: 466 lines before split.
+- Split Phase 2 into:
+  - `phase2_lab.go` — constants, request/response DTOs, and state types.
+  - `phase2_runtime.go` — hub/store/bus setup and lifecycle.
+  - `phase2_actions.go` — scenario actions, waits, response assembly, export.
+  - `phase2_projections.go` — command handler, projections, bus hooks, trace append.
+  - `phase2_checks.go` — ordering and isolation checks.
+  - `phase2_clone.go` — clone helpers.
+  - `phase2_render.go` — transcript rendering and small render helpers.
+- Split Phase 5 into:
+  - `phase5_lab.go` — constants, request/response DTOs, and state/runtime types.
+  - `phase5_runtime.go` — persistent/in-memory SQLite runtime setup and shutdown.
+  - `phase5_actions.go` — scenario actions, snapshot/wait helpers, response assembly.
+  - `phase5_projections.go` — command handler, UI/timeline projections, trace append.
+  - `phase5_checks.go` — restart/persistence correctness checks.
+  - `phase5_clone.go` — response clone helper.
+- Ran `goimports` over the new split files.
+- Updated `phase-2-ordering-and-ordinals.md` file references to point at the new Phase 2 split files.
+- Marked Phase 6 split tasks complete.
+- Ran tests.
+
+### Why
+
+Phase 2 and Phase 5 had become file-size hotspots because each mixed setup, action dispatch, projections, checks, clone helpers, and rendering in one file. Splitting by teaching role makes the code easier to review without introducing a new framework or hiding lesson-specific behavior behind abstractions.
+
+### What worked
+
+- The split was mechanical and `goimports` cleaned imports correctly.
+- `go test ./cmd/sessionstream-systemlab` and `go test ./...` passed after the split.
+- The resulting files are all substantially smaller and have clearer responsibility boundaries.
+
+### What didn't work
+
+No test or compile failure occurred. The main risk was accidentally dropping a function during the file move, so I split by function names and validated with package and full tests.
+
+### What I learned
+
+The earlier shared helper extraction made this split easier: trace helpers, snapshot helpers, and websocket hook helpers were already out of the phase files, so the remaining functions grouped naturally into runtime/actions/projections/checks/render files.
+
+### What was tricky to build
+
+The tricky part was keeping the split mechanical rather than redesigning the phases. Phase 2 especially has coupled bus hooks and response-building state, so I kept the state types in `phase2_lab.go` and moved behavior around those types into role-specific files.
+
+Phase 5 has two runtime modes and restart semantics, so I kept all runtime construction/shutdown in one file and the scenario flow in another. That keeps persistence setup separate from the user-facing action sequence.
+
+### What warrants a second pair of eyes
+
+- Whether `phase2_clone.go` should remain separate or merge into `phase2_render.go` later.
+- Whether Phase 5 should gain a render file if exports are added later.
+- Whether any external documentation should point at the new split files beyond the Phase 2 chapter reference update.
+
+### What should be done in the future
+
+- Consider adding short package/file comments if new contributors need a roadmap.
+- If Phase 2 grows again, consider extracting bus hook tests around `phase2Published`/`phase2Consumed`.
+- If Phase 5 grows again, keep replay inspection UI/backend code separate from restart scenario code.
+
+### Code review instructions
+
+Start with the file layout:
+
+```bash
+ls cmd/sessionstream-systemlab/phase2*.go cmd/sessionstream-systemlab/phase5*.go
+wc -l cmd/sessionstream-systemlab/phase2*.go cmd/sessionstream-systemlab/phase5*.go
+```
+
+Then review:
+
+- `cmd/sessionstream-systemlab/phase2_lab.go`
+- `cmd/sessionstream-systemlab/phase2_runtime.go`
+- `cmd/sessionstream-systemlab/phase2_actions.go`
+- `cmd/sessionstream-systemlab/phase2_projections.go`
+- `cmd/sessionstream-systemlab/phase2_checks.go`
+- `cmd/sessionstream-systemlab/phase2_render.go`
+- `cmd/sessionstream-systemlab/phase5_lab.go`
+- `cmd/sessionstream-systemlab/phase5_runtime.go`
+- `cmd/sessionstream-systemlab/phase5_actions.go`
+- `cmd/sessionstream-systemlab/phase5_projections.go`
+- `cmd/sessionstream-systemlab/phase5_checks.go`
+
+Validate with:
+
+```bash
+cd sessionstream
+go test ./cmd/sessionstream-systemlab
+go test ./...
+make check
+docmgr --root ttmp doctor --ticket SESSIONSTREAM-003 --stale-after 30
+```
+
+### Technical details
+
+Post-split line counts:
+
+```text
+phase2_actions.go      ~210 lines
+phase2_runtime.go      ~194 lines
+phase2_projections.go  ~136 lines
+phase2_render.go        ~92 lines
+phase2_clone.go         ~73 lines
+phase2_lab.go           ~66 lines
+phase2_checks.go        ~62 lines
+phase5_actions.go      ~167 lines
+phase5_runtime.go      ~154 lines
+phase5_checks.go        ~57 lines
+phase5_projections.go   ~56 lines
+phase5_lab.go           ~55 lines
+phase5_clone.go         ~15 lines
 ```

@@ -207,3 +207,17 @@ Step 17: Deferred configurable bus decode ack/nack policy to GitHub issue #1.
 - /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/29/SESSIONSTREAM-003--code-review-and-architecture-audit-for-sessionstream/reference/01-investigation-diary.md — Step 17 records issue deferral
 - /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/ttmp/2026/04/29/SESSIONSTREAM-003--code-review-and-architecture-audit-for-sessionstream/tasks.md — Bus decode policy deferred to GitHub issue #1
 
+
+## 2026-04-29
+
+Step 18: Split large Phase 2 and Phase 5 Systemlab files into runtime/actions/projections/checks/render-focused files.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase2_actions.go — Phase 2 actions split
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase2_projections.go — Phase 2 projections split
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase2_runtime.go — Phase 2 runtime split
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase5_actions.go — Phase 5 actions split
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase5_projections.go — Phase 5 projections split
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/phase5_runtime.go — Phase 5 runtime split
+
