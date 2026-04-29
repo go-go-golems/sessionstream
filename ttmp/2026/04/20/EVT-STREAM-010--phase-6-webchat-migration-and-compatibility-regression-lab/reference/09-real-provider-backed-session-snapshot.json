@@ -1,0 +1,33 @@
+{
+  "sessionId": "bd184e03-db5e-40bc-acaa-d5ba8d53b786",
+  "ordinal": "28",
+  "status": "finished",
+  "entities": [
+    {
+      "kind": "ChatMessage",
+      "id": "chat-msg-1",
+      "tombstone": false,
+      "payload": {
+        "content": "Ordinals express a position in a sequence (first, second, third) and are used to denote order rather than quantity.",
+        "messageId": "chat-msg-1",
+        "prompt": "In one short sentence, explain ordinals.",
+        "role": "assistant",
+        "status": "finished",
+        "streaming": false,
+        "text": "Ordinals express a position in a sequence (first, second, third) and are used to denote order rather than quantity."
+      }
+    },
+    {
+      "kind": "ChatMessage",
+      "id": "chat-msg-1-user",
+      "tombstone": false,
+      "payload": {
+        "content": "In one short sentence, explain ordinals.",
+        "messageId": "chat-msg-1-user",
+        "role": "user",
+        "streaming": false,
+        "text": "In one short sentence, explain ordinals."
+      }
+    }
+  ]
+}

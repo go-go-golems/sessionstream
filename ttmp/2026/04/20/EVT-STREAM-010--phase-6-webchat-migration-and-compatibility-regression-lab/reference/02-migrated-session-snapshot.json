@@ -1,0 +1,1 @@
+{"sessionId":"da138fa3-7f5a-497d-be95-04ce86ff6154","ordinal":"7","status":"finished","entities":[{"kind":"ChatMessage","id":"chat-msg-1","tombstone":false,"payload":{"messageId":"chat-msg-1","prompt":"Explain ordinals in plain language","status":"finished","streaming":false,"text":"Answer: Explain ordinals in plain language"}}]}

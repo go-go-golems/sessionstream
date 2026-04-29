@@ -1,0 +1,47 @@
+{
+  "routeFamily": "canonical-evtstream",
+  "createSessionPath": "/api/chat/sessions",
+  "submitPath": "/api/chat/sessions/9ed83944-8801-40b6-8ce4-64fb40e0c25f/messages",
+  "snapshotPath": "/api/chat/sessions/9ed83944-8801-40b6-8ce4-64fb40e0c25f",
+  "webSocketPath": "/api/chat/ws",
+  "sessionId": "9ed83944-8801-40b6-8ce4-64fb40e0c25f",
+  "createStatus": 200,
+  "submitStatus": 200,
+  "helloFrameType": "hello",
+  "snapshotFrameType": "snapshot",
+  "subscribedFrameType": "subscribed",
+  "uiEventNames": [
+    "ChatMessageStarted",
+    "ChatMessageAppended",
+    "ChatMessageAppended",
+    "ChatMessageAppended",
+    "ChatMessageAppended",
+    "ChatMessageAppended",
+    "ChatMessageFinished"
+  ],
+  "finalSnapshot": {
+    "entities": [
+      {
+        "id": "chat-msg-1",
+        "kind": "ChatMessage",
+        "payload": {
+          "messageId": "chat-msg-1",
+          "prompt": "Explain ordinals in plain language",
+          "status": "finished",
+          "streaming": false,
+          "text": "Answer: Explain ordinals in plain language"
+        },
+        "tombstone": false
+      }
+    ],
+    "ordinal": "7",
+    "sessionId": "9ed83944-8801-40b6-8ce4-64fb40e0c25f",
+    "status": "finished"
+  },
+  "expectedBehavior": [
+    "create or resume session explicitly",
+    "subscribe websocket by client frame instead of conv_id query",
+    "receive snapshot then subscribed then ui-event frames",
+    "read final transcript from canonical session snapshot endpoint"
+  ]
+}

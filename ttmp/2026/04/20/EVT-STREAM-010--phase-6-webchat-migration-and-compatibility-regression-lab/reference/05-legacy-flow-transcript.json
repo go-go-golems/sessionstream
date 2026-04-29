@@ -1,0 +1,29 @@
+{
+  "routeFamily": "legacy-webchat",
+  "submitPath": "/chat/default",
+  "webSocketPath": "/ws?conv_id=legacy-conv-1",
+  "snapshotPath": "/api/timeline?conv_id=legacy-conv-1",
+  "conversationId": "legacy-conv-1",
+  "submitStatus": 200,
+  "helloEventType": "ws.hello",
+  "runtimeKey": "default",
+  "assistantEntity": {
+    "createdAtMs": "1776716131010",
+    "id": "349a47ac-8491-4d17-9138-63a6e06dcb67",
+    "kind": "message",
+    "props": {
+      "content": "Answer: Explain ordinals in plain language",
+      "metadata": {},
+      "role": "assistant",
+      "schemaVersion": 1,
+      "streaming": true
+    },
+    "updatedAtMs": "1776716131010"
+  },
+  "expectedBehavior": [
+    "submit prompt via legacy /chat route",
+    "attach websocket by conv_id query string",
+    "hydrate transcript from /api/timeline",
+    "assistant transcript entity eventually contains final content"
+  ]
+}

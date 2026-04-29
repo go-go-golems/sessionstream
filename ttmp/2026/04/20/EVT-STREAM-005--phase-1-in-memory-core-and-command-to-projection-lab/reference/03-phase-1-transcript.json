@@ -1,0 +1,173 @@
+{
+  "sessionId": "lab-session-1",
+  "session": {
+    "id": "lab-session-1",
+    "metadata": {
+      "createdBy": "evtstream-systemlab",
+      "lab": "phase1",
+      "sessionId": "lab-session-1"
+    }
+  },
+  "trace": [
+    {
+      "step": 1,
+      "kind": "command",
+      "message": "submit command",
+      "details": {
+        "commandName": "LabStart",
+        "prompt": "hello from systemlab"
+      }
+    },
+    {
+      "step": 2,
+      "kind": "session",
+      "message": "session created",
+      "details": {
+        "createdBy": "evtstream-systemlab",
+        "lab": "phase1",
+        "sessionId": "lab-session-1"
+      }
+    },
+    {
+      "step": 3,
+      "kind": "handler",
+      "message": "handler invoked",
+      "details": {
+        "hasSession": true,
+        "messageId": "msg-1",
+        "sessionId": "lab-session-1"
+      }
+    },
+    {
+      "step": 4,
+      "kind": "ui-projection",
+      "message": "ui projection emitted event",
+      "details": {
+        "ordinal": 1,
+        "sourceEvent": "LabStarted",
+        "uiEvent": "LabMessageStarted"
+      }
+    },
+    {
+      "step": 5,
+      "kind": "timeline-projection",
+      "message": "timeline projection upserted entity",
+      "details": {
+        "entityId": "msg-1",
+        "ordinal": 1,
+        "sourceEvent": "LabStarted"
+      }
+    },
+    {
+      "step": 6,
+      "kind": "ui-projection",
+      "message": "ui projection emitted event",
+      "details": {
+        "ordinal": 2,
+        "sourceEvent": "LabChunk",
+        "uiEvent": "LabMessageAppended"
+      }
+    },
+    {
+      "step": 7,
+      "kind": "timeline-projection",
+      "message": "timeline projection upserted entity",
+      "details": {
+        "entityId": "msg-1",
+        "ordinal": 2,
+        "sourceEvent": "LabChunk"
+      }
+    },
+    {
+      "step": 8,
+      "kind": "ui-projection",
+      "message": "ui projection emitted event",
+      "details": {
+        "ordinal": 3,
+        "sourceEvent": "LabChunk",
+        "uiEvent": "LabMessageAppended"
+      }
+    },
+    {
+      "step": 9,
+      "kind": "timeline-projection",
+      "message": "timeline projection upserted entity",
+      "details": {
+        "entityId": "msg-1",
+        "ordinal": 3,
+        "sourceEvent": "LabChunk"
+      }
+    },
+    {
+      "step": 10,
+      "kind": "ui-projection",
+      "message": "ui projection emitted event",
+      "details": {
+        "ordinal": 4,
+        "sourceEvent": "LabFinished",
+        "uiEvent": "LabMessageFinished"
+      }
+    },
+    {
+      "step": 11,
+      "kind": "timeline-projection",
+      "message": "timeline projection upserted entity",
+      "details": {
+        "entityId": "msg-1",
+        "ordinal": 4,
+        "sourceEvent": "LabFinished"
+      }
+    }
+  ],
+  "uiEvents": [
+    {
+      "name": "LabMessageStarted",
+      "payload": {
+        "messageId": "msg-1",
+        "prompt": "hello from systemlab"
+      }
+    },
+    {
+      "name": "LabMessageAppended",
+      "payload": {
+        "chunk": "hello from",
+        "messageId": "msg-1"
+      }
+    },
+    {
+      "name": "LabMessageAppended",
+      "payload": {
+        "chunk": " systemlab",
+        "messageId": "msg-1"
+      }
+    },
+    {
+      "name": "LabMessageFinished",
+      "payload": {
+        "messageId": "msg-1",
+        "text": "hello from systemlab"
+      }
+    }
+  ],
+  "snapshot": {
+    "entities": [
+      {
+        "id": "msg-1",
+        "kind": "LabMessage",
+        "payload": {
+          "messageId": "msg-1",
+          "status": "finished",
+          "text": "hello from systemlab"
+        }
+      }
+    ],
+    "ordinal": 4,
+    "sessionId": "lab-session-1"
+  },
+  "checks": {
+    "cursorAdvanced": true,
+    "sessionExists": true,
+    "timelineProduced": true,
+    "uiEventsProduced": true
+  }
+}
