@@ -19,6 +19,10 @@ topics:
       description: Repository or module extraction work
     - slug: systemlab
       description: Interactive lab or documentation app surfaces
+    - slug: cleanup
+      description: Code cleanup, refactoring, maintainability, and simplification work.
+    - slug: code-review
+      description: Evidence-backed source code review, architecture audit, and quality assessment.
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
