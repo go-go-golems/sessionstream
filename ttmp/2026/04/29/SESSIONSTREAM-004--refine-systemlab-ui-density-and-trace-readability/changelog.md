@@ -30,3 +30,16 @@ Step 3: Rendered Phase 2 raw JSON panels as compact trace rows, tables, ordinal 
 - /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/pages/phase2.js — Phase 2 rendered trace/table/snapshot views
 - /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/partials/components.html — Compact data table sandbox sample
 
+
+## 2026-04-29
+
+Step 4: Rendered Phase 3-5 raw JSON-heavy panels as shared compact trace, frame, snapshot, replay, and restart-state views.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/app.css — Frame
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/pages/phase3.js — Uses compact frame/trace/snapshot renderers
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/pages/phase4.js — Uses compact frame/trace/snapshot renderers
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/pages/phase5.js — Uses compact frame/replay/restart renderers
+- /home/manuel/workspaces/2026-04-07/extract-webchat/sessionstream/cmd/sessionstream-systemlab/static/js/renderers.js — Shared compact frontend renderers
+

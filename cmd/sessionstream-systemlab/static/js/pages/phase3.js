@@ -1,5 +1,6 @@
 import { fetchChapterHTML, fetchPhase3State, resetPhase3, runPhase3 } from "../api.js";
-import { byId, renderChecks, setHTML, setJSON } from "../dom.js";
+import { byId, renderChecks, setHTML } from "../dom.js";
+import { renderClientFrames, renderConnectionSnapshot, renderError, renderTrace } from "../renderers.js";
 
 const clients = {
   a: makeClientState(),
@@ -47,12 +48,12 @@ async function runAction(input) {
   const checksOutput = byId("phase3-checks");
   try {
     const data = await runPhase3(input);
-    setJSON(traceOutput, data.trace || data);
-    setJSON(stateOutput, { connections: data.connections, snapshot: data.snapshot });
+    renderTrace(traceOutput, data.trace || []);
+    renderConnectionSnapshot(stateOutput, { connections: data.connections, snapshot: data.snapshot });
     renderChecks(checksOutput, data.checks);
   } catch (error) {
-    setJSON(traceOutput, { error: error.message });
-    setJSON(stateOutput, { error: error.message });
+    renderError(traceOutput, error);
+    renderError(stateOutput, error);
     renderChecks(checksOutput, {});
   }
 }
@@ -63,12 +64,12 @@ async function refreshState() {
   const checksOutput = byId("phase3-checks");
   try {
     const data = await fetchPhase3State(sessionId(), prompt());
-    setJSON(traceOutput, data.trace || data);
-    setJSON(stateOutput, { connections: data.connections, snapshot: data.snapshot });
+    renderTrace(traceOutput, data.trace || []);
+    renderConnectionSnapshot(stateOutput, { connections: data.connections, snapshot: data.snapshot });
     renderChecks(checksOutput, data.checks);
   } catch (error) {
-    setJSON(traceOutput, { error: error.message });
-    setJSON(stateOutput, { error: error.message });
+    renderError(traceOutput, error);
+    renderError(stateOutput, error);
     renderChecks(checksOutput, {});
   }
 }
@@ -117,7 +118,7 @@ function disconnectClient(name) {
 }
 
 function renderClient(name, value) {
-  setJSON(byId(`phase3-client-${name}-output`), value);
+  renderClientFrames(byId(`phase3-client-${name}-output`), value);
 }
 
 function makeClientState() {

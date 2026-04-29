@@ -16,6 +16,7 @@ RelatedFiles:
         Global CSS for rendered trace/session widgets
         Compact trace/session/check badge CSS
         Compact data table and snapshot card CSS
+        Frame
     - Path: cmd/sessionstream-systemlab/static/index.html
       Note: Components sandbox navigation and page mount
     - Path: cmd/sessionstream-systemlab/static/js/pages/phase1.js
@@ -24,6 +25,14 @@ RelatedFiles:
         Compact Phase 1 UI event row markup
     - Path: cmd/sessionstream-systemlab/static/js/pages/phase2.js
       Note: Phase 2 rendered trace/table/snapshot views
+    - Path: cmd/sessionstream-systemlab/static/js/pages/phase3.js
+      Note: Phase 3 uses compact client/trace/state renderers
+    - Path: cmd/sessionstream-systemlab/static/js/pages/phase4.js
+      Note: Phase 4 uses compact client/trace/state renderers
+    - Path: cmd/sessionstream-systemlab/static/js/pages/phase5.js
+      Note: Phase 5 uses compact client/replay/restart renderers
+    - Path: cmd/sessionstream-systemlab/static/js/renderers.js
+      Note: Shared compact renderers for phases 3-5
     - Path: cmd/sessionstream-systemlab/static/partials/components.html
       Note: |-
         Static density sandbox samples
@@ -37,6 +46,7 @@ LastUpdated: 2026-04-29T17:05:00-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 
@@ -445,4 +455,136 @@ Browser-measured after clicking `Publish B`:
   "snapCards": 2,
   "badges": [22, 22, 22, 22]
 }
+```
+
+## Step 4: Applied compact renderers to Phases 3–5 and captured detail screenshots
+
+I extended the rendered-widget work from Phase 2 to Phases 3, 4, and 5. The websocket client frame panels, backend traces, snapshot/state panels, replay inspection panel, and pre/post restart comparison now use compact rendered views instead of raw JSON blobs.
+
+After the user suggested screenshots of sub-divs for better resolution, I captured focused element screenshots for the individual trace, message, ordinal, snapshot, replay, and state widgets. These are much easier to inspect than full-page screenshots dominated by chapter prose.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+ok, do phase 3-5
+```
+
+**Assistant interpretation:** Apply the same rendered/table treatment to the remaining raw JSON-heavy Systemlab phases.
+
+**Inferred user intent:** Make Phases 3–5 readable and visually consistent with the refined Phase 1/2 panels.
+
+**Follow-up user prompt (verbatim):**
+
+```text
+see if you can do screnshots of sub divs or so. to have more resolution
+```
+
+**Assistant interpretation:** Capture screenshots of specific widget containers instead of only full-page screenshots.
+
+**Inferred user intent:** Produce review artifacts that show the actual component rendering at useful resolution.
+
+### What I did
+
+- Added `cmd/sessionstream-systemlab/static/js/renderers.js` with shared compact renderers:
+  - `renderTrace`
+  - `renderClientFrames`
+  - `renderConnectionSnapshot`
+  - `renderRestartState`
+  - `renderReplayState`
+  - `renderError`
+- Updated Phase 3 to render:
+  - client A/B websocket frames as compact frame cards;
+  - backend trace as compact trace rows;
+  - connections/snapshot as rendered tables/cards.
+- Updated Phase 4 to render:
+  - websocket client frames as compact frame cards;
+  - backend trace as compact trace rows;
+  - connections/snapshot as rendered tables/cards.
+- Updated Phase 5 to render:
+  - websocket client frames as compact frame cards;
+  - replay inspection as metric chips plus error table;
+  - backend trace as compact trace rows;
+  - pre/post restart state as rendered comparison cards.
+- Extended CSS for:
+  - frame cards;
+  - metric chips;
+  - state comparison grids;
+  - shared rendered state overflow behavior.
+- Interacted with local Systemlab on `:18091` and captured full-page screenshots for:
+  - `phase3-rendered-after.png`
+  - `phase4-rendered-after.png`
+  - `phase5-rendered-after.png`
+- Captured focused sub-widget screenshots:
+  - `phase2-trace-detail.png`
+  - `phase2-message-history-detail.png`
+  - `phase2-ordinals-detail.png`
+  - `phase2-snapshots-detail.png`
+  - `phase3-backend-trace-detail.png`
+  - `phase3-state-detail.png`
+  - `phase4-backend-trace-detail.png`
+  - `phase4-state-detail.png`
+  - `phase5-replay-detail.png`
+  - `phase5-backend-trace-detail.png`
+  - `phase5-restart-state-detail.png`
+- Ran `make lint`, `make check`, and `docmgr doctor`.
+
+### Why
+
+Phases 3–5 had the same raw JSON readability issue as Phase 2, especially in websocket client frames and state/snapshot panels. Shared renderers avoid copying one-off rendering code across pages and make the visual language consistent.
+
+### What worked
+
+- Shared frontend renderers covered all three phases without changing backend APIs.
+- Focused element screenshots produced much better review artifacts than full-page screenshots.
+- `make lint`, `make check`, and `docmgr doctor` passed.
+
+### What didn't work
+
+The first attempt to capture detail screenshots used brittle `.grid:nth-of-type(...)` selectors and timed out. I switched to direct stable output IDs such as `#phase3-trace-output` and `#phase5-replay-output`.
+
+Hash navigation also needed a reload/cache-buster during scripted screenshot capture, otherwise hidden page state could leave the target button invisible. I used `?detail=<timestamp>#phaseN` plus `page.reload()` before interaction.
+
+### What I learned
+
+For this app, component-level screenshots are much more useful than full-page screenshots because every phase includes a long chapter before the interactive panels. Future visual review should capture both page-level context and widget-level detail.
+
+### What was tricky to build
+
+The renderer has to be generic enough for frames, snapshots, replay metrics, and restart comparisons, but not so abstract that it hides the teaching model. I kept renderer functions named after Systemlab concepts rather than introducing a generic component framework.
+
+### What warrants a second pair of eyes
+
+- Whether `renderers.js` is the right boundary or should be split by widget type later.
+- Whether frame cards should expose full payloads via expanders instead of compact inline summaries.
+- Whether Phase 5 pre/post restart comparison needs a more explicit visual diff.
+
+### What should be done in the future
+
+- Consider adding rendered/json toggles to Phases 2–5 if users still need raw data in-page.
+- Consider moving long chapter text behind a collapsible section so interactive panels are immediately visible.
+- Consider a screenshot playbook for Systemlab visual regression review.
+
+### Code review instructions
+
+Start with:
+
+- `cmd/sessionstream-systemlab/static/js/renderers.js`
+- `cmd/sessionstream-systemlab/static/js/pages/phase3.js`
+- `cmd/sessionstream-systemlab/static/js/pages/phase4.js`
+- `cmd/sessionstream-systemlab/static/js/pages/phase5.js`
+- `cmd/sessionstream-systemlab/static/app.css`
+
+Review focused screenshots under:
+
+- `ttmp/2026/04/29/SESSIONSTREAM-004--refine-systemlab-ui-density-and-trace-readability/sources/*detail.png`
+
+Validate with:
+
+```bash
+cd sessionstream
+make lint
+make check
+docmgr --root ttmp doctor --ticket SESSIONSTREAM-004 --stale-after 30
 ```
