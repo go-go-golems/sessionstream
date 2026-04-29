@@ -1,6 +1,6 @@
 # sessionstream
 
-`sessionstream` is the standalone home for the generic session-based streaming substrate that started life as `pinocchio/pkg/evtstream`.
+`sessionstream` is the standalone home for a generic session-based streaming substrate.
 
 The goal of this repository is to host the reusable parts of that architecture:
 
@@ -36,11 +36,7 @@ Those stay in downstream consumer repositories such as `pinocchio`.
 
 The repository is currently in bootstrap mode.
 
-The first ticket is:
-
-- `ttmp/2026/04/21/SESSIONSTREAM-001--extract-evtstream-into-standalone-sessionstream-repository-and-reusable-session-based-streaming-framework`
-
-That ticket captures the extraction plan, the intern-facing architecture guide, and the ongoing implementation diary.
+The initial repository planning tickets live under `ttmp/` and capture the extraction plan, intern-facing architecture guides, and implementation diaries.
 
 ## Development
 
@@ -50,6 +46,14 @@ Useful commands:
 make test
 make build
 make lint
+make goreleaser   # local single-target snapshot release into dist/
+```
+
+Release tags are cut with [`svu`](https://github.com/caarlos0/svu) and published by the `release` GitHub Actions workflow:
+
+```bash
+make tag-patch    # or tag-minor / tag-major
+make release      # pushes tags and primes the Go module proxy
 ```
 
 If you are working on repo-local planning/docs:

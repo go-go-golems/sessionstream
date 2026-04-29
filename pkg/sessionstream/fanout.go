@@ -2,8 +2,8 @@ package sessionstream
 
 import "context"
 
-// UIFanout is the consumer-side output seam used to publish projected UI events.
-// Websocket transport will subscribe to this seam in later phases.
+// UIFanout is the consumer-side output seam used to publish projected UI events
+// to fanout-only transports such as the websocket snapshot/fanout adapter.
 type UIFanout interface {
 	PublishUI(ctx context.Context, sid SessionId, ord uint64, events []UIEvent) error
 }

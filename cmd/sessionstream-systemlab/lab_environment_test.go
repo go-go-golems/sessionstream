@@ -132,3 +132,24 @@ func TestLabEnvironmentRunPhase5SQLRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.Checks["resumeWithoutGaps"])
 }
+
+func TestLabEnvironmentInspectPhase5Replay(t *testing.T) {
+	env, err := newLabEnvironment()
+	require.NoError(t, err)
+
+	_, err = env.RunPhase5(context.Background(), phase5RunRequest{
+		Action:    "seed-session",
+		Mode:      "sql",
+		SessionID: "replay-demo",
+		Text:      "inspect cursors",
+	})
+	require.NoError(t, err)
+
+	resp, err := env.inspectPhase5Replay(context.Background(), "replay-demo", 10)
+	require.NoError(t, err)
+	require.Equal(t, "phase5", resp.Phase)
+	require.Equal(t, "replay-demo", resp.SessionID)
+	require.Equal(t, uint64(1), resp.EventCursor)
+	require.Equal(t, uint64(1), resp.TimelineCursor)
+	require.Empty(t, resp.Errors)
+}

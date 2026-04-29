@@ -1,13 +1,16 @@
-name: golang-pipeline
+name: release
 
 on:
+  workflow_dispatch:
   push:
-    branches:
-      - 'main'
-  pull_request:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
-  check:
+  goreleaser:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -20,5 +23,10 @@ jobs:
           cache: true
       - name: Run repository checks
         run: make check
-      - name: Smoke test systemlab help
-        run: GOWORK=off go run ./cmd/sessionstream-systemlab --help
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

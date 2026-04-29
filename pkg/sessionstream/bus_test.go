@@ -127,7 +127,7 @@ func newBusTestHub(
 		WithSessionMetadataFactory(func(_ context.Context, sid SessionId) (any, error) {
 			return map[string]any{"sessionId": string(sid)}, nil
 		}),
-		WithEventBus(pubsub, pubsub, WithBusTopic("evtstream.test"), WithBusObserver(observer), WithBusMessageMutator(mutator)),
+		WithEventBus(pubsub, pubsub, WithBusTopic("sessionstream.test"), WithBusObserver(observer), WithBusMessageMutator(mutator)),
 	)
 	require.NoError(t, err)
 	require.NoError(t, hub.RegisterCommand(busTestCommandName, func(ctx context.Context, cmd Command, _ *Session, pub EventPublisher) error {

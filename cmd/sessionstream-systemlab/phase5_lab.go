@@ -10,7 +10,6 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
-	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
 	storesqlite "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite"
 	wstransport "github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -113,32 +112,19 @@ func (e *labEnvironment) buildPhase5Runtime(mode string, existingDBPath string) 
 		store = sqlStore
 		closeFn = sqlStore.Close
 	} else {
-		store = storememory.New()
-		closeFn = func() error { return nil }
+		memStore, err := storesqlite.NewInMemory(reg)
+		if err != nil {
+			return nil, err
+		}
+		store = memStore
+		closeFn = memStore.Close
 	}
 
-	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithHooks(wstransport.Hooks{
-		OnConnect: func(cid sessionstream.ConnectionId) {
-			e.appendPhase5Trace("transport", "phase 5 websocket connected", map[string]any{"connectionId": string(cid)})
-		},
-		OnDisconnect: func(cid sessionstream.ConnectionId) {
-			e.appendPhase5Trace("transport", "phase 5 websocket disconnected", map[string]any{"connectionId": string(cid)})
-		},
-		OnSubscribe: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, since uint64) {
-			e.appendPhase5Trace("transport", "phase 5 subscribed", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "sinceOrdinal": fmt.Sprintf("%d", since)})
-		},
-		OnSnapshotSent: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, snap sessionstream.Snapshot) {
-			e.appendPhase5Trace("transport", "phase 5 snapshot sent", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "ordinal": fmt.Sprintf("%d", snap.Ordinal), "entityCount": len(snap.Entities)})
-		},
-		OnUIEventSent: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, ord uint64, event sessionstream.UIEvent) {
-			details := protoStructMap(event.Payload)
-			details["connectionId"] = string(cid)
-			details["sessionId"] = string(sid)
-			details["ordinal"] = fmt.Sprintf("%d", ord)
-			details["uiEvent"] = event.Name
-			e.appendPhase5Trace("transport", "phase 5 ui event sent", details)
-		},
-	}))
+	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithHooks(newWebsocketTraceHooks(websocketTraceOptions{
+		Phase:            5,
+		AppendTrace:      e.appendPhase5Trace,
+		IncludeUIPayload: true,
+	})))
 	if err != nil {
 		return nil, err
 	}
@@ -415,8 +401,7 @@ func (e *labEnvironment) appendPhase5Trace(kind, message string, details map[str
 	if e.phase5 == nil {
 		return
 	}
-	step := len(e.phase5.trace) + 1
-	e.phase5.trace = append(e.phase5.trace, traceEntry{Step: step, Kind: kind, Message: message, Details: cloneMap(details)})
+	appendTraceEntry(&e.phase5.trace, kind, message, details)
 }
 
 func normalizePhase5Mode(mode string) string {
@@ -472,10 +457,7 @@ func phase5ResumeWithoutGaps(trace []traceEntry, sessionID string) bool {
 
 func clonePhase5RunResponse(in phase5RunResponse) phase5RunResponse {
 	out := in
-	out.Trace = make([]traceEntry, 0, len(in.Trace))
-	for _, entry := range in.Trace {
-		out.Trace = append(out.Trace, traceEntry{Step: entry.Step, Kind: entry.Kind, Message: entry.Message, Details: cloneMap(entry.Details)})
-	}
+	out.Trace = cloneTraceEntries(in.Trace)
 	out.Connections = append([]wstransport.ConnectionInfo(nil), in.Connections...)
 	out.PreRestart = cloneMap(in.PreRestart)
 	out.PostRestart = cloneMap(in.PostRestart)

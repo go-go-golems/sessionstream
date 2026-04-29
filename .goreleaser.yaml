@@ -1,0 +1,46 @@
+version: 2
+project_name: sessionstream
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: sessionstream-systemlab
+    env:
+      - CGO_ENABLED=0
+    main: ./cmd/sessionstream-systemlab
+    binary: sessionstream-systemlab
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: sessionstream-systemlab
+    ids:
+      - sessionstream-systemlab
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - README.md
+      - cmd/sessionstream-systemlab/README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json

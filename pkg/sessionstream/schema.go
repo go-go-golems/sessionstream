@@ -97,7 +97,7 @@ func (r *SchemaRegistry) register(m map[string]proto.Message, kind, name string,
 	if _, ok := m[name]; ok {
 		return fmt.Errorf("%s %q already registered", kind, name)
 	}
-	m[name] = msg
+	m[name] = proto.Clone(msg)
 	return nil
 }
 
@@ -111,7 +111,7 @@ func (r *SchemaRegistry) lookup(m map[string]proto.Message, name string) (proto.
 	if !ok {
 		return nil, false
 	}
-	return msg, true
+	return proto.Clone(msg), true
 }
 
 func (r *SchemaRegistry) instantiate(m map[string]proto.Message, kind, name string) (proto.Message, error) {

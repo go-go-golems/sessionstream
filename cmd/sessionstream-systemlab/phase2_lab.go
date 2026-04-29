@@ -12,8 +12,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
-	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
-	"google.golang.org/protobuf/proto"
+	storesqlite "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -61,7 +60,7 @@ type phase2MessageRecord struct {
 
 type phase2State struct {
 	hub               *sessionstream.Hub
-	store             *storememory.Store
+	store             *storesqlite.Store
 	cancel            context.CancelFunc
 	streamMode        string
 	syntheticSequence uint64
@@ -85,7 +84,6 @@ func (e *labEnvironment) newPhase2State() (*phase2State, error) {
 		ordinals:        map[string][]uint64{},
 		fanout:          map[string][]namedPayload{},
 	}
-	store := storememory.New()
 	reg := sessionstream.NewSchemaRegistry()
 	for _, err := range []error{
 		reg.RegisterCommand(phase2CommandName, &structpb.Struct{}),
@@ -96,6 +94,11 @@ func (e *labEnvironment) newPhase2State() (*phase2State, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	store, err := storesqlite.NewInMemory(reg)
+	if err != nil {
+		return nil, err
 	}
 
 	pubsub := gochannel.NewGoChannel(gochannel.Config{OutputChannelBuffer: 256}, watermill.NopLogger{})
@@ -572,8 +575,7 @@ func (e *labEnvironment) phase2RecordLocked(messageID string) *phase2MessageReco
 }
 
 func (e *labEnvironment) phase2AppendTraceLocked(kind, message string, details map[string]any) {
-	step := len(e.phase2.trace) + 1
-	e.phase2.trace = append(e.phase2.trace, traceEntry{Step: step, Kind: kind, Message: message, Details: cloneMap(details)})
+	appendTraceEntry(&e.phase2.trace, kind, message, details)
 }
 
 func normalizeStreamMode(mode string) string {
@@ -679,7 +681,7 @@ func cloneStringMap(in map[string]string) map[string]string {
 
 func clonePhase2RunResponse(in phase2RunResponse) phase2RunResponse {
 	out := in
-	out.Trace = append([]traceEntry(nil), in.Trace...)
+	out.Trace = cloneTraceEntries(in.Trace)
 	out.MessageHistory = make([]map[string]any, 0, len(in.MessageHistory))
 	for _, record := range in.MessageHistory {
 		out.MessageHistory = append(out.MessageHistory, cloneMap(record))
@@ -774,13 +776,6 @@ func renderPhase2Markdown(resp phase2RunResponse) string {
 		}
 	}
 	return b.String()
-}
-
-func protoStructMap(msg proto.Message) map[string]any {
-	if pb, ok := msg.(*structpb.Struct); ok && pb != nil {
-		return cloneMap(pb.AsMap())
-	}
-	return map[string]any{}
 }
 
 func uniqueStrings(values ...string) []string {

@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
-	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
+	storesqlite "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -54,7 +54,7 @@ type traceEntry struct {
 type labEnvironment struct {
 	mu          sync.Mutex
 	hub         *sessionstream.Hub
-	store       *storememory.Store
+	store       *storesqlite.Store
 	reg         *sessionstream.SchemaRegistry
 	sessionMeta map[string]map[string]any
 	traces      map[string][]traceEntry
@@ -83,7 +83,6 @@ func (e *labEnvironment) Reset() error {
 		return err
 	}
 
-	store := storememory.New()
 	reg := sessionstream.NewSchemaRegistry()
 	for _, err := range []error{
 		reg.RegisterCommand(phase1CommandName, &structpb.Struct{}),
@@ -98,6 +97,11 @@ func (e *labEnvironment) Reset() error {
 		if err != nil {
 			return err
 		}
+	}
+
+	store, err := storesqlite.NewInMemory(reg)
+	if err != nil {
+		return err
 	}
 
 	hub, err := sessionstream.NewHub(
@@ -365,8 +369,9 @@ func (e *labEnvironment) appendTrace(sessionID, kind, message string, details ma
 }
 
 func (e *labEnvironment) appendTraceLocked(sessionID, kind, message string, details map[string]any) {
-	step := len(e.traces[sessionID]) + 1
-	e.traces[sessionID] = append(e.traces[sessionID], traceEntry{Step: step, Kind: kind, Message: message, Details: cloneMap(details)})
+	entries := e.traces[sessionID]
+	appendTraceEntry(&entries, kind, message, details)
+	e.traces[sessionID] = entries
 }
 
 func (e *labEnvironment) recordUIEvent(sessionID, name string, payload map[string]any) {
@@ -383,48 +388,11 @@ func splitPrompt(prompt string) []string {
 	return []string{prompt[:mid], prompt[mid:]}
 }
 
-func currentEntityMap(view sessionstream.TimelineView, id string) map[string]any {
-	entity, ok := view.Get(phase1TimelineEntity, id)
-	if !ok || entity.Payload == nil {
-		return map[string]any{}
-	}
-	if pb, ok := entity.Payload.(*structpb.Struct); ok {
-		return cloneMap(pb.AsMap())
-	}
-	return map[string]any{}
-}
-
-func encodeSnapshot(snap sessionstream.Snapshot) map[string]any {
-	entities := make([]map[string]any, 0, len(snap.Entities))
-	for _, entity := range snap.Entities {
-		payload := map[string]any{}
-		if pb, ok := entity.Payload.(*structpb.Struct); ok && pb != nil {
-			payload = cloneMap(pb.AsMap())
-		}
-		entities = append(entities, map[string]any{
-			"kind":    entity.Kind,
-			"id":      entity.Id,
-			"payload": payload,
-		})
-	}
-	return map[string]any{
-		"sessionId": string(snap.SessionId),
-		"ordinal":   snap.Ordinal,
-		"entities":  entities,
-	}
-}
-
 func cloneRunResponse(in phase1RunResponse) phase1RunResponse {
 	out := in
 	out.Session = cloneMap(in.Session)
-	out.Trace = make([]traceEntry, 0, len(in.Trace))
-	for _, entry := range in.Trace {
-		out.Trace = append(out.Trace, traceEntry{Step: entry.Step, Kind: entry.Kind, Message: entry.Message, Details: cloneMap(entry.Details)})
-	}
-	out.UIEvents = make([]namedPayload, 0, len(in.UIEvents))
-	for _, event := range in.UIEvents {
-		out.UIEvents = append(out.UIEvents, namedPayload{Name: event.Name, Payload: cloneMap(event.Payload)})
-	}
+	out.Trace = cloneTraceEntries(in.Trace)
+	out.UIEvents = cloneNamedPayloads(in.UIEvents)
 	out.Snapshot = cloneMap(in.Snapshot)
 	out.Checks = cloneBoolMap(in.Checks)
 	return out

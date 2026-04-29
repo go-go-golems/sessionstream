@@ -61,7 +61,10 @@ func WithUpgrader(u websocket.Upgrader) Option {
 	}
 }
 
-// Server is the Phase 3 websocket transport. It is both an HTTP handler and an sessionstream.UIFanout.
+// Server is a websocket snapshot/fanout adapter. It is both an HTTP handler
+// and a sessionstream.UIFanout: clients may subscribe/unsubscribe to sessions,
+// receive snapshots, and receive live UI events. Command ingress is deliberately
+// out of scope for this adapter.
 type Server struct {
 	snapshots SnapshotProvider
 	upgrader  websocket.Upgrader

@@ -7,8 +7,9 @@ import (
 	"sync"
 	"time"
 
+	chatdemov1 "github.com/go-go-golems/sessionstream/examples/chatdemo/gen/sessionstream/examples/chatdemo/v1"
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
-	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -82,19 +83,19 @@ func NewEngine(opts ...Option) *Engine {
 
 func RegisterSchemas(reg *sessionstream.SchemaRegistry) error {
 	for _, err := range []error{
-		reg.RegisterCommand(CommandStartInference, &structpb.Struct{}),
-		reg.RegisterCommand(CommandStopInference, &structpb.Struct{}),
-		reg.RegisterEvent(EventUserMessageAccepted, &structpb.Struct{}),
-		reg.RegisterEvent(EventInferenceStarted, &structpb.Struct{}),
-		reg.RegisterEvent(EventTokensDelta, &structpb.Struct{}),
-		reg.RegisterEvent(EventInferenceFinished, &structpb.Struct{}),
-		reg.RegisterEvent(EventInferenceStopped, &structpb.Struct{}),
-		reg.RegisterUIEvent(UIMessageAccepted, &structpb.Struct{}),
-		reg.RegisterUIEvent(UIMessageStarted, &structpb.Struct{}),
-		reg.RegisterUIEvent(UIMessageAppended, &structpb.Struct{}),
-		reg.RegisterUIEvent(UIMessageFinished, &structpb.Struct{}),
-		reg.RegisterUIEvent(UIMessageStopped, &structpb.Struct{}),
-		reg.RegisterTimelineEntity(TimelineEntityChatMessage, &structpb.Struct{}),
+		reg.RegisterCommand(CommandStartInference, &chatdemov1.StartInferenceCommand{}),
+		reg.RegisterCommand(CommandStopInference, &chatdemov1.StopInferenceCommand{}),
+		reg.RegisterEvent(EventUserMessageAccepted, &chatdemov1.UserMessageAcceptedEvent{}),
+		reg.RegisterEvent(EventInferenceStarted, &chatdemov1.InferenceStartedEvent{}),
+		reg.RegisterEvent(EventTokensDelta, &chatdemov1.TokensDeltaEvent{}),
+		reg.RegisterEvent(EventInferenceFinished, &chatdemov1.InferenceFinishedEvent{}),
+		reg.RegisterEvent(EventInferenceStopped, &chatdemov1.InferenceStoppedEvent{}),
+		reg.RegisterUIEvent(UIMessageAccepted, &chatdemov1.ChatMessageUpdate{}),
+		reg.RegisterUIEvent(UIMessageStarted, &chatdemov1.ChatMessageUpdate{}),
+		reg.RegisterUIEvent(UIMessageAppended, &chatdemov1.ChatMessageUpdate{}),
+		reg.RegisterUIEvent(UIMessageFinished, &chatdemov1.ChatMessageUpdate{}),
+		reg.RegisterUIEvent(UIMessageStopped, &chatdemov1.ChatMessageUpdate{}),
+		reg.RegisterTimelineEntity(TimelineEntityChatMessage, &chatdemov1.ChatMessageEntity{}),
 	} {
 		if err != nil {
 			return err
@@ -146,11 +147,7 @@ func (s *Service) SubmitPrompt(ctx context.Context, sid sessionstream.SessionId,
 	if prompt == "" {
 		return fmt.Errorf("prompt is empty")
 	}
-	payload, err := structpb.NewStruct(map[string]any{"prompt": prompt})
-	if err != nil {
-		return err
-	}
-	return s.hub.Submit(ctx, sid, CommandStartInference, payload)
+	return s.hub.Submit(ctx, sid, CommandStartInference, &chatdemov1.StartInferenceCommand{Prompt: prompt})
 }
 
 func (s *Service) Stop(ctx context.Context, sid sessionstream.SessionId) error {
@@ -160,11 +157,7 @@ func (s *Service) Stop(ctx context.Context, sid sessionstream.SessionId) error {
 	if sid == "" {
 		return fmt.Errorf("session id is empty")
 	}
-	payload, err := structpb.NewStruct(map[string]any{})
-	if err != nil {
-		return err
-	}
-	return s.hub.Submit(ctx, sid, CommandStopInference, payload)
+	return s.hub.Submit(ctx, sid, CommandStopInference, &chatdemov1.StopInferenceCommand{})
 }
 
 func (s *Service) WaitIdle(ctx context.Context, sid sessionstream.SessionId) error {
@@ -182,14 +175,18 @@ func (s *Service) Snapshot(ctx context.Context, sid sessionstream.SessionId) (se
 }
 
 func (e *Engine) handleStartInference(ctx context.Context, cmd sessionstream.Command, _ *sessionstream.Session, pub sessionstream.EventPublisher) error {
-	payload := toMap(cmd.Payload)
-	prompt := strings.TrimSpace(asString(payload["prompt"]))
+	payload, ok := cmd.Payload.(*chatdemov1.StartInferenceCommand)
+	if !ok {
+		return fmt.Errorf("unexpected start inference payload %T", cmd.Payload)
+	}
+	prompt := strings.TrimSpace(payload.GetPrompt())
 	if prompt == "" {
 		prompt = "Explain sessionstream"
 	}
 	messageID := e.nextMessageID()
 	userMessageID := messageID + "-user"
-	if err := e.publish(ctx, cmd.SessionId, pub, EventUserMessageAccepted, map[string]any{
+	userEvent := &chatdemov1.UserMessageAcceptedEvent{MessageId: userMessageID, Role: "user", Content: prompt, Streaming: false}
+	if err := e.publish(ctx, cmd.SessionId, pub, EventUserMessageAccepted, userEvent, map[string]any{
 		"messageId": userMessageID,
 		"role":      "user",
 		"content":   prompt,
@@ -218,8 +215,8 @@ func (e *Engine) runDemoInference(ctx context.Context, sid sessionstream.Session
 	defer close(done)
 	defer e.clearRun(sid, messageID)
 
-	started := map[string]any{"messageId": messageID, "prompt": prompt, "role": "assistant", "content": "", "status": "streaming", "streaming": true}
-	if err := e.publish(ctx, sid, pub, EventInferenceStarted, started); err != nil {
+	started := &chatdemov1.InferenceStartedEvent{MessageId: messageID, Prompt: prompt, Role: "assistant", Content: "", Status: "streaming", Streaming: true}
+	if err := e.publish(ctx, sid, pub, EventInferenceStarted, started, map[string]any{"messageId": messageID, "prompt": prompt, "role": "assistant", "content": "", "status": "streaming", "streaming": true}); err != nil {
 		return
 	}
 
@@ -229,27 +226,26 @@ func (e *Engine) runDemoInference(ctx context.Context, sid sessionstream.Session
 	for _, chunk := range chunks {
 		select {
 		case <-ctx.Done():
-			_ = e.publish(context.Background(), sid, pub, EventInferenceStopped, map[string]any{"messageId": messageID, "role": "assistant", "text": accumulated, "content": accumulated, "status": "stopped", "streaming": false})
+			stopped := &chatdemov1.InferenceStoppedEvent{MessageId: messageID, Role: "assistant", Text: accumulated, Content: accumulated, Status: "stopped", Streaming: false}
+			_ = e.publish(context.Background(), sid, pub, EventInferenceStopped, stopped, map[string]any{"messageId": messageID, "role": "assistant", "text": accumulated, "content": accumulated, "status": "stopped", "streaming": false})
 			return
 		case <-time.After(e.chunkDelay):
 		}
 		accumulated += chunk
-		if err := e.publish(context.Background(), sid, pub, EventTokensDelta, map[string]any{"messageId": messageID, "role": "assistant", "chunk": chunk, "text": accumulated, "content": accumulated, "status": "streaming", "streaming": true}); err != nil {
+		delta := &chatdemov1.TokensDeltaEvent{MessageId: messageID, Role: "assistant", Chunk: chunk, Text: accumulated, Content: accumulated, Status: "streaming", Streaming: true}
+		if err := e.publish(context.Background(), sid, pub, EventTokensDelta, delta, map[string]any{"messageId": messageID, "role": "assistant", "chunk": chunk, "text": accumulated, "content": accumulated, "status": "streaming", "streaming": true}); err != nil {
 			return
 		}
 	}
-	_ = e.publish(context.Background(), sid, pub, EventInferenceFinished, map[string]any{"messageId": messageID, "role": "assistant", "text": accumulated, "content": accumulated, "status": "finished", "streaming": false})
+	finished := &chatdemov1.InferenceFinishedEvent{MessageId: messageID, Role: "assistant", Text: accumulated, Content: accumulated, Status: "finished", Streaming: false}
+	_ = e.publish(context.Background(), sid, pub, EventInferenceFinished, finished, map[string]any{"messageId": messageID, "role": "assistant", "text": accumulated, "content": accumulated, "status": "finished", "streaming": false})
 }
 
-func (e *Engine) publish(ctx context.Context, sid sessionstream.SessionId, pub sessionstream.EventPublisher, name string, payload map[string]any) error {
-	pb, err := structpb.NewStruct(payload)
-	if err != nil {
-		return err
-	}
+func (e *Engine) publish(ctx context.Context, sid sessionstream.SessionId, pub sessionstream.EventPublisher, name string, payload proto.Message, hookPayload map[string]any) error {
 	if e.hooks.OnBackendEvent != nil {
-		e.hooks.OnBackendEvent(string(sid), name, cloneMap(payload))
+		e.hooks.OnBackendEvent(string(sid), name, cloneMap(hookPayload))
 	}
-	return pub.Publish(ctx, sessionstream.Event{Name: name, SessionId: sid, Payload: pb})
+	return pub.Publish(ctx, sessionstream.Event{Name: name, SessionId: sid, Payload: payload})
 }
 
 func (e *Engine) WaitIdle(ctx context.Context, sid sessionstream.SessionId) error {
@@ -297,86 +293,114 @@ func (e *Engine) clearRun(sid sessionstream.SessionId, messageID string) {
 }
 
 func uiProjection(_ context.Context, ev sessionstream.Event, _ *sessionstream.Session, _ sessionstream.TimelineView) ([]sessionstream.UIEvent, error) {
-	payload := toMap(ev.Payload)
-	payload["ordinal"] = fmt.Sprintf("%d", ev.Ordinal)
-	pb, err := structpb.NewStruct(payload)
-	if err != nil {
-		return nil, err
+	update, ok := chatUpdateFromEvent(ev)
+	if !ok {
+		return nil, nil
 	}
+	update.Ordinal = fmt.Sprintf("%d", ev.Ordinal)
 	switch ev.Name {
 	case EventUserMessageAccepted:
-		return []sessionstream.UIEvent{{Name: UIMessageAccepted, Payload: pb}}, nil
+		return []sessionstream.UIEvent{{Name: UIMessageAccepted, Payload: update}}, nil
 	case EventInferenceStarted:
-		return []sessionstream.UIEvent{{Name: UIMessageStarted, Payload: pb}}, nil
+		return []sessionstream.UIEvent{{Name: UIMessageStarted, Payload: update}}, nil
 	case EventTokensDelta:
-		return []sessionstream.UIEvent{{Name: UIMessageAppended, Payload: pb}}, nil
+		return []sessionstream.UIEvent{{Name: UIMessageAppended, Payload: update}}, nil
 	case EventInferenceFinished:
-		return []sessionstream.UIEvent{{Name: UIMessageFinished, Payload: pb}}, nil
+		return []sessionstream.UIEvent{{Name: UIMessageFinished, Payload: update}}, nil
 	case EventInferenceStopped:
-		return []sessionstream.UIEvent{{Name: UIMessageStopped, Payload: pb}}, nil
+		return []sessionstream.UIEvent{{Name: UIMessageStopped, Payload: update}}, nil
 	default:
 		return nil, nil
 	}
 }
 
 func timelineProjection(_ context.Context, ev sessionstream.Event, _ *sessionstream.Session, view sessionstream.TimelineView) ([]sessionstream.TimelineEntity, error) {
-	payload := toMap(ev.Payload)
-	messageID := asString(payload["messageId"])
+	messageID := eventMessageID(ev.Payload)
 	if messageID == "" {
 		return nil, nil
 	}
-	entity := currentKindEntity(view, TimelineEntityChatMessage, messageID)
-	entity["messageId"] = messageID
-	switch ev.Name {
-	case EventUserMessageAccepted:
-		entity["role"] = "user"
-		entity["content"] = asString(payload["content"])
-		entity["text"] = asString(payload["content"])
-		entity["streaming"] = false
-	case EventInferenceStarted:
-		entity["prompt"] = asString(payload["prompt"])
-		entity["role"] = "assistant"
-		entity["content"] = ""
-		entity["text"] = ""
-		entity["status"] = "streaming"
-		entity["streaming"] = true
-	case EventTokensDelta:
-		entity["role"] = "assistant"
-		entity["content"] = asString(payload["content"])
-		entity["text"] = asString(payload["text"])
-		entity["status"] = "streaming"
-		entity["streaming"] = true
-	case EventInferenceFinished:
-		entity["role"] = "assistant"
-		entity["content"] = asString(payload["content"])
-		entity["text"] = asString(payload["text"])
-		entity["status"] = "finished"
-		entity["streaming"] = false
-	case EventInferenceStopped:
-		entity["role"] = "assistant"
-		entity["content"] = asString(payload["content"])
-		entity["text"] = asString(payload["text"])
-		entity["status"] = "stopped"
-		entity["streaming"] = false
+	entity := currentChatEntity(view, TimelineEntityChatMessage, messageID)
+	entity.MessageId = messageID
+	switch payload := ev.Payload.(type) {
+	case *chatdemov1.UserMessageAcceptedEvent:
+		entity.Role = "user"
+		entity.Content = payload.GetContent()
+		entity.Text = payload.GetContent()
+		entity.Streaming = false
+	case *chatdemov1.InferenceStartedEvent:
+		entity.Prompt = payload.GetPrompt()
+		entity.Role = "assistant"
+		entity.Content = ""
+		entity.Text = ""
+		entity.Status = "streaming"
+		entity.Streaming = true
+	case *chatdemov1.TokensDeltaEvent:
+		entity.Role = "assistant"
+		entity.Content = payload.GetContent()
+		entity.Text = payload.GetText()
+		entity.Status = "streaming"
+		entity.Streaming = true
+	case *chatdemov1.InferenceFinishedEvent:
+		entity.Role = "assistant"
+		entity.Content = payload.GetContent()
+		entity.Text = payload.GetText()
+		entity.Status = "finished"
+		entity.Streaming = false
+	case *chatdemov1.InferenceStoppedEvent:
+		entity.Role = "assistant"
+		entity.Content = payload.GetContent()
+		entity.Text = payload.GetText()
+		entity.Status = "stopped"
+		entity.Streaming = false
 	default:
 		return nil, nil
 	}
-	pb, err := structpb.NewStruct(entity)
-	if err != nil {
-		return nil, err
-	}
-	return []sessionstream.TimelineEntity{{Kind: TimelineEntityChatMessage, Id: messageID, Payload: pb}}, nil
+	return []sessionstream.TimelineEntity{{Kind: TimelineEntityChatMessage, Id: messageID, Payload: entity}}, nil
 }
 
-func currentKindEntity(view sessionstream.TimelineView, kind, id string) map[string]any {
+func chatUpdateFromEvent(ev sessionstream.Event) (*chatdemov1.ChatMessageUpdate, bool) {
+	switch payload := ev.Payload.(type) {
+	case *chatdemov1.UserMessageAcceptedEvent:
+		return &chatdemov1.ChatMessageUpdate{MessageId: payload.GetMessageId(), Role: payload.GetRole(), Content: payload.GetContent(), Text: payload.GetContent(), Streaming: payload.GetStreaming()}, true
+	case *chatdemov1.InferenceStartedEvent:
+		return &chatdemov1.ChatMessageUpdate{MessageId: payload.GetMessageId(), Role: payload.GetRole(), Prompt: payload.GetPrompt(), Content: payload.GetContent(), Status: payload.GetStatus(), Streaming: payload.GetStreaming()}, true
+	case *chatdemov1.TokensDeltaEvent:
+		return &chatdemov1.ChatMessageUpdate{MessageId: payload.GetMessageId(), Role: payload.GetRole(), Chunk: payload.GetChunk(), Text: payload.GetText(), Content: payload.GetContent(), Status: payload.GetStatus(), Streaming: payload.GetStreaming()}, true
+	case *chatdemov1.InferenceFinishedEvent:
+		return &chatdemov1.ChatMessageUpdate{MessageId: payload.GetMessageId(), Role: payload.GetRole(), Text: payload.GetText(), Content: payload.GetContent(), Status: payload.GetStatus(), Streaming: payload.GetStreaming()}, true
+	case *chatdemov1.InferenceStoppedEvent:
+		return &chatdemov1.ChatMessageUpdate{MessageId: payload.GetMessageId(), Role: payload.GetRole(), Text: payload.GetText(), Content: payload.GetContent(), Status: payload.GetStatus(), Streaming: payload.GetStreaming()}, true
+	default:
+		return nil, false
+	}
+}
+
+func eventMessageID(msg proto.Message) string {
+	switch payload := msg.(type) {
+	case *chatdemov1.UserMessageAcceptedEvent:
+		return payload.GetMessageId()
+	case *chatdemov1.InferenceStartedEvent:
+		return payload.GetMessageId()
+	case *chatdemov1.TokensDeltaEvent:
+		return payload.GetMessageId()
+	case *chatdemov1.InferenceFinishedEvent:
+		return payload.GetMessageId()
+	case *chatdemov1.InferenceStoppedEvent:
+		return payload.GetMessageId()
+	default:
+		return ""
+	}
+}
+
+func currentChatEntity(view sessionstream.TimelineView, kind, id string) *chatdemov1.ChatMessageEntity {
 	entity, ok := view.Get(kind, id)
 	if !ok || entity.Payload == nil {
-		return map[string]any{}
+		return &chatdemov1.ChatMessageEntity{}
 	}
-	if pb, ok := entity.Payload.(*structpb.Struct); ok {
-		return cloneMap(pb.AsMap())
+	if pb, ok := entity.Payload.(*chatdemov1.ChatMessageEntity); ok {
+		return proto.Clone(pb).(*chatdemov1.ChatMessageEntity)
 	}
-	return map[string]any{}
+	return &chatdemov1.ChatMessageEntity{}
 }
 
 func renderAnswer(prompt string) string {
@@ -397,20 +421,6 @@ func chunkText(text string, size int) []string {
 		text = text[size:]
 	}
 	return out
-}
-
-func toMap(msg any) map[string]any {
-	if pb, ok := msg.(*structpb.Struct); ok && pb != nil {
-		return cloneMap(pb.AsMap())
-	}
-	return map[string]any{}
-}
-
-func asString(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
 }
 
 func cloneMap(in map[string]any) map[string]any {

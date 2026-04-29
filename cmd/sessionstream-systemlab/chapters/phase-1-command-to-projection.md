@@ -305,7 +305,7 @@ Each check points at a different subsystem. If one goes red, you know where to i
 - `sessionstream/session_registry.go` — session lifecycle
 - `sessionstream/projection.go` — projection interfaces
 - `sessionstream/hydration.go` — store interface
-- `sessionstream/hydration/memory/store.go` — Phase 1 store
+- `sessionstream/hydration/sqlite/store.go` — SQLite-backed Phase 1 store, using in-memory SQLite for local runs
 
 ### Systemlab files
 
@@ -316,5 +316,5 @@ Each check points at a different subsystem. If one goes red, you know where to i
 ### Tests
 
 - `sessionstream/hub_test.go`
-- `sessionstream/hydration/memory/store_test.go`
+- `sessionstream/hydration/sqlite/store_test.go`
 - `cmd/sessionstream-systemlab/lab_environment_test.go`

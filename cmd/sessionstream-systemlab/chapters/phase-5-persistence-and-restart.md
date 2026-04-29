@@ -4,7 +4,7 @@
 
 Phase 3 showed you how the framework handles reconnect in the same process. Phase 5 shows you what happens when the process restarts. The system must prove that it can stop, come back, and resume from the right place without losing state or duplicating work.
 
-By the end of this chapter, you should understand why cursor and timeline state must survive restart together, how a SQL hydration store preserves the same semantics as the memory store, and what restart correctness means for reconnect.
+By the end of this chapter, you should understand why cursor and timeline state must survive restart together, how the SQL hydration store can run either durably on disk or ephemerally in memory, and what restart correctness means for reconnect.
 
 ---
 
@@ -156,13 +156,40 @@ The SQL hydration store is what makes restart behave the same as in-process reco
 
 ---
 
-## 10. Common mistakes
+## 10. Replay inspection: event cursor vs timeline cursor
+
+Phase 5 also exposes a read-only replay inspection panel. It shows two cursors for the selected session:
+
+- **Event cursor** — the highest backend event ordinal stored in the event log.
+- **Timeline cursor** — the highest backend event ordinal successfully materialized by the timeline projection.
+
+When everything is healthy, these cursors usually match:
+
+```text
+event cursor:    4
+timeline cursor: 4
+```
+
+If timeline projection fails, the event can still be durably stored while the timeline cursor stays behind:
+
+```text
+event cursor:    7
+timeline cursor: 4
+```
+
+That state means: "events 5 through 7 exist, but the timeline projection has not successfully applied them yet." The replay panel also lists persisted error records so you can connect cursor gaps to concrete projection, decode, fanout, or storage errors.
+
+The panel is deliberately read-only. Systemlab uses it to teach replay state; it does not expose retry or rebuild controls.
+
+---
+
+## 11. Common mistakes
 
 **Apply is not atomic.** State and cursor get out of sync on crash.
 
 **Testing restart manually only.** Restart correctness should be in repeatable tests, not just human observation.
 
-**Memory is truth, SQL approximates it.** Both should have the same semantics where their contracts overlap.
+**Memory is truth, SQL approximates it.** This used to be a risk when the project had a separate map-backed memory store. The current local mode uses in-memory SQLite so local and disk-backed SQL share one implementation.
 
 **Underestimating cursor correctness.** Cursor handling is where restart bugs quietly originate.
 
@@ -175,8 +202,9 @@ The SQL hydration store is what makes restart behave the same as in-process reco
 - Cursor state and timeline state must survive restart together. Neither is sufficient alone.
 - `Apply` must be atomic. A crash must not leave state and cursor out of sync.
 - After restart, the consumer resumes from the cursor. No duplicate work. No skipped state.
-- The SQL store must preserve the same semantics as the memory store. Implementation changes are allowed; semantic drift is not.
+- The disk-backed SQL store must preserve the same semantics as the in-memory SQLite mode. Implementation changes are allowed; semantic drift is not.
 - Persistence and reconnect are the same story in different contexts. SQL makes restart behave like in-process reconnect.
+- Event cursor and timeline cursor are intentionally separate so failed projections can be detected and repaired instead of hidden.
 
 ---
 
@@ -187,13 +215,15 @@ The SQL hydration store is what makes restart behave the same as in-process reco
 - **`Apply(sessionId, ordinal, entities)`**: Atomically advance state and cursor.
 - **`Snapshot(sessionId)`**: Return current state for a session.
 - **`View(sessionId)`**: Return read-only view for projections.
-- **`Cursor(sessionId)`**: Return latest applied ordinal for a session.
+- **`Cursor(sessionId)`**: Return latest applied timeline ordinal for a session.
+- **`EventCursor(sessionId)`**: Return latest stored backend event ordinal when the store supports replay.
+- **`ProjectionCursor("timeline", sessionId)`**: Return latest timeline projection ordinal when the store supports projection cursors.
 
 ### Implementation notes
 
 - SQL store uses transactions for atomic `Apply`.
-- Memory store is for development and testing.
-- Both must produce identical semantics where their contracts overlap.
+- In-memory mode uses SQLite's named in-memory database support.
+- The event log, entity versions, projection cursors, and error records all live in the SQLite backend.
 
 ---
 
@@ -202,7 +232,7 @@ The SQL hydration store is what makes restart behave the same as in-process reco
 ### Framework files
 
 - `sessionstream/hydration.go` — store interface
-- `sessionstream/hydration/memory/store.go` — memory implementation
+- `sessionstream/hydration/sqlite/store.go` — SQLite implementation, including in-memory SQLite mode
 - `sessionstream/hydration/sql/store.go` — SQL implementation
 - `sessionstream/consumer.go` — consumer and restart logic
 - `sessionstream/ordinals.go` — ordinal assignment

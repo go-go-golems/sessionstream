@@ -19,7 +19,7 @@ func newEventConsumer(h *Hub) *eventConsumer {
 	return &eventConsumer{
 		hub: h,
 		ordinals: NewOrdinalAssigner(func(ctx context.Context, sid SessionId) (uint64, error) {
-			return h.store.Cursor(ctx, sid)
+			return h.eventCursor(ctx, sid)
 		}),
 		ready: make(chan error, 1),
 		done:  make(chan error, 1),
@@ -80,10 +80,12 @@ func (c *eventConsumer) consume(ctx context.Context) {
 func (c *eventConsumer) handleMessage(ctx context.Context, msg *message.Message) error {
 	ev, err := decodeEventEnvelope(c.hub.reg, msg.Payload)
 	if err != nil {
+		c.hub.reportError(ctx, ErrorRecord{Kind: ErrorKindDecode, Err: err, RawMessage: append([]byte(nil), msg.Payload...), Metadata: cloneWatermillMetadata(msg.Metadata)})
 		return nil
 	}
 	ord, err := c.ordinals.Next(ctx, ev.SessionId, msg.Metadata)
 	if err != nil {
+		c.hub.reportError(ctx, ErrorRecord{Kind: ErrorKindOrdinal, SessionId: ev.SessionId, EventName: ev.Name, Err: err, RawMessage: append([]byte(nil), msg.Payload...), Metadata: cloneWatermillMetadata(msg.Metadata)})
 		return err
 	}
 	ev.Ordinal = ord

@@ -223,7 +223,7 @@ This forces you to think about:
 - `sessionstream/transport/transport.go` — transport interface
 - `sessionstream/fanout.go` — UI event fanout
 - `sessionstream/hydration.go` — hydration store interface
-- `sessionstream/hydration/memory/store.go` — in-memory store
+- `sessionstream/hydration/sqlite/store.go` — SQLite-backed store, using in-memory SQLite for local reconnect labs
 
 ### Systemlab files
 
@@ -234,4 +234,4 @@ This forces you to think about:
 ### Tests
 
 - `sessionstream/transport/transport_test.go`
-- `sessionstream/hydration/memory/store_test.go`
+- `sessionstream/hydration/sqlite/store_test.go`

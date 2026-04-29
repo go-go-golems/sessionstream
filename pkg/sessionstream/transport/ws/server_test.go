@@ -7,7 +7,7 @@ import (
 	"time"
 
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
-	storememory "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/memory"
+	storesqlite "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -120,7 +120,9 @@ func newTestHubAndServer(t *testing.T) (*sessionstream.Hub, *Server) {
 	require.NoError(t, reg.RegisterUIEvent(testUIEventName, &structpb.Struct{}))
 	require.NoError(t, reg.RegisterTimelineEntity(testEntityKind, &structpb.Struct{}))
 
-	store := storememory.New()
+	store, err := storesqlite.NewInMemory(reg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
 	server, err := NewServer(snapshotAdapter{store: store})
 	require.NoError(t, err)
 
@@ -147,7 +149,7 @@ func registerTestFlow(t *testing.T, hub *sessionstream.Hub) {
 	})))
 }
 
-type snapshotAdapter struct{ store *storememory.Store }
+type snapshotAdapter struct{ store *storesqlite.Store }
 
 func (a snapshotAdapter) Snapshot(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
 	return a.store.Snapshot(ctx, sid, 0)
