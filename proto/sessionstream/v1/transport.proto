@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package sessionstream.v1;
+
+option go_package = "github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1;sessionstreamv1";
+
+import "google/protobuf/any.proto";
+
+message ClientFrame {
+  oneof frame {
+    SubscribeRequest subscribe = 1;
+    UnsubscribeRequest unsubscribe = 2;
+    PingFrame ping = 3;
+    PongFrame pong = 4;
+  }
+}
+
+message ServerFrame {
+  oneof frame {
+    HelloFrame hello = 1;
+    SnapshotFrame snapshot = 2;
+    SubscribedFrame subscribed = 3;
+    UnsubscribedFrame unsubscribed = 4;
+    UiEventFrame ui_event = 5;
+    ErrorFrame error = 6;
+    PingFrame ping = 7;
+    PongFrame pong = 8;
+  }
+}
+
+message HelloFrame {
+  string connection_id = 1;
+}
+
+message SubscribeRequest {
+  string session_id = 1;
+  uint64 since_snapshot_ordinal = 2;
+}
+
+message UnsubscribeRequest {
+  string session_id = 1;
+}
+
+message SubscribedFrame {
+  string session_id = 1;
+  uint64 since_snapshot_ordinal = 2;
+}
+
+message UnsubscribedFrame {
+  string session_id = 1;
+}
+
+message SnapshotFrame {
+  string session_id = 1;
+  uint64 snapshot_ordinal = 2;
+  repeated SnapshotEntity entities = 3;
+}
+
+message SnapshotEntity {
+  string kind = 1;
+  string id = 2;
+  uint64 created_ordinal = 3;
+  uint64 last_event_ordinal = 4;
+  bool tombstone = 5;
+  google.protobuf.Any payload = 6;
+}
+
+message UiEventFrame {
+  string session_id = 1;
+  uint64 event_ordinal = 2;
+  string name = 3;
+  google.protobuf.Any payload = 4;
+}
+
+message ErrorFrame {
+  string code = 1;
+  string message = 2;
+  string session_id = 3;
+  string detail = 4;
+}
+
+message PingFrame {
+  string nonce = 1;
+}
+
+message PongFrame {
+  string nonce = 1;
+}

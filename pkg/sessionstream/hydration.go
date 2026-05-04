@@ -42,7 +42,7 @@ type ErrorRecordStore interface {
 
 // Snapshot is the reconnect payload returned by the store.
 type Snapshot struct {
-	SessionId SessionId        `json:"sessionId"`
-	Ordinal   uint64           `json:"ordinal"`
-	Entities  []TimelineEntity `json:"entities"`
+	SessionId       SessionId        `json:"sessionId"`
+	SnapshotOrdinal uint64           `json:"snapshotOrdinal"`
+	Entities        []TimelineEntity `json:"entities"`
 }

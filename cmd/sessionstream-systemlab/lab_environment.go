@@ -214,7 +214,7 @@ func (e *labEnvironment) RunPhase1(ctx context.Context, in phase1RunRequest) (ph
 		Snapshot: encodeSnapshot(snap),
 		Checks: map[string]bool{
 			"sessionExists":    metadata != nil,
-			"cursorAdvanced":   snap.Ordinal > 0,
+			"cursorAdvanced":   snap.SnapshotOrdinal > 0,
 			"timelineProduced": len(snap.Entities) > 0,
 			"uiEventsProduced": len(uiEvents) > 0,
 		},

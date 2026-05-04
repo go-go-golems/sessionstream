@@ -146,7 +146,7 @@ function renderPhase2Snapshots(el, snapshots) {
       <section class="snapshot-card compact-snapshot-card">
         <header class="snapshot-card-header">
           <span class="snapshot-card-title">${escapeHTML(sid)}</span>
-          <span class="ordinal-chip">cursor ${escapeHTML(snapshot?.ordinal ?? 0)}</span>
+          <span class="ordinal-chip">snapshot ${escapeHTML(snapshot?.snapshotOrdinal ?? snapshot?.ordinal ?? 0)}</span>
           <span class="ordinal-chip">${entities.length} entities</span>
         </header>
         ${renderSnapshotEntities(entities)}
@@ -161,12 +161,13 @@ function renderSnapshotEntities(entities) {
   }
   return `
     <table class="data-table compact-table snapshot-table">
-      <thead><tr><th>Kind</th><th>ID</th><th>Payload</th></tr></thead>
+      <thead><tr><th>Kind</th><th>ID</th><th>Ordinals</th><th>Payload</th></tr></thead>
       <tbody>
         ${entities.map((entity) => `
           <tr>
             <td>${escapeHTML(entity.kind)}</td>
             <td>${escapeHTML(entity.id)}</td>
+            <td><code>created: ${escapeHTML(entity.createdOrdinal ?? "")} · last: ${escapeHTML(entity.lastEventOrdinal ?? "")}</code></td>
             <td><code>${escapeHTML(inlineObject(entity.payload))}</code></td>
           </tr>
         `).join("")}

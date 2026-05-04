@@ -38,6 +38,17 @@ Current chapter coverage in Systemlab:
 - Phase 0 through Phase 5 are framework-oriented labs owned by the `sessionstream` repo
 - The old Phase 6 `cmd/web-chat` migration console is intentionally not part of this extracted Systemlab because it remains a downstream `pinocchio` concern
 
+## Transport schema note
+
+The websocket transport exercised by the labs now uses the public protobuf schema in `proto/sessionstream/v1/transport.proto`. Frames are sent as protobuf JSON `ClientFrame` / `ServerFrame` messages rather than ad-hoc JSON envelopes. Snapshot and UI payloads are carried as `google.protobuf.Any`, and ordinal fields are `uint64` values that protojson renders as strings for JavaScript safety.
+
+When adding or updating labs, prefer the protobuf field names used by the transport schema:
+
+- `sinceSnapshotOrdinal` on subscribe requests;
+- `snapshotOrdinal` on snapshot frames;
+- `createdOrdinal` and `lastEventOrdinal` on snapshot entities;
+- `eventOrdinal` on live UI event frames.
+
 ## Frontend and chapter file layout
 
 The Systemlab browser UI is intentionally split so future labs do not accumulate into one large inline HTML file, and the long-form intern chapters live as editable markdown beside the app:

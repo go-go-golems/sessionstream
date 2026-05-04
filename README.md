@@ -9,6 +9,7 @@ The goal of this repository is to host the reusable parts of that architecture:
 - sibling UI and timeline projections,
 - hydration stores,
 - transport adapters,
+- protobuf transport schemas for websocket clients,
 - framework-oriented examples and labs.
 
 ## What belongs here
@@ -17,6 +18,7 @@ This repository is intended to own the framework layer:
 
 - the core sessionstream package under `pkg/sessionstream`,
 - generic stores and transports under `pkg/sessionstream/...`,
+- protobuf schemas under `proto/sessionstream/v1/` and generated bindings under `pkg/sessionstream/pb/proto/sessionstream/v1/`,
 - small demo/example applications that prove the substrate API,
 - framework-oriented Systemlab content,
 - repository-local design and implementation tickets under `ttmp/`.
@@ -37,6 +39,24 @@ Those stay in downstream consumer repositories such as `pinocchio`.
 The repository is currently in bootstrap mode.
 
 The initial repository planning tickets live under `ttmp/` and capture the extraction plan, intern-facing architecture guides, and implementation diaries.
+
+## Transport and ordinal contract
+
+The websocket adapter uses protobuf-defined frames from `proto/sessionstream/v1/transport.proto`. The wire format is protobuf JSON so browsers can consume it over normal websocket text messages while still getting a typed contract:
+
+- clients send `ClientFrame` oneofs such as `subscribe`, `unsubscribe`, `ping`, and `pong`;
+- servers send `ServerFrame` oneofs such as `hello`, `snapshot`, `subscribed`, `uiEvent`, and `error`;
+- UI event and snapshot payloads are `google.protobuf.Any`, so consumers must register application payload schemas before unpacking;
+- `uint64` ordinals appear as JSON strings under protojson and should not be coerced through JavaScript `number` if precision matters.
+
+Ordinals have distinct meanings at different layers:
+
+- backend events carry an event ordinal assigned by the consumer or hub path;
+- `Snapshot.snapshotOrdinal` / `SnapshotFrame.snapshotOrdinal` is the highest timeline ordinal materialized in the hydration store;
+- each snapshot entity carries `createdOrdinal` and `lastEventOrdinal` so hydrated timelines can preserve display order instead of sorting only by kind/id;
+- live `UiEventFrame.eventOrdinal` identifies the backend event that produced that UI event.
+
+`SubscribeRequest.sinceSnapshotOrdinal` is currently advisory. The reference websocket server still sends the current snapshot first and then future live UI events; it does not silently replay missed UI events.
 
 ## Development
 

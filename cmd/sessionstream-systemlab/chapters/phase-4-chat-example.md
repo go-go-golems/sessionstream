@@ -39,8 +39,9 @@ Chat-specific items stay in example code:
 - `TokensDelta`, `InferenceFinished` backend events
 - `MessageStarted`, `MessageAppended` UI events
 - `ChatMessage` timeline entities
+- protobuf message schemas for those application payloads
 
-These do not belong in `sessionstream`. If chat logic leaks into the substrate, the framework stops being reusable.
+These do not belong in `sessionstream`. The framework only requires that payloads are protobuf messages so transports can pack them into `google.protobuf.Any`. If chat logic or chat schemas leak into the substrate, the framework stops being reusable.
 
 ---
 
@@ -132,7 +133,8 @@ The page should answer:
 2. What backend events did it create?
 3. What did the live UI derive?
 4. What final timeline entity did the store retain?
-5. What happens when you click Stop?
+5. Which ordinals describe the live event stream and the hydrated timeline entity?
+6. What happens when you click Stop?
 
 ---
 
@@ -144,7 +146,7 @@ The page should answer:
 
 **Click Stop mid-stream.** The UI shows MessageStopped. The timeline shows the message with accumulated text so far. The framework treated stop as normal, not as an error.
 
-**Compare the panels.** Backend events, UI events, and final timeline should all be consistent. If they drift apart, something is wrong with the architecture.
+**Compare the panels.** Backend events, UI events, and final timeline should all be consistent. If they drift apart, something is wrong with the architecture. In transport-backed views, live UI rows have `eventOrdinal`, while hydrated `ChatMessage` entities have `createdOrdinal` and `lastEventOrdinal`.
 
 **Export.** The exported transcript is a useful artifact for onboarding and debugging.
 
@@ -157,6 +159,7 @@ The page should answer:
 - The UI projection produces transient live updates. The timeline projection produces durable state.
 - Stop behavior is normal, not exceptional. The framework handles it the same way as finish.
 - Compare the panels. Consistent panels mean the architecture is working.
+- Example payload schemas stay in example code; sessionstream transports only see protobuf messages and `Any` wrappers.
 
 ---
 
@@ -187,10 +190,10 @@ The page should answer:
 
 ### Framework files
 
-- `sessionstream/hub.go` — command routing
-- `sessionstream/projection.go` — projection interfaces
-- `sessionstream/fanout.go` — UI output
-- `sessionstream/hydration.go` — hydration store
+- `pkg/sessionstream/hub.go` — command routing
+- `pkg/sessionstream/projection.go` — projection interfaces
+- `pkg/sessionstream/fanout.go` — UI output
+- `pkg/sessionstream/hydration.go` — hydration store
 
 ### Example files
 

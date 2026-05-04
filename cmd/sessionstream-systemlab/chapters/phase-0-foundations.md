@@ -57,11 +57,11 @@ That distinction will help you make better decisions. When you wonder where a he
 
 Start here:
 
-- `sessionstream/doc.go` — what the package is
-- `sessionstream/types.go` — the core types
-- `sessionstream/hub.go` — the central routing point
-- `sessionstream/projection.go` — how events become views
-- `sessionstream/hydration.go` — the persistence seam
+- `pkg/sessionstream/doc.go` — what the package is
+- `pkg/sessionstream/types.go` — the core types
+- `pkg/sessionstream/hub.go` — the central routing point
+- `pkg/sessionstream/projection.go` — how events become views
+- `pkg/sessionstream/hydration.go` — the persistence seam
 
 These are the files where the framework begins by naming the things it cares about.
 
@@ -154,7 +154,7 @@ The fix was not some clever Go trick. The fix was to return to the architecture 
 The result:
 
 - `sessionstream` defines the `HydrationStore` interface,
-- `sessionstream/hydration/sqlite` implements it,
+- `pkg/sessionstream/hydration/sqlite` implements it,
 - callers inject implementations with options,
 - the core keeps a root-local noop fallback rather than depending on the SQLite implementation.
 
@@ -246,12 +246,12 @@ These are not afterthoughts. They are part of the architecture's defense system.
 
 ### Framework files
 
-- `sessionstream/doc.go` — package documentation
-- `sessionstream/types.go` — core type definitions
-- `sessionstream/hub.go` — central routing point
-- `sessionstream/projection.go` — UI and timeline projection interfaces
-- `sessionstream/hydration.go` — persistence seam
-- `sessionstream/hub.go` — orchestration entrypoint
+- `pkg/sessionstream/doc.go` — package documentation
+- `pkg/sessionstream/types.go` — core type definitions
+- `pkg/sessionstream/hub.go` — central routing point
+- `pkg/sessionstream/projection.go` — UI and timeline projection interfaces
+- `pkg/sessionstream/hydration.go` — persistence seam
+- `pkg/sessionstream/hub.go` — orchestration entrypoint
 
 ### Systemlab files
 

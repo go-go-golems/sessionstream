@@ -14,10 +14,12 @@ type UIEvent struct {
 
 // TimelineEntity is the value type persisted in hydration state.
 type TimelineEntity struct {
-	Kind      string
-	Id        string
-	Payload   proto.Message
-	Tombstone bool
+	Kind             string
+	Id               string
+	CreatedOrdinal   uint64
+	LastEventOrdinal uint64
+	Payload          proto.Message
+	Tombstone        bool
 }
 
 // TimelineView is a read-only view of current timeline state.

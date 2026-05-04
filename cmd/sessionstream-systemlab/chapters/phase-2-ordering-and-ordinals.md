@@ -102,10 +102,12 @@ func handleMessage(msg Message) {
 }
 ```
 
-The ordinal is what the framework uses for:
-- **Order.** If you know ordinals 1 through 5, you know the sequence.
-- **Reconnect.** A client that disconnected at ordinal 3 can ask for everything after ordinal 3.
-- **Hydration.** The store tracks the latest ordinal per session.
+The event ordinal is what the framework uses for:
+- **Order.** If you know event ordinals 1 through 5, you know the consumed event sequence.
+- **Projection.** Timeline and UI projections run against the event that owns that ordinal.
+- **Hydration.** The store advances its `snapshotOrdinal` to the latest event ordinal successfully materialized into timeline state.
+
+Reconnect uses a related but more specific cursor: the client subscribes with `sinceSnapshotOrdinal`, and the server answers with a snapshot labeled by `snapshotOrdinal`. Live UI events then carry `eventOrdinal`.
 
 ---
 
@@ -140,7 +142,23 @@ The system never fails to assign an ordinal.
 
 ---
 
-## 7. Per-session ordering
+## 7. Ordinals in the protobuf transport
+
+The websocket transport exposes these ordering concepts through protobuf fields:
+
+| Field | Where it appears | Meaning |
+|-------|------------------|---------|
+| `snapshotOrdinal` | `SnapshotFrame` | Highest timeline event ordinal included in the snapshot. |
+| `createdOrdinal` | `SnapshotEntity` | Event ordinal that first created the entity. Stable across updates. |
+| `lastEventOrdinal` | `SnapshotEntity` | Event ordinal that most recently updated the entity. |
+| `eventOrdinal` | `UiEventFrame` | Backend event ordinal that produced the live UI event. |
+| `sinceSnapshotOrdinal` | `SubscribeRequest` / `SubscribedFrame` | Advisory client cursor for diagnostics and future replay APIs. |
+
+These fields are `uint64` in protobuf. In protobuf JSON they render as strings, which avoids JavaScript precision loss for large stream-derived ordinals.
+
+---
+
+## 8. Per-session ordering
 
 The framework orders events per session, not globally.
 
@@ -157,7 +175,7 @@ This matters because the framework's unit of work is the session. Hydration trac
 
 ---
 
-## 8. The pseudocode comparison
+## 9. The pseudocode comparison
 
 Here is Phase 1:
 
@@ -198,7 +216,7 @@ The hub is now thin. The consumer is the orchestration center.
 
 ---
 
-## 9. The UIFanout seam
+## 10. The UIFanout seam
 
 The consumer projects UI events. But the consumer should not know about websockets, browser tabs, or connection lifetimes.
 
@@ -214,7 +232,7 @@ This separation means Phase 3 can add websocket transport without changing the c
 
 ---
 
-## 10. Reading the page
+## 11. Reading the page
 
 The Phase 2 page shows the publish/consume split explicitly.
 
@@ -229,7 +247,7 @@ The **Bus Trace** shows what happened in order. The **Session Ordinals** shows p
 
 ---
 
-## 11. Things to try
+## 12. Things to try
 
 **Publish A.** Look at the message history. `publishedOrdinal` is 0. `consumedOrdinal` is a large value. The framework believes the consumed value.
 
@@ -243,11 +261,11 @@ Note: the burst order and displayed order may not match perfectly. The framework
 
 **Restart Consumer.** The consumer restarts and continues processing. The lab remains responsive.
 
-**Export.** Ordinals render as strings. This is intentional. JavaScript cannot represent large stream IDs precisely as numbers.
+**Export.** Ordinals render as strings. This mirrors protobuf JSON for `uint64` fields and is intentional. JavaScript cannot represent large stream IDs precisely as numbers.
 
 ---
 
-## 12. What the checks prove
+## 13. What the checks prove
 
 | Check | What it proves |
 |-------|----------------|
@@ -265,6 +283,7 @@ Note: the burst order and displayed order may not match perfectly. The framework
 - The consumer assigns the real ordinal. The consumer is the first place that knows the actual order.
 - Ordinals are monotonic per session. Sessions are independent.
 - The ordinal assigner prefers stream metadata when available, falls back to a counter otherwise.
+- The protobuf transport names ordinal roles explicitly: `snapshotOrdinal`, `createdOrdinal`, `lastEventOrdinal`, `eventOrdinal`, and `sinceSnapshotOrdinal`.
 - `UIFanout` separates the consumer from transport concerns.
 - Correctness is end-to-end. If the frontend rounds ordinals, the lab is misleading.
 
@@ -285,11 +304,11 @@ Note: the burst order and displayed order may not match perfectly. The framework
 
 ### Framework files
 
-- `sessionstream/bus.go` — bus publisher interface
-- `sessionstream/consumer.go` — consumer loop and orchestration
-- `sessionstream/ordinals.go` — ordinal assignment logic
-- `sessionstream/fanout.go` — UI output seam
-- `sessionstream/hub.go` — command routing
+- `pkg/sessionstream/bus.go` — bus publisher interface
+- `pkg/sessionstream/consumer.go` — consumer loop and orchestration
+- `pkg/sessionstream/ordinals.go` — ordinal assignment logic
+- `pkg/sessionstream/fanout.go` — UI output seam
+- `pkg/sessionstream/hub.go` — command routing
 
 ### Systemlab files
 
@@ -304,6 +323,6 @@ Note: the burst order and displayed order may not match perfectly. The framework
 
 ### Tests
 
-- `sessionstream/bus_test.go`
-- `sessionstream/ordinals_test.go`
+- `pkg/sessionstream/bus_test.go`
+- `pkg/sessionstream/ordinals_test.go`
 - `cmd/sessionstream-systemlab/lab_environment_test.go`

@@ -10,20 +10,16 @@ import (
 	"sync/atomic"
 
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+	sessionstreamv1 "github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
-const (
-	frameTypeHello        = "hello"
-	frameTypeSubscribed   = "subscribed"
-	frameTypeUnsubscribed = "unsubscribed"
-	frameTypeSnapshot     = "snapshot"
-	frameTypeUIEvent      = "ui-event"
-	frameTypeError        = "error"
-	frameTypePing         = "ping"
-	frameTypePong         = "pong"
+var (
+	marshalOptions = protojson.MarshalOptions{EmitUnpopulated: false, UseProtoNames: false}
+	unmarshalOpts  = protojson.UnmarshalOptions{DiscardUnknown: false}
 )
 
 // SnapshotProvider provides snapshot lookup for subscribe flows.
@@ -33,13 +29,18 @@ type SnapshotProvider interface {
 
 // Hooks observes websocket lifecycle and payload sequencing for debugging and labs.
 type Hooks struct {
-	OnConnect      func(sessionstream.ConnectionId)
-	OnDisconnect   func(sessionstream.ConnectionId)
-	OnSubscribe    func(sessionstream.ConnectionId, sessionstream.SessionId, uint64)
-	OnUnsubscribe  func(sessionstream.ConnectionId, sessionstream.SessionId)
-	OnSnapshotSent func(sessionstream.ConnectionId, sessionstream.SessionId, sessionstream.Snapshot)
-	OnUIEventSent  func(sessionstream.ConnectionId, sessionstream.SessionId, uint64, sessionstream.UIEvent)
-	OnClientFrame  func(sessionstream.ConnectionId, map[string]any)
+	OnUpgradeError  func(*http.Request, error)
+	OnConnect       func(sessionstream.ConnectionId)
+	OnDisconnect    func(sessionstream.ConnectionId)
+	OnReadError     func(sessionstream.ConnectionId, error)
+	OnWriteError    func(sessionstream.ConnectionId, error)
+	OnSendError     func(sessionstream.ConnectionId, error)
+	OnProtocolError func(sessionstream.ConnectionId, error)
+	OnSubscribe     func(sessionstream.ConnectionId, sessionstream.SessionId, uint64)
+	OnUnsubscribe   func(sessionstream.ConnectionId, sessionstream.SessionId)
+	OnSnapshotSent  func(sessionstream.ConnectionId, sessionstream.SessionId, sessionstream.Snapshot)
+	OnUIEventSent   func(sessionstream.ConnectionId, sessionstream.SessionId, uint64, sessionstream.UIEvent)
+	OnClientFrame   func(sessionstream.ConnectionId, map[string]any)
 }
 
 // Option configures a websocket Server.
@@ -67,7 +68,7 @@ func WithUpgrader(u websocket.Upgrader) Option {
 // out of scope for this adapter.
 //
 // Subscribe always sends a current snapshot followed by future live UI fanout.
-// sinceOrdinal is accepted, stored, echoed, and surfaced to hooks for teaching
+// sinceSnapshotOrdinal is accepted, stored, echoed, and surfaced to hooks for teaching
 // and diagnostics, but it is advisory for now: this reference adapter does not
 // replay missed UI events from the event store. Replayed event history belongs
 // behind an explicit replay API rather than being hidden inside websocket
@@ -101,31 +102,13 @@ type connection struct {
 }
 
 type subscription struct {
-	sinceOrdinal uint64
+	sinceSnapshotOrdinal uint64
 }
 
 // ConnectionInfo describes the current transport-visible state of one connection.
 type ConnectionInfo struct {
 	ConnectionId  string   `json:"connectionId"`
 	Subscriptions []string `json:"subscriptions"`
-}
-
-type clientFrame struct {
-	Type         string `json:"type"`
-	SessionID    string `json:"sessionId,omitempty"`
-	SinceOrdinal string `json:"sinceOrdinal,omitempty"`
-}
-
-type envelope struct {
-	Type         string `json:"type"`
-	ConnectionID string `json:"connectionId,omitempty"`
-	SessionID    string `json:"sessionId,omitempty"`
-	SinceOrdinal string `json:"sinceOrdinal,omitempty"`
-	Ordinal      string `json:"ordinal,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Payload      any    `json:"payload,omitempty"`
-	Entities     []any  `json:"entities,omitempty"`
-	Error        string `json:"error,omitempty"`
 }
 
 var _ http.Handler = (*Server)(nil)
@@ -159,6 +142,9 @@ func NewServer(snapshots SnapshotProvider, opts ...Option) (*Server, error) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		if s.hooks.OnUpgradeError != nil {
+			s.hooks.OnUpgradeError(r, err)
+		}
 		return
 	}
 	cid := sessionstream.ConnectionId(fmt.Sprintf("conn-%d", atomic.AddUint64(&s.nextID, 1)))
@@ -176,7 +162,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go s.writeLoop(c)
-	_ = s.sendEnvelope(c, envelope{Type: frameTypeHello, ConnectionID: string(cid)})
+	_ = s.sendFrame(c, newHelloFrame(cid))
 	s.readLoop(r.Context(), c)
 	s.closeConnection(c)
 }
@@ -189,13 +175,15 @@ func (s *Server) PublishUI(_ context.Context, sid sessionstream.SessionId, ord u
 	targets := s.connectionsForSession(sid)
 	for _, c := range targets {
 		for _, event := range events {
-			if err := s.sendEnvelope(c, envelope{
-				Type:      frameTypeUIEvent,
-				SessionID: string(sid),
-				Ordinal:   fmt.Sprintf("%d", ord),
-				Name:      event.Name,
-				Payload:   encodeProtoJSON(event.Payload),
-			}); err != nil {
+			frame, err := newUIEventFrame(sid, ord, event)
+			if err != nil {
+				if s.hooks.OnSendError != nil {
+					s.hooks.OnSendError(c.id, err)
+				}
+				s.closeConnection(c)
+				continue
+			}
+			if err := s.sendFrame(c, frame); err != nil {
 				s.closeConnection(c)
 				continue
 			}
@@ -233,53 +221,62 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			return
 		default:
 		}
-		var frame clientFrame
-		if err := c.ws.ReadJSON(&frame); err != nil {
+		_, raw, err := c.ws.ReadMessage()
+		if err != nil {
+			if s.hooks.OnReadError != nil {
+				s.hooks.OnReadError(c.id, err)
+			}
 			return
 		}
+		frame := &sessionstreamv1.ClientFrame{}
+		if err := unmarshalOpts.Unmarshal(raw, frame); err != nil {
+			if s.hooks.OnProtocolError != nil {
+				s.hooks.OnProtocolError(c.id, err)
+			}
+			if sendErr := s.sendFrame(c, newErrorFrame("bad_client_frame", err.Error(), "")); sendErr != nil && s.hooks.OnSendError != nil {
+				s.hooks.OnSendError(c.id, sendErr)
+			}
+			continue
+		}
 		if s.hooks.OnClientFrame != nil {
-			s.hooks.OnClientFrame(c.id, map[string]any{
-				"type":         frame.Type,
-				"sessionId":    frame.SessionID,
-				"sinceOrdinal": frame.SinceOrdinal,
-			})
+			s.hooks.OnClientFrame(c.id, protoMessageAsMap(frame))
 		}
 		if err := s.handleClientFrame(ctx, c, frame); err != nil {
-			_ = s.sendEnvelope(c, envelope{Type: frameTypeError, Error: err.Error()})
+			if s.hooks.OnProtocolError != nil {
+				s.hooks.OnProtocolError(c.id, err)
+			}
+			if sendErr := s.sendFrame(c, newErrorFrame("protocol_error", err.Error(), "")); sendErr != nil && s.hooks.OnSendError != nil {
+				s.hooks.OnSendError(c.id, sendErr)
+			}
 		}
 	}
 }
 
-func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame clientFrame) error {
-	switch frame.Type {
-	case frameTypePing:
-		return s.sendEnvelope(c, envelope{Type: frameTypePong})
-	case "subscribe":
-		sid := sessionstream.SessionId(frame.SessionID)
+func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *sessionstreamv1.ClientFrame) error {
+	switch typed := frame.GetFrame().(type) {
+	case *sessionstreamv1.ClientFrame_Ping:
+		return s.sendFrame(c, newPongFrame(typed.Ping.GetNonce()))
+	case *sessionstreamv1.ClientFrame_Pong:
+		return nil
+	case *sessionstreamv1.ClientFrame_Subscribe:
+		sub := typed.Subscribe
+		sid := sessionstream.SessionId(sub.GetSessionId())
 		if sid == "" {
 			return fmt.Errorf("subscribe missing session id")
 		}
-		since, err := parseUint(frame.SinceOrdinal)
-		if err != nil {
-			return fmt.Errorf("parse since ordinal: %w", err)
-		}
+		since := sub.GetSinceSnapshotOrdinal()
 		snap, err := s.snapshots.Snapshot(ctx, sid)
 		if err != nil {
 			return fmt.Errorf("load snapshot for %q: %w", sid, err)
 		}
-		if err := s.sendEnvelope(c, envelope{
-			Type:      frameTypeSnapshot,
-			SessionID: string(sid),
-			Ordinal:   fmt.Sprintf("%d", snap.Ordinal),
-			Entities:  encodeSnapshotEntities(snap.Entities),
-		}); err != nil {
+		if err := s.sendFrame(c, newSnapshotFrame(sid, snap)); err != nil {
 			return err
 		}
 		if s.hooks.OnSnapshotSent != nil {
 			s.hooks.OnSnapshotSent(c.id, sid, cloneSnapshot(snap))
 		}
 		c.mu.Lock()
-		c.subs[sid] = subscription{sinceOrdinal: since}
+		c.subs[sid] = subscription{sinceSnapshotOrdinal: since}
 		c.mu.Unlock()
 		s.mu.Lock()
 		set := s.bySession[sid]
@@ -292,9 +289,9 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame cli
 		if s.hooks.OnSubscribe != nil {
 			s.hooks.OnSubscribe(c.id, sid, since)
 		}
-		return s.sendEnvelope(c, envelope{Type: frameTypeSubscribed, SessionID: string(sid), SinceOrdinal: fmt.Sprintf("%d", since)})
-	case "unsubscribe":
-		sid := sessionstream.SessionId(frame.SessionID)
+		return s.sendFrame(c, newSubscribedFrame(sid, since))
+	case *sessionstreamv1.ClientFrame_Unsubscribe:
+		sid := sessionstream.SessionId(typed.Unsubscribe.GetSessionId())
 		if sid == "" {
 			return fmt.Errorf("unsubscribe missing session id")
 		}
@@ -302,15 +299,18 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame cli
 		if s.hooks.OnUnsubscribe != nil {
 			s.hooks.OnUnsubscribe(c.id, sid)
 		}
-		return s.sendEnvelope(c, envelope{Type: frameTypeUnsubscribed, SessionID: string(sid)})
+		return s.sendFrame(c, newUnsubscribedFrame(sid))
 	default:
-		return fmt.Errorf("unknown frame type %q", frame.Type)
+		return fmt.Errorf("unknown client frame")
 	}
 }
 
 func (s *Server) writeLoop(c *connection) {
 	for msg := range c.send {
 		if err := c.ws.WriteMessage(websocket.TextMessage, msg); err != nil {
+			if s.hooks.OnWriteError != nil {
+				s.hooks.OnWriteError(c.id, err)
+			}
 			return
 		}
 	}
@@ -379,14 +379,14 @@ func (s *Server) removeSubscription(c *connection, sid sessionstream.SessionId) 
 	s.mu.Unlock()
 }
 
-func (s *Server) sendEnvelope(c *connection, env envelope) (err error) {
+func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) (err error) {
 	if c == nil {
 		return fmt.Errorf("connection is nil")
 	}
 	if c.closed.Load() {
 		return fmt.Errorf("connection %s is closed", c.id)
 	}
-	body, err := json.Marshal(env)
+	body, err := marshalOptions.Marshal(frame)
 	if err != nil {
 		return err
 	}
@@ -406,50 +406,88 @@ func (s *Server) sendEnvelope(c *connection, env envelope) (err error) {
 	}
 }
 
-func encodeSnapshotEntities(in []sessionstream.TimelineEntity) []any {
-	if len(in) == 0 {
-		return []any{}
+func newHelloFrame(cid sessionstream.ConnectionId) *sessionstreamv1.ServerFrame {
+	return &sessionstreamv1.ServerFrame{Frame: &sessionstreamv1.ServerFrame_Hello{Hello: &sessionstreamv1.HelloFrame{ConnectionId: string(cid)}}}
+}
+
+func newSubscribedFrame(sid sessionstream.SessionId, since uint64) *sessionstreamv1.ServerFrame {
+	return &sessionstreamv1.ServerFrame{Frame: &sessionstreamv1.ServerFrame_Subscribed{Subscribed: &sessionstreamv1.SubscribedFrame{SessionId: string(sid), SinceSnapshotOrdinal: since}}}
+}
+
+func newUnsubscribedFrame(sid sessionstream.SessionId) *sessionstreamv1.ServerFrame {
+	return &sessionstreamv1.ServerFrame{Frame: &sessionstreamv1.ServerFrame_Unsubscribed{Unsubscribed: &sessionstreamv1.UnsubscribedFrame{SessionId: string(sid)}}}
+}
+
+func newSnapshotFrame(sid sessionstream.SessionId, snap sessionstream.Snapshot) *sessionstreamv1.ServerFrame {
+	return &sessionstreamv1.ServerFrame{Frame: &sessionstreamv1.ServerFrame_Snapshot{Snapshot: &sessionstreamv1.SnapshotFrame{SessionId: string(sid), SnapshotOrdinal: snap.SnapshotOrdinal, Entities: encodeSnapshotEntities(snap.Entities)}}}
+}
+
+func newUIEventFrame(sid sessionstream.SessionId, ord uint64, event sessionstream.UIEvent) (*sessionstreamv1.ServerFrame, error) {
+	payload, err := packAny(event.Payload)
+	if err != nil {
+		return nil, err
 	}
-	out := make([]any, 0, len(in))
+	return &sessionstreamv1.ServerFrame{Frame: &sessionstreamv1.ServerFrame_UiEvent{UiEvent: &sessionstreamv1.UiEventFrame{SessionId: string(sid), EventOrdinal: ord, Name: event.Name, Payload: payload}}}, nil
+}
+
+func newErrorFrame(code, message, sessionID string) *sessionstreamv1.ServerFrame {
+	return &sessionstreamv1.ServerFrame{Frame: &sessionstreamv1.ServerFrame_Error{Error: &sessionstreamv1.ErrorFrame{Code: code, Message: message, SessionId: sessionID}}}
+}
+
+func newPongFrame(nonce string) *sessionstreamv1.ServerFrame {
+	return &sessionstreamv1.ServerFrame{Frame: &sessionstreamv1.ServerFrame_Pong{Pong: &sessionstreamv1.PongFrame{Nonce: nonce}}}
+}
+
+func encodeSnapshotEntities(in []sessionstream.TimelineEntity) []*sessionstreamv1.SnapshotEntity {
+	if len(in) == 0 {
+		return []*sessionstreamv1.SnapshotEntity{}
+	}
+	out := make([]*sessionstreamv1.SnapshotEntity, 0, len(in))
 	for _, entity := range in {
-		out = append(out, map[string]any{
-			"kind":      entity.Kind,
-			"id":        entity.Id,
-			"tombstone": entity.Tombstone,
-			"payload":   encodeProtoJSON(entity.Payload),
+		out = append(out, &sessionstreamv1.SnapshotEntity{
+			Kind:             entity.Kind,
+			Id:               entity.Id,
+			CreatedOrdinal:   entity.CreatedOrdinal,
+			LastEventOrdinal: entity.LastEventOrdinal,
+			Tombstone:        entity.Tombstone,
+			Payload:          mustPackAny(entity.Payload),
 		})
 	}
 	return out
 }
 
-func encodeProtoJSON(msg proto.Message) any {
+func packAny(msg proto.Message) (*anypb.Any, error) {
 	if msg == nil {
-		return nil
+		return nil, nil
 	}
-	body, err := protojson.MarshalOptions{EmitUnpopulated: false, UseProtoNames: false}.Marshal(msg)
+	return anypb.New(msg)
+}
+
+func mustPackAny(msg proto.Message) *anypb.Any {
+	packed, err := packAny(msg)
+	if err != nil {
+		return &anypb.Any{Value: []byte(err.Error())}
+	}
+	return packed
+}
+
+func protoMessageAsMap(msg proto.Message) map[string]any {
+	if msg == nil {
+		return map[string]any{}
+	}
+	body, err := marshalOptions.Marshal(msg)
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}
-	var out any
+	out := map[string]any{}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return string(body)
+		return map[string]any{"error": err.Error()}
 	}
 	return out
 }
 
-func parseUint(raw string) (uint64, error) {
-	if raw == "" {
-		return 0, nil
-	}
-	var out uint64
-	if _, err := fmt.Sscanf(raw, "%d", &out); err != nil {
-		return 0, err
-	}
-	return out, nil
-}
-
 func cloneSnapshot(snap sessionstream.Snapshot) sessionstream.Snapshot {
-	out := sessionstream.Snapshot{SessionId: snap.SessionId, Ordinal: snap.Ordinal}
+	out := sessionstream.Snapshot{SessionId: snap.SessionId, SnapshotOrdinal: snap.SnapshotOrdinal}
 	out.Entities = make([]sessionstream.TimelineEntity, 0, len(snap.Entities))
 	for _, entity := range snap.Entities {
 		cloned := entity

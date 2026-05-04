@@ -174,11 +174,11 @@ function renderSnapshotRendered(data) {
   
   const entities = data.entities || [];
   const sessionId = data.sessionId || 'unknown';
-  const ordinal = data.ordinal || 0;
+  const ordinal = data.snapshotOrdinal || data.ordinal || 0;
   
   let html = `<div class="snapshot-session">`;
   html += `<div class="session-header-label">Session: ${sessionId}</div>`;
-  html += `<div class="session-header-label">Ordinal: ${ordinal}</div>`;
+  html += `<div class="session-header-label">Snapshot ordinal: ${ordinal}</div>`;
   html += '</div>';
   
   entities.forEach(entity => {

@@ -172,7 +172,7 @@ func (e *labEnvironment) buildPhase4Response(action, sessionID, prompt string) (
 		return phase4RunResponse{}, err
 	}
 	encoded := encodeSnapshot(snap)
-	encoded["ordinal"] = fmt.Sprintf("%d", snap.Ordinal)
+	encoded["ordinal"] = fmt.Sprintf("%d", snap.SnapshotOrdinal)
 	checks := map[string]bool{
 		"snapshotBeforeLive": phase4SnapshotBeforeLive(trace),
 		"timelineMatchesUI":  phase4TimelineMatchesUI(trace, encoded),

@@ -1,6 +1,6 @@
 <div class="panel">
   <h2>Phase 5 — Persistence and Restart Correctness</h2>
-  <p>Switch between memory and SQL hydration stores, seed a session, restart the backend runtime, reconnect the websocket client, and compare pre/post restart snapshots. The memory mode should forget state; the SQL mode should preserve cursor and entities and continue ordinals without gaps.</p>
+  <p>Switch between memory and SQL hydration stores, seed a session, restart the backend runtime, reconnect the websocket client, and compare pre/post restart snapshots. The memory mode should forget state; the SQL mode should preserve snapshot cursor and entities and continue ordinals without gaps.</p>
 </div>
 <div class="panel">
   <h3>Phase 5 Chapter</h3>
@@ -40,7 +40,7 @@
 <div class="grid">
   <div class="panel">
     <h3>Replay Cursors and Errors</h3>
-    <p class="muted">Read-only inspection: event cursor, timeline projection cursor, and persisted error records for the selected session.</p>
+    <p class="muted">Read-only inspection: event cursor, timeline/snapshot projection cursor, and persisted error records for the selected session.</p>
     <div class="actions">
       <button class="secondary" data-action="phase5-replay-refresh">Refresh Replay State</button>
     </div>
