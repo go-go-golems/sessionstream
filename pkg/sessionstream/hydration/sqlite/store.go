@@ -584,7 +584,7 @@ func (s *Store) migrate() error {
 	if err := s.db.QueryRow(`PRAGMA user_version;`).Scan(&userVersion); err != nil {
 		return err
 	}
-	if userVersion > 0 && userVersion < targetUserVersion {
+	if userVersion < targetUserVersion {
 		for _, stmt := range []string{
 			`DROP TABLE IF EXISTS sessionstream_errors;`,
 			`DROP TABLE IF EXISTS sessionstream_projection_cursors;`,
