@@ -97,7 +97,7 @@ func (s *Store) Apply(ctx context.Context, sid sessionstream.SessionId, ord uint
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	cursor, err := uint64ToInt64(ord)
+	eventOrdinal, err := uint64ToInt64(ord)
 	if err != nil {
 		return err
 	}
@@ -112,13 +112,50 @@ func (s *Store) Apply(ctx context.Context, sid sessionstream.SessionId, ord uint
 		if err != nil {
 			return err
 		}
+
+		createdOrdinal := entity.CreatedOrdinal
+		lastEventOrdinal := entity.LastEventOrdinal
+		if createdOrdinal == 0 {
+			createdOrdinal = ord
+		}
+		if lastEventOrdinal == 0 {
+			lastEventOrdinal = ord
+		}
+
+		var existingCreated sql.NullInt64
+		err = tx.QueryRowContext(ctx, `
+			SELECT created_ordinal
+			FROM sessionstream_entities
+			WHERE session_id = ? AND kind = ? AND entity_id = ?
+		`, string(sid), entity.Kind, entity.Id).Scan(&existingCreated)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil && existingCreated.Valid && entity.CreatedOrdinal == 0 {
+			createdOrdinal, err = int64ToUint64(existingCreated.Int64)
+			if err != nil {
+				return err
+			}
+		}
+
+		createdOrdinalDB, err := uint64ToInt64(createdOrdinal)
+		if err != nil {
+			return err
+		}
+		lastEventOrdinalDB, err := uint64ToInt64(lastEventOrdinal)
+		if err != nil {
+			return err
+		}
+
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO sessionstream_entity_versions(session_id, kind, entity_id, ordinal, tombstone, payload_json)
-			VALUES(?, ?, ?, ?, ?, ?)
+			INSERT INTO sessionstream_entity_versions(session_id, kind, entity_id, ordinal, created_ordinal, last_event_ordinal, tombstone, payload_json)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(session_id, kind, entity_id, ordinal) DO UPDATE SET
+				created_ordinal = excluded.created_ordinal,
+				last_event_ordinal = excluded.last_event_ordinal,
 				tombstone = excluded.tombstone,
 				payload_json = excluded.payload_json
-		`, string(sid), entity.Kind, entity.Id, cursor, boolToInt(entity.Tombstone), string(payload)); err != nil {
+		`, string(sid), entity.Kind, entity.Id, eventOrdinal, createdOrdinalDB, lastEventOrdinalDB, boolToInt(entity.Tombstone), string(payload)); err != nil {
 			return err
 		}
 		if entity.Tombstone {
@@ -128,21 +165,24 @@ func (s *Store) Apply(ctx context.Context, sid sessionstream.SessionId, ord uint
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO sessionstream_entities(session_id, kind, entity_id, payload_json)
-			VALUES(?, ?, ?, ?)
-			ON CONFLICT(session_id, kind, entity_id) DO UPDATE SET payload_json = excluded.payload_json
-		`, string(sid), entity.Kind, entity.Id, string(payload)); err != nil {
+			INSERT INTO sessionstream_entities(session_id, kind, entity_id, created_ordinal, last_event_ordinal, payload_json)
+			VALUES(?, ?, ?, ?, ?, ?)
+			ON CONFLICT(session_id, kind, entity_id) DO UPDATE SET
+				created_ordinal = excluded.created_ordinal,
+				last_event_ordinal = excluded.last_event_ordinal,
+				payload_json = excluded.payload_json
+		`, string(sid), entity.Kind, entity.Id, createdOrdinalDB, lastEventOrdinalDB, string(payload)); err != nil {
 			return err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO sessionstream_sessions(session_id, cursor)
+		INSERT INTO sessionstream_sessions(session_id, snapshot_ordinal)
 		VALUES(?, ?)
-		ON CONFLICT(session_id) DO UPDATE SET cursor = CASE
-			WHEN excluded.cursor > sessionstream_sessions.cursor THEN excluded.cursor
-			ELSE sessionstream_sessions.cursor
+		ON CONFLICT(session_id) DO UPDATE SET snapshot_ordinal = CASE
+			WHEN excluded.snapshot_ordinal > sessionstream_sessions.snapshot_ordinal THEN excluded.snapshot_ordinal
+			ELSE sessionstream_sessions.snapshot_ordinal
 		END
-	`, string(sid), cursor); err != nil {
+	`, string(sid), eventOrdinal); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -155,25 +195,30 @@ func (s *Store) Snapshot(ctx context.Context, sid sessionstream.SessionId, asOf 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	cursor, err := s.Cursor(ctx, sid)
+	snapshotOrdinal, err := s.Cursor(ctx, sid)
 	if err != nil {
 		return sessionstream.Snapshot{}, err
 	}
-	if asOf > 0 && asOf < cursor {
-		cursor = asOf
+	if asOf > 0 && asOf < snapshotOrdinal {
+		snapshotOrdinal = asOf
 	}
 
 	var rows *sql.Rows
 	if asOf == 0 {
-		rows, err = s.db.QueryContext(ctx, `SELECT kind, entity_id, 0 AS tombstone, payload_json FROM sessionstream_entities WHERE session_id = ? ORDER BY kind ASC, entity_id ASC`, string(sid))
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT kind, entity_id, created_ordinal, last_event_ordinal, 0 AS tombstone, payload_json
+			FROM sessionstream_entities
+			WHERE session_id = ?
+			ORDER BY created_ordinal ASC, last_event_ordinal ASC, kind ASC, entity_id ASC
+		`, string(sid))
 	} else {
-		var versionCursor int64
-		versionCursor, err = uint64ToInt64(asOf)
+		var versionOrdinal int64
+		versionOrdinal, err = uint64ToInt64(snapshotOrdinal)
 		if err != nil {
 			return sessionstream.Snapshot{}, err
 		}
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT v.kind, v.entity_id, v.tombstone, v.payload_json
+			SELECT v.kind, v.entity_id, v.created_ordinal, v.last_event_ordinal, v.tombstone, v.payload_json
 			FROM sessionstream_entity_versions v
 			JOIN (
 				SELECT kind, entity_id, MAX(ordinal) AS ordinal
@@ -183,8 +228,8 @@ func (s *Store) Snapshot(ctx context.Context, sid sessionstream.SessionId, asOf 
 			) latest
 			ON latest.kind = v.kind AND latest.entity_id = v.entity_id AND latest.ordinal = v.ordinal
 			WHERE v.session_id = ?
-			ORDER BY v.kind ASC, v.entity_id ASC
-		`, string(sid), versionCursor, string(sid))
+			ORDER BY v.created_ordinal ASC, v.last_event_ordinal ASC, v.kind ASC, v.entity_id ASC
+		`, string(sid), versionOrdinal, string(sid))
 	}
 	if err != nil {
 		return sessionstream.Snapshot{}, err
@@ -193,12 +238,14 @@ func (s *Store) Snapshot(ctx context.Context, sid sessionstream.SessionId, asOf 
 	entities := make([]sessionstream.TimelineEntity, 0)
 	for rows.Next() {
 		var (
-			kind      string
-			id        string
-			tombstone int
-			rawJSON   string
+			kind             string
+			id               string
+			createdOrdinal   int64
+			lastEventOrdinal int64
+			tombstone        int
+			rawJSON          string
 		)
-		if err := rows.Scan(&kind, &id, &tombstone, &rawJSON); err != nil {
+		if err := rows.Scan(&kind, &id, &createdOrdinal, &lastEventOrdinal, &tombstone, &rawJSON); err != nil {
 			return sessionstream.Snapshot{}, err
 		}
 		if tombstone != 0 {
@@ -212,18 +259,20 @@ func (s *Store) Snapshot(ctx context.Context, sid sessionstream.SessionId, asOf 
 		if err := protojson.Unmarshal([]byte(rawJSON), msg); err != nil {
 			return sessionstream.Snapshot{}, err
 		}
-		entities = append(entities, sessionstream.TimelineEntity{Kind: kind, Id: id, Payload: msg})
+		createdOrdinalU64, err := int64ToUint64(createdOrdinal)
+		if err != nil {
+			return sessionstream.Snapshot{}, err
+		}
+		lastEventOrdinalU64, err := int64ToUint64(lastEventOrdinal)
+		if err != nil {
+			return sessionstream.Snapshot{}, err
+		}
+		entities = append(entities, sessionstream.TimelineEntity{Kind: kind, Id: id, CreatedOrdinal: createdOrdinalU64, LastEventOrdinal: lastEventOrdinalU64, Payload: msg})
 	}
 	if err := rows.Err(); err != nil {
 		return sessionstream.Snapshot{}, err
 	}
-	sort.Slice(entities, func(i, j int) bool {
-		if entities[i].Kind == entities[j].Kind {
-			return entities[i].Id < entities[j].Id
-		}
-		return entities[i].Kind < entities[j].Kind
-	})
-	return sessionstream.Snapshot{SessionId: sid, Ordinal: cursor, Entities: entities}, nil
+	return sessionstream.Snapshot{SessionId: sid, SnapshotOrdinal: snapshotOrdinal, Entities: entities}, nil
 }
 
 func (s *Store) View(ctx context.Context, sid sessionstream.SessionId) (sessionstream.TimelineView, error) {
@@ -242,7 +291,7 @@ func (s *Store) Cursor(ctx context.Context, sid sessionstream.SessionId) (uint64
 		ctx = context.Background()
 	}
 	var cursor sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT cursor FROM sessionstream_sessions WHERE session_id = ?`, string(sid)).Scan(&cursor)
+	err := s.db.QueryRowContext(ctx, `SELECT snapshot_ordinal FROM sessionstream_sessions WHERE session_id = ?`, string(sid)).Scan(&cursor)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}
@@ -271,7 +320,7 @@ func (s *Store) ClearTimeline(ctx context.Context, sid sessionstream.SessionId) 
 		`DELETE FROM sessionstream_entities WHERE session_id = ?`,
 		`DELETE FROM sessionstream_entity_versions WHERE session_id = ?`,
 		`DELETE FROM sessionstream_projection_cursors WHERE session_id = ? AND projector = ?`,
-		`UPDATE sessionstream_sessions SET cursor = 0 WHERE session_id = ?`,
+		`UPDATE sessionstream_sessions SET snapshot_ordinal = 0 WHERE session_id = ?`,
 	} {
 		if stmt == `DELETE FROM sessionstream_projection_cursors WHERE session_id = ? AND projector = ?` {
 			if _, err := tx.ExecContext(ctx, stmt, string(sid), sessionstream.TimelineProjectorName); err != nil {
@@ -530,10 +579,29 @@ func (s *Store) ErrorRecords(ctx context.Context, sid sessionstream.SessionId, l
 }
 
 func (s *Store) migrate() error {
+	const targetUserVersion = 2
+	var userVersion int
+	if err := s.db.QueryRow(`PRAGMA user_version;`).Scan(&userVersion); err != nil {
+		return err
+	}
+	if userVersion > 0 && userVersion < targetUserVersion {
+		for _, stmt := range []string{
+			`DROP TABLE IF EXISTS sessionstream_errors;`,
+			`DROP TABLE IF EXISTS sessionstream_projection_cursors;`,
+			`DROP TABLE IF EXISTS sessionstream_entity_versions;`,
+			`DROP TABLE IF EXISTS sessionstream_entities;`,
+			`DROP TABLE IF EXISTS sessionstream_events;`,
+			`DROP TABLE IF EXISTS sessionstream_sessions;`,
+		} {
+			if _, err := s.db.Exec(stmt); err != nil {
+				return err
+			}
+		}
+	}
 	for _, stmt := range []string{
 		`CREATE TABLE IF NOT EXISTS sessionstream_sessions (
 		  session_id TEXT PRIMARY KEY,
-		  cursor INTEGER NOT NULL DEFAULT 0
+		  snapshot_ordinal INTEGER NOT NULL DEFAULT 0
 		);`,
 		`CREATE TABLE IF NOT EXISTS sessionstream_events (
 		  session_id TEXT NOT NULL,
@@ -547,6 +615,8 @@ func (s *Store) migrate() error {
 		  session_id TEXT NOT NULL,
 		  kind TEXT NOT NULL,
 		  entity_id TEXT NOT NULL,
+		  created_ordinal INTEGER NOT NULL,
+		  last_event_ordinal INTEGER NOT NULL,
 		  payload_json TEXT NOT NULL,
 		  PRIMARY KEY(session_id, kind, entity_id)
 		);`,
@@ -555,6 +625,8 @@ func (s *Store) migrate() error {
 		  kind TEXT NOT NULL,
 		  entity_id TEXT NOT NULL,
 		  ordinal INTEGER NOT NULL,
+		  created_ordinal INTEGER NOT NULL,
+		  last_event_ordinal INTEGER NOT NULL,
 		  tombstone INTEGER NOT NULL DEFAULT 0,
 		  payload_json TEXT NOT NULL,
 		  PRIMARY KEY(session_id, kind, entity_id, ordinal)
@@ -578,14 +650,18 @@ func (s *Store) migrate() error {
 		  metadata_json TEXT NOT NULL DEFAULT '{}'
 		);`,
 		`CREATE INDEX IF NOT EXISTS sessionstream_events_by_session ON sessionstream_events(session_id, ordinal);`,
-		`CREATE INDEX IF NOT EXISTS sessionstream_entities_by_session ON sessionstream_entities(session_id);`,
+		`CREATE INDEX IF NOT EXISTS sessionstream_entities_by_session ON sessionstream_entities(session_id, created_ordinal, last_event_ordinal);`,
 		`CREATE INDEX IF NOT EXISTS sessionstream_entity_versions_by_session ON sessionstream_entity_versions(session_id, ordinal);`,
+		`CREATE INDEX IF NOT EXISTS sessionstream_entity_versions_ordering ON sessionstream_entity_versions(session_id, created_ordinal, last_event_ordinal);`,
 		`CREATE INDEX IF NOT EXISTS sessionstream_projection_cursors_by_session ON sessionstream_projection_cursors(session_id, cursor);`,
 		`CREATE INDEX IF NOT EXISTS sessionstream_errors_by_session ON sessionstream_errors(session_id, ordinal);`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return err
 		}
+	}
+	if _, err := s.db.Exec(fmt.Sprintf(`PRAGMA user_version = %d;`, targetUserVersion)); err != nil {
+		return err
 	}
 	return nil
 }
@@ -609,7 +685,7 @@ func newView(snap sessionstream.Snapshot) *view {
 		}
 		index[entityKey{kind: entity.Kind, id: entity.Id}] = cloned
 	}
-	return &view{ordinal: snap.Ordinal, index: index}
+	return &view{ordinal: snap.SnapshotOrdinal, index: index}
 }
 
 func (v *view) Get(kind, id string) (sessionstream.TimelineEntity, bool) {

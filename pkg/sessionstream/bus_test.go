@@ -52,12 +52,12 @@ func TestHubEventBusGoChannelRoundTrip(t *testing.T) {
 
 	snapA, err := hub.Snapshot(context.Background(), "s-a")
 	require.NoError(t, err)
-	require.Greater(t, snapA.Ordinal, uint64(0))
+	require.Greater(t, snapA.SnapshotOrdinal, uint64(0))
 	require.Len(t, snapA.Entities, 2)
 
 	snapB, err := hub.Snapshot(context.Background(), "s-b")
 	require.NoError(t, err)
-	require.Greater(t, snapB.Ordinal, uint64(0))
+	require.Greater(t, snapB.SnapshotOrdinal, uint64(0))
 	require.Len(t, snapB.Entities, 1)
 
 	observer.mu.Lock()
@@ -96,7 +96,7 @@ func TestHubEventBusFallsBackWithoutStreamID(t *testing.T) {
 
 	snap, err := hub.Snapshot(context.Background(), "s-a")
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), snap.Ordinal)
+	require.Equal(t, uint64(2), snap.SnapshotOrdinal)
 
 	observer.mu.Lock()
 	defer observer.mu.Unlock()

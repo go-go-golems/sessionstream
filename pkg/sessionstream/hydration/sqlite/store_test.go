@@ -21,7 +21,7 @@ func TestStoreApplySnapshotAndCursor(t *testing.T) {
 
 	snap, err := store.Snapshot(context.Background(), sessionstream.SessionId("s-1"), 0)
 	require.NoError(t, err)
-	require.Equal(t, uint64(7), snap.Ordinal)
+	require.Equal(t, uint64(7), snap.SnapshotOrdinal)
 	require.Len(t, snap.Entities, 1)
 	require.Equal(t, "hello", snap.Entities[0].Payload.(*structpb.Struct).AsMap()["text"])
 }
@@ -43,7 +43,7 @@ func TestStorePersistsAcrossReopen(t *testing.T) {
 	defer func() { require.NoError(t, reopened.Close()) }()
 	snap, err := reopened.Snapshot(context.Background(), sessionstream.SessionId("s-2"), 0)
 	require.NoError(t, err)
-	require.Equal(t, uint64(9), snap.Ordinal)
+	require.Equal(t, uint64(9), snap.SnapshotOrdinal)
 	require.Equal(t, "persisted", snap.Entities[0].Payload.(*structpb.Struct).AsMap()["text"])
 }
 
@@ -92,14 +92,38 @@ func TestStoreSnapshotAsOfUsesEntityVersions(t *testing.T) {
 
 	snap, err := store.Snapshot(context.Background(), "s-5", 1)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), snap.Ordinal)
+	require.Equal(t, uint64(1), snap.SnapshotOrdinal)
 	require.Len(t, snap.Entities, 1)
 	require.Equal(t, "one", snap.Entities[0].Payload.(*structpb.Struct).AsMap()["text"])
 
 	snap, err = store.Snapshot(context.Background(), "s-5", 0)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), snap.Ordinal)
+	require.Equal(t, uint64(2), snap.SnapshotOrdinal)
 	require.Equal(t, "two", snap.Entities[0].Payload.(*structpb.Struct).AsMap()["text"])
+}
+
+func TestStoreSnapshotCurrentOrdersByCreatedThenLastEventOrdinal(t *testing.T) {
+	store := newTestStore(t)
+	first, err := structpb.NewStruct(map[string]any{"text": "first"})
+	require.NoError(t, err)
+	second, err := structpb.NewStruct(map[string]any{"text": "second"})
+	require.NoError(t, err)
+	updatedFirst, err := structpb.NewStruct(map[string]any{"text": "first updated"})
+	require.NoError(t, err)
+
+	require.NoError(t, store.Apply(context.Background(), "s-order", 1, []sessionstream.TimelineEntity{{Kind: "TestEntity", Id: "first", Payload: first}}))
+	require.NoError(t, store.Apply(context.Background(), "s-order", 2, []sessionstream.TimelineEntity{{Kind: "TestEntity", Id: "second", Payload: second}}))
+	require.NoError(t, store.Apply(context.Background(), "s-order", 3, []sessionstream.TimelineEntity{{Kind: "TestEntity", Id: "first", Payload: updatedFirst}}))
+
+	snap, err := store.Snapshot(context.Background(), "s-order", 0)
+	require.NoError(t, err)
+	require.Len(t, snap.Entities, 2)
+	require.Equal(t, "first", snap.Entities[0].Id)
+	require.Equal(t, uint64(1), snap.Entities[0].CreatedOrdinal)
+	require.Equal(t, uint64(3), snap.Entities[0].LastEventOrdinal)
+	require.Equal(t, "second", snap.Entities[1].Id)
+	require.Equal(t, uint64(2), snap.Entities[1].CreatedOrdinal)
+	require.Equal(t, uint64(2), snap.Entities[1].LastEventOrdinal)
 }
 
 func TestStoreSnapshotAsOfRespectsTombstones(t *testing.T) {

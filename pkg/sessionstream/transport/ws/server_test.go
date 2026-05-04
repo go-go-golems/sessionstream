@@ -34,11 +34,11 @@ func TestServerSubscribeEmptySnapshotThenLive(t *testing.T) {
 	require.Equal(t, frameTypeHello, hello["type"])
 	require.NotEmpty(t, hello["connectionId"])
 
-	require.NoError(t, conn.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-1", "sinceOrdinal": "0"}))
+	require.NoError(t, conn.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-1", "sinceSnapshotOrdinal": "0"}))
 	snapshot := readFrame(t, conn)
 	require.Equal(t, frameTypeSnapshot, snapshot["type"])
 	require.Equal(t, "s-1", snapshot["sessionId"])
-	require.Equal(t, "0", snapshot["ordinal"])
+	require.Equal(t, "0", snapshot["snapshotOrdinal"])
 	require.Empty(t, snapshot["entities"])
 
 	subscribed := readFrame(t, conn)
@@ -51,7 +51,7 @@ func TestServerSubscribeEmptySnapshotThenLive(t *testing.T) {
 	live := readFrame(t, conn)
 	require.Equal(t, frameTypeUIEvent, live["type"])
 	require.Equal(t, "s-1", live["sessionId"])
-	require.Equal(t, "1", live["ordinal"])
+	require.Equal(t, "1", live["eventOrdinal"])
 	require.Equal(t, testUIEventName, live["name"])
 }
 
@@ -66,10 +66,10 @@ func TestServerReconnectGetsSnapshotThenNextLive(t *testing.T) {
 
 	conn := dialWS(t, httpServer.URL)
 	_ = readFrame(t, conn) // hello
-	require.NoError(t, conn.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-2", "sinceOrdinal": "0"}))
+	require.NoError(t, conn.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-2", "sinceSnapshotOrdinal": "0"}))
 	snapshot := readFrame(t, conn)
 	require.Equal(t, frameTypeSnapshot, snapshot["type"])
-	require.Equal(t, "1", snapshot["ordinal"])
+	require.Equal(t, "1", snapshot["snapshotOrdinal"])
 	readFrame(t, conn) // subscribed
 	require.NoError(t, conn.Close())
 
@@ -80,10 +80,10 @@ func TestServerReconnectGetsSnapshotThenNextLive(t *testing.T) {
 	reconnected := dialWS(t, httpServer.URL)
 	defer func() { require.NoError(t, reconnected.Close()) }()
 	_ = readFrame(t, reconnected) // hello
-	require.NoError(t, reconnected.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-2", "sinceOrdinal": "1"}))
+	require.NoError(t, reconnected.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-2", "sinceSnapshotOrdinal": "1"}))
 	snapshot2 := readFrame(t, reconnected)
 	require.Equal(t, frameTypeSnapshot, snapshot2["type"])
-	require.Equal(t, "2", snapshot2["ordinal"])
+	require.Equal(t, "2", snapshot2["snapshotOrdinal"])
 	readFrame(t, reconnected) // subscribed
 
 	payload3, err := structpb.NewStruct(map[string]any{"text": "three"})
@@ -92,7 +92,7 @@ func TestServerReconnectGetsSnapshotThenNextLive(t *testing.T) {
 
 	live := readFrame(t, reconnected)
 	require.Equal(t, frameTypeUIEvent, live["type"])
-	require.Equal(t, "3", live["ordinal"])
+	require.Equal(t, "3", live["eventOrdinal"])
 }
 
 func TestServerConnectionsTracksSubscriptions(t *testing.T) {

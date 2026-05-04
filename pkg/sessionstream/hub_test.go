@@ -50,7 +50,7 @@ func TestHubSubmitRunsHandlerProjectionAndStore(t *testing.T) {
 
 	snap, err := hub.Snapshot(context.Background(), "s-1")
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), snap.Ordinal)
+	require.Equal(t, uint64(1), snap.SnapshotOrdinal)
 	require.Len(t, snap.Entities, 1)
 	require.Equal(t, "hello", snap.Entities[0].Payload.(*structpb.Struct).AsMap()["prompt"])
 }
@@ -131,7 +131,7 @@ func TestHubProjectionPoliciesSplitUIAndTimeline(t *testing.T) {
 
 func TestHubLocalOrdinalSeedsFromStoreCursor(t *testing.T) {
 	store := newTestHydrationStore().(*testHydrationStore)
-	store.snapshots["s-1"] = Snapshot{SessionId: "s-1", Ordinal: 41}
+	store.snapshots["s-1"] = Snapshot{SessionId: "s-1", SnapshotOrdinal: 41}
 	hub := newTestHub(t, WithHydrationStore(store))
 	registerTestHandler(t, hub)
 	require.NoError(t, hub.RegisterTimelineProjection(TimelineProjectionFunc(func(_ context.Context, ev Event, _ *Session, _ TimelineView) ([]TimelineEntity, error) {
@@ -150,7 +150,7 @@ func TestHubLocalOrdinalSeedsFromStoreCursor(t *testing.T) {
 func TestHubLocalOrdinalPrefersEventCursorWhenAvailable(t *testing.T) {
 	store := newTestEventStore()
 	store.eventCursor = 7
-	store.snapshots["s-1"] = Snapshot{SessionId: "s-1", Ordinal: 2}
+	store.snapshots["s-1"] = Snapshot{SessionId: "s-1", SnapshotOrdinal: 2}
 	hub := newTestHub(t, WithHydrationStore(store))
 	registerTestHandler(t, hub)
 	require.NoError(t, hub.RegisterTimelineProjection(TimelineProjectionFunc(func(_ context.Context, ev Event, _ *Session, _ TimelineView) ([]TimelineEntity, error) {
@@ -318,8 +318,8 @@ func newTestHydrationStore() HydrationStore {
 func (s *testHydrationStore) Apply(_ context.Context, sid SessionId, ord uint64, entities []TimelineEntity) error {
 	snap := s.snapshots[sid]
 	snap.SessionId = sid
-	if ord > snap.Ordinal {
-		snap.Ordinal = ord
+	if ord > snap.SnapshotOrdinal {
+		snap.SnapshotOrdinal = ord
 	}
 	entityMap := map[string]TimelineEntity{}
 	for _, entity := range snap.Entities {
@@ -346,7 +346,7 @@ func (s *testHydrationStore) Snapshot(_ context.Context, sid SessionId, _ uint64
 	if !ok {
 		return Snapshot{SessionId: sid}, nil
 	}
-	out := Snapshot{SessionId: snap.SessionId, Ordinal: snap.Ordinal, Entities: make([]TimelineEntity, 0, len(snap.Entities))}
+	out := Snapshot{SessionId: snap.SessionId, SnapshotOrdinal: snap.SnapshotOrdinal, Entities: make([]TimelineEntity, 0, len(snap.Entities))}
 	for _, entity := range snap.Entities {
 		out.Entities = append(out.Entities, cloneTestEntity(entity))
 	}
@@ -362,7 +362,7 @@ func (s *testHydrationStore) View(ctx context.Context, sid SessionId) (TimelineV
 }
 
 func (s *testHydrationStore) Cursor(_ context.Context, sid SessionId) (uint64, error) {
-	return s.snapshots[sid].Ordinal, nil
+	return s.snapshots[sid].SnapshotOrdinal, nil
 }
 
 type testEventStore struct {
@@ -403,14 +403,14 @@ func (s *testEventStore) EventCursor(context.Context, SessionId) (uint64, error)
 }
 
 func (s *testEventStore) ProjectionCursor(_ context.Context, projector string, sid SessionId) (uint64, error) {
-	return s.snapshots[sid].Ordinal, nil
+	return s.snapshots[sid].SnapshotOrdinal, nil
 }
 
 func (s *testEventStore) AdvanceProjectionCursor(_ context.Context, projector string, sid SessionId, ord uint64) error {
 	snap := s.snapshots[sid]
 	snap.SessionId = sid
-	if ord > snap.Ordinal {
-		snap.Ordinal = ord
+	if ord > snap.SnapshotOrdinal {
+		snap.SnapshotOrdinal = ord
 	}
 	s.snapshots[sid] = snap
 	return nil
@@ -475,7 +475,7 @@ func (v testTimelineView) List(kind string) []TimelineEntity {
 	return ret
 }
 
-func (v testTimelineView) Ordinal() uint64 { return v.snapshot.Ordinal }
+func (v testTimelineView) Ordinal() uint64 { return v.snapshot.SnapshotOrdinal }
 
 func cloneTestEntity(entity TimelineEntity) TimelineEntity {
 	out := entity

@@ -72,7 +72,7 @@ func WithUpgrader(u websocket.Upgrader) Option {
 // out of scope for this adapter.
 //
 // Subscribe always sends a current snapshot followed by future live UI fanout.
-// sinceOrdinal is accepted, stored, echoed, and surfaced to hooks for teaching
+// sinceSnapshotOrdinal is accepted, stored, echoed, and surfaced to hooks for teaching
 // and diagnostics, but it is advisory for now: this reference adapter does not
 // replay missed UI events from the event store. Replayed event history belongs
 // behind an explicit replay API rather than being hidden inside websocket
@@ -106,7 +106,7 @@ type connection struct {
 }
 
 type subscription struct {
-	sinceOrdinal uint64
+	sinceSnapshotOrdinal uint64
 }
 
 // ConnectionInfo describes the current transport-visible state of one connection.
@@ -116,21 +116,22 @@ type ConnectionInfo struct {
 }
 
 type clientFrame struct {
-	Type         string `json:"type"`
-	SessionID    string `json:"sessionId,omitempty"`
-	SinceOrdinal string `json:"sinceOrdinal,omitempty"`
+	Type                 string `json:"type"`
+	SessionID            string `json:"sessionId,omitempty"`
+	SinceSnapshotOrdinal string `json:"sinceSnapshotOrdinal,omitempty"`
 }
 
 type envelope struct {
-	Type         string `json:"type"`
-	ConnectionID string `json:"connectionId,omitempty"`
-	SessionID    string `json:"sessionId,omitempty"`
-	SinceOrdinal string `json:"sinceOrdinal,omitempty"`
-	Ordinal      string `json:"ordinal,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Payload      any    `json:"payload,omitempty"`
-	Entities     []any  `json:"entities,omitempty"`
-	Error        string `json:"error,omitempty"`
+	Type                 string `json:"type"`
+	ConnectionID         string `json:"connectionId,omitempty"`
+	SessionID            string `json:"sessionId,omitempty"`
+	SinceSnapshotOrdinal string `json:"sinceSnapshotOrdinal,omitempty"`
+	SnapshotOrdinal      string `json:"snapshotOrdinal,omitempty"`
+	EventOrdinal         string `json:"eventOrdinal,omitempty"`
+	Name                 string `json:"name,omitempty"`
+	Payload              any    `json:"payload,omitempty"`
+	Entities             []any  `json:"entities,omitempty"`
+	Error                string `json:"error,omitempty"`
 }
 
 var _ http.Handler = (*Server)(nil)
@@ -198,11 +199,11 @@ func (s *Server) PublishUI(_ context.Context, sid sessionstream.SessionId, ord u
 	for _, c := range targets {
 		for _, event := range events {
 			if err := s.sendEnvelope(c, envelope{
-				Type:      frameTypeUIEvent,
-				SessionID: string(sid),
-				Ordinal:   fmt.Sprintf("%d", ord),
-				Name:      event.Name,
-				Payload:   encodeProtoJSON(event.Payload),
+				Type:         frameTypeUIEvent,
+				SessionID:    string(sid),
+				EventOrdinal: fmt.Sprintf("%d", ord),
+				Name:         event.Name,
+				Payload:      encodeProtoJSON(event.Payload),
 			}); err != nil {
 				s.closeConnection(c)
 				continue
@@ -250,9 +251,9 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 		}
 		if s.hooks.OnClientFrame != nil {
 			s.hooks.OnClientFrame(c.id, map[string]any{
-				"type":         frame.Type,
-				"sessionId":    frame.SessionID,
-				"sinceOrdinal": frame.SinceOrdinal,
+				"type":                 frame.Type,
+				"sessionId":            frame.SessionID,
+				"sinceSnapshotOrdinal": frame.SinceSnapshotOrdinal,
 			})
 		}
 		if err := s.handleClientFrame(ctx, c, frame); err != nil {
@@ -275,19 +276,19 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame cli
 		if sid == "" {
 			return fmt.Errorf("subscribe missing session id")
 		}
-		since, err := parseUint(frame.SinceOrdinal)
+		since, err := parseUint(frame.SinceSnapshotOrdinal)
 		if err != nil {
-			return fmt.Errorf("parse since ordinal: %w", err)
+			return fmt.Errorf("parse since snapshot ordinal: %w", err)
 		}
 		snap, err := s.snapshots.Snapshot(ctx, sid)
 		if err != nil {
 			return fmt.Errorf("load snapshot for %q: %w", sid, err)
 		}
 		if err := s.sendEnvelope(c, envelope{
-			Type:      frameTypeSnapshot,
-			SessionID: string(sid),
-			Ordinal:   fmt.Sprintf("%d", snap.Ordinal),
-			Entities:  encodeSnapshotEntities(snap.Entities),
+			Type:            frameTypeSnapshot,
+			SessionID:       string(sid),
+			SnapshotOrdinal: fmt.Sprintf("%d", snap.SnapshotOrdinal),
+			Entities:        encodeSnapshotEntities(snap.Entities),
 		}); err != nil {
 			return err
 		}
@@ -295,7 +296,7 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame cli
 			s.hooks.OnSnapshotSent(c.id, sid, cloneSnapshot(snap))
 		}
 		c.mu.Lock()
-		c.subs[sid] = subscription{sinceOrdinal: since}
+		c.subs[sid] = subscription{sinceSnapshotOrdinal: since}
 		c.mu.Unlock()
 		s.mu.Lock()
 		set := s.bySession[sid]
@@ -308,7 +309,7 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame cli
 		if s.hooks.OnSubscribe != nil {
 			s.hooks.OnSubscribe(c.id, sid, since)
 		}
-		return s.sendEnvelope(c, envelope{Type: frameTypeSubscribed, SessionID: string(sid), SinceOrdinal: fmt.Sprintf("%d", since)})
+		return s.sendEnvelope(c, envelope{Type: frameTypeSubscribed, SessionID: string(sid), SinceSnapshotOrdinal: fmt.Sprintf("%d", since)})
 	case "unsubscribe":
 		sid := sessionstream.SessionId(frame.SessionID)
 		if sid == "" {
@@ -432,10 +433,12 @@ func encodeSnapshotEntities(in []sessionstream.TimelineEntity) []any {
 	out := make([]any, 0, len(in))
 	for _, entity := range in {
 		out = append(out, map[string]any{
-			"kind":      entity.Kind,
-			"id":        entity.Id,
-			"tombstone": entity.Tombstone,
-			"payload":   encodeProtoJSON(entity.Payload),
+			"kind":             entity.Kind,
+			"id":               entity.Id,
+			"createdOrdinal":   fmt.Sprintf("%d", entity.CreatedOrdinal),
+			"lastEventOrdinal": fmt.Sprintf("%d", entity.LastEventOrdinal),
+			"tombstone":        entity.Tombstone,
+			"payload":          encodeProtoJSON(entity.Payload),
 		})
 	}
 	return out
@@ -468,7 +471,7 @@ func parseUint(raw string) (uint64, error) {
 }
 
 func cloneSnapshot(snap sessionstream.Snapshot) sessionstream.Snapshot {
-	out := sessionstream.Snapshot{SessionId: snap.SessionId, Ordinal: snap.Ordinal}
+	out := sessionstream.Snapshot{SessionId: snap.SessionId, SnapshotOrdinal: snap.SnapshotOrdinal}
 	out.Entities = make([]sessionstream.TimelineEntity, 0, len(snap.Entities))
 	for _, entity := range snap.Entities {
 		cloned := entity
