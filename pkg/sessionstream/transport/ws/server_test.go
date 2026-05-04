@@ -8,8 +8,10 @@ import (
 
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 	storesqlite "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite"
+	sessionstreamv1 "github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -20,8 +22,6 @@ const (
 	testEntityKind  = "TestEntity"
 )
 
-type frameMap map[string]any
-
 func TestServerSubscribeEmptySnapshotThenLive(t *testing.T) {
 	hub, server := newTestHubAndServer(t)
 	httpServer := httptest.NewServer(server)
@@ -30,29 +30,30 @@ func TestServerSubscribeEmptySnapshotThenLive(t *testing.T) {
 	conn := dialWS(t, httpServer.URL)
 	defer func() { require.NoError(t, conn.Close()) }()
 
-	hello := readFrame(t, conn)
-	require.Equal(t, frameTypeHello, hello["type"])
-	require.NotEmpty(t, hello["connectionId"])
+	hello := readServerFrame(t, conn)
+	require.NotNil(t, hello.GetHello())
+	require.NotEmpty(t, hello.GetHello().GetConnectionId())
 
-	require.NoError(t, conn.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-1", "sinceSnapshotOrdinal": "0"}))
-	snapshot := readFrame(t, conn)
-	require.Equal(t, frameTypeSnapshot, snapshot["type"])
-	require.Equal(t, "s-1", snapshot["sessionId"])
-	require.Equal(t, "0", snapshot["snapshotOrdinal"])
-	require.Empty(t, snapshot["entities"])
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "s-1", SinceSnapshotOrdinal: 0}}})
+	snapshot := readServerFrame(t, conn)
+	require.NotNil(t, snapshot.GetSnapshot())
+	require.Equal(t, "s-1", snapshot.GetSnapshot().GetSessionId())
+	require.Equal(t, uint64(0), snapshot.GetSnapshot().GetSnapshotOrdinal())
+	require.Empty(t, snapshot.GetSnapshot().GetEntities())
 
-	subscribed := readFrame(t, conn)
-	require.Equal(t, frameTypeSubscribed, subscribed["type"])
+	subscribed := readServerFrame(t, conn)
+	require.NotNil(t, subscribed.GetSubscribed())
+	require.Equal(t, uint64(0), subscribed.GetSubscribed().GetSinceSnapshotOrdinal())
 
 	payload, err := structpb.NewStruct(map[string]any{"text": "hello"})
 	require.NoError(t, err)
 	require.NoError(t, hub.Submit(context.Background(), sessionstream.SessionId("s-1"), testCommandName, payload))
 
-	live := readFrame(t, conn)
-	require.Equal(t, frameTypeUIEvent, live["type"])
-	require.Equal(t, "s-1", live["sessionId"])
-	require.Equal(t, "1", live["eventOrdinal"])
-	require.Equal(t, testUIEventName, live["name"])
+	live := readServerFrame(t, conn)
+	require.NotNil(t, live.GetUiEvent())
+	require.Equal(t, "s-1", live.GetUiEvent().GetSessionId())
+	require.Equal(t, uint64(1), live.GetUiEvent().GetEventOrdinal())
+	require.Equal(t, testUIEventName, live.GetUiEvent().GetName())
 }
 
 func TestServerReconnectGetsSnapshotThenNextLive(t *testing.T) {
@@ -65,12 +66,11 @@ func TestServerReconnectGetsSnapshotThenNextLive(t *testing.T) {
 	require.NoError(t, hub.Submit(context.Background(), sessionstream.SessionId("s-2"), testCommandName, payload1))
 
 	conn := dialWS(t, httpServer.URL)
-	_ = readFrame(t, conn) // hello
-	require.NoError(t, conn.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-2", "sinceSnapshotOrdinal": "0"}))
-	snapshot := readFrame(t, conn)
-	require.Equal(t, frameTypeSnapshot, snapshot["type"])
-	require.Equal(t, "1", snapshot["snapshotOrdinal"])
-	readFrame(t, conn) // subscribed
+	_ = readServerFrame(t, conn) // hello
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "s-2", SinceSnapshotOrdinal: 0}}})
+	snapshot := readServerFrame(t, conn)
+	require.Equal(t, uint64(1), snapshot.GetSnapshot().GetSnapshotOrdinal())
+	_ = readServerFrame(t, conn) // subscribed
 	require.NoError(t, conn.Close())
 
 	payload2, err := structpb.NewStruct(map[string]any{"text": "two"})
@@ -79,20 +79,18 @@ func TestServerReconnectGetsSnapshotThenNextLive(t *testing.T) {
 
 	reconnected := dialWS(t, httpServer.URL)
 	defer func() { require.NoError(t, reconnected.Close()) }()
-	_ = readFrame(t, reconnected) // hello
-	require.NoError(t, reconnected.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-2", "sinceSnapshotOrdinal": "1"}))
-	snapshot2 := readFrame(t, reconnected)
-	require.Equal(t, frameTypeSnapshot, snapshot2["type"])
-	require.Equal(t, "2", snapshot2["snapshotOrdinal"])
-	readFrame(t, reconnected) // subscribed
+	_ = readServerFrame(t, reconnected) // hello
+	writeClientFrame(t, reconnected, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "s-2", SinceSnapshotOrdinal: 1}}})
+	snapshot2 := readServerFrame(t, reconnected)
+	require.Equal(t, uint64(2), snapshot2.GetSnapshot().GetSnapshotOrdinal())
+	_ = readServerFrame(t, reconnected) // subscribed
 
 	payload3, err := structpb.NewStruct(map[string]any{"text": "three"})
 	require.NoError(t, err)
 	require.NoError(t, hub.Submit(context.Background(), sessionstream.SessionId("s-2"), testCommandName, payload3))
 
-	live := readFrame(t, reconnected)
-	require.Equal(t, frameTypeUIEvent, live["type"])
-	require.Equal(t, "3", live["eventOrdinal"])
+	live := readServerFrame(t, reconnected)
+	require.Equal(t, uint64(3), live.GetUiEvent().GetEventOrdinal())
 }
 
 func TestServerConnectionsTracksSubscriptions(t *testing.T) {
@@ -102,10 +100,10 @@ func TestServerConnectionsTracksSubscriptions(t *testing.T) {
 
 	conn := dialWS(t, httpServer.URL)
 	defer func() { require.NoError(t, conn.Close()) }()
-	_ = readFrame(t, conn) // hello
-	require.NoError(t, conn.WriteJSON(map[string]any{"type": "subscribe", "sessionId": "s-3"}))
-	_ = readFrame(t, conn) // snapshot
-	_ = readFrame(t, conn) // subscribed
+	_ = readServerFrame(t, conn) // hello
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "s-3"}}})
+	_ = readServerFrame(t, conn) // snapshot
+	_ = readServerFrame(t, conn) // subscribed
 
 	infos := server.Connections()
 	require.Len(t, infos, 1)
@@ -119,18 +117,20 @@ func TestServerRejectsCommandFramesAsUnsupported(t *testing.T) {
 
 	conn := dialWS(t, httpServer.URL)
 	defer func() { require.NoError(t, conn.Close()) }()
-	_ = readFrame(t, conn) // hello
+	_ = readServerFrame(t, conn) // hello
 
 	require.NoError(t, conn.WriteJSON(map[string]any{
-		"type":      "command",
-		"sessionId": "s-command",
-		"name":      testCommandName,
-		"payload":   map[string]any{"text": "should not enter through websocket"},
+		"command": map[string]any{
+			"sessionId": "s-command",
+			"name":      testCommandName,
+			"payload":   map[string]any{"text": "should not enter through websocket"},
+		},
 	}))
 
-	frame := readFrame(t, conn)
-	require.Equal(t, frameTypeError, frame["type"])
-	require.Contains(t, frame["error"], "unknown frame type")
+	frame := readServerFrame(t, conn)
+	require.NotNil(t, frame.GetError())
+	require.Equal(t, "bad_client_frame", frame.GetError().GetCode())
+	require.Contains(t, frame.GetError().GetMessage(), "unknown field \"command\"")
 
 	require.Empty(t, server.Connections()[0].Subscriptions)
 }
@@ -187,10 +187,19 @@ func dialWS(t *testing.T, rawURL string) *websocket.Conn {
 	return conn
 }
 
-func readFrame(t *testing.T, conn *websocket.Conn) frameMap {
+func writeClientFrame(t *testing.T, conn *websocket.Conn, frame *sessionstreamv1.ClientFrame) {
 	t.Helper()
-	var frame frameMap
-	require.NoError(t, conn.ReadJSON(&frame))
+	body, err := protojson.Marshal(frame)
+	require.NoError(t, err)
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, body))
+}
+
+func readServerFrame(t *testing.T, conn *websocket.Conn) *sessionstreamv1.ServerFrame {
+	t.Helper()
+	_, body, err := conn.ReadMessage()
+	require.NoError(t, err)
+	frame := &sessionstreamv1.ServerFrame{}
+	require.NoError(t, protojson.Unmarshal(body, frame))
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
 	return frame
 }
