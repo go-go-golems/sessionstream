@@ -17,17 +17,6 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-const (
-	frameTypeHello        = "hello"
-	frameTypeSubscribed   = "subscribed"
-	frameTypeUnsubscribed = "unsubscribed"
-	frameTypeSnapshot     = "snapshot"
-	frameTypeUIEvent      = "ui-event"
-	frameTypeError        = "error"
-	frameTypePing         = "ping"
-	frameTypePong         = "pong"
-)
-
 var (
 	marshalOptions = protojson.MarshalOptions{EmitUnpopulated: false, UseProtoNames: false}
 	unmarshalOpts  = protojson.UnmarshalOptions{DiscardUnknown: false}
