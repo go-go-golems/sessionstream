@@ -33,13 +33,18 @@ type SnapshotProvider interface {
 
 // Hooks observes websocket lifecycle and payload sequencing for debugging and labs.
 type Hooks struct {
-	OnConnect      func(sessionstream.ConnectionId)
-	OnDisconnect   func(sessionstream.ConnectionId)
-	OnSubscribe    func(sessionstream.ConnectionId, sessionstream.SessionId, uint64)
-	OnUnsubscribe  func(sessionstream.ConnectionId, sessionstream.SessionId)
-	OnSnapshotSent func(sessionstream.ConnectionId, sessionstream.SessionId, sessionstream.Snapshot)
-	OnUIEventSent  func(sessionstream.ConnectionId, sessionstream.SessionId, uint64, sessionstream.UIEvent)
-	OnClientFrame  func(sessionstream.ConnectionId, map[string]any)
+	OnUpgradeError  func(*http.Request, error)
+	OnConnect       func(sessionstream.ConnectionId)
+	OnDisconnect    func(sessionstream.ConnectionId)
+	OnReadError     func(sessionstream.ConnectionId, error)
+	OnWriteError    func(sessionstream.ConnectionId, error)
+	OnSendError     func(sessionstream.ConnectionId, error)
+	OnProtocolError func(sessionstream.ConnectionId, error)
+	OnSubscribe     func(sessionstream.ConnectionId, sessionstream.SessionId, uint64)
+	OnUnsubscribe   func(sessionstream.ConnectionId, sessionstream.SessionId)
+	OnSnapshotSent  func(sessionstream.ConnectionId, sessionstream.SessionId, sessionstream.Snapshot)
+	OnUIEventSent   func(sessionstream.ConnectionId, sessionstream.SessionId, uint64, sessionstream.UIEvent)
+	OnClientFrame   func(sessionstream.ConnectionId, map[string]any)
 }
 
 // Option configures a websocket Server.
@@ -159,6 +164,9 @@ func NewServer(snapshots SnapshotProvider, opts ...Option) (*Server, error) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		if s.hooks.OnUpgradeError != nil {
+			s.hooks.OnUpgradeError(r, err)
+		}
 		return
 	}
 	cid := sessionstream.ConnectionId(fmt.Sprintf("conn-%d", atomic.AddUint64(&s.nextID, 1)))
@@ -235,6 +243,9 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 		}
 		var frame clientFrame
 		if err := c.ws.ReadJSON(&frame); err != nil {
+			if s.hooks.OnReadError != nil {
+				s.hooks.OnReadError(c.id, err)
+			}
 			return
 		}
 		if s.hooks.OnClientFrame != nil {
@@ -245,7 +256,12 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			})
 		}
 		if err := s.handleClientFrame(ctx, c, frame); err != nil {
-			_ = s.sendEnvelope(c, envelope{Type: frameTypeError, Error: err.Error()})
+			if s.hooks.OnProtocolError != nil {
+				s.hooks.OnProtocolError(c.id, err)
+			}
+			if sendErr := s.sendEnvelope(c, envelope{Type: frameTypeError, Error: err.Error()}); sendErr != nil && s.hooks.OnSendError != nil {
+				s.hooks.OnSendError(c.id, sendErr)
+			}
 		}
 	}
 }
@@ -311,6 +327,9 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame cli
 func (s *Server) writeLoop(c *connection) {
 	for msg := range c.send {
 		if err := c.ws.WriteMessage(websocket.TextMessage, msg); err != nil {
+			if s.hooks.OnWriteError != nil {
+				s.hooks.OnWriteError(c.id, err)
+			}
 			return
 		}
 	}
