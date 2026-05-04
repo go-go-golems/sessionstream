@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package sessionstream.v1;
 
-option go_package = "github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/sessionstream/v1;sessionstreamv1";
+option go_package = "github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1;sessionstreamv1";
 
 import "google/protobuf/any.proto";
 

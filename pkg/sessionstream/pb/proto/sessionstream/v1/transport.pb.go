@@ -986,7 +986,7 @@ const file_proto_sessionstream_v1_transport_proto_rawDesc = "" +
 	"\tPingFrame\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\tR\x05nonce\"!\n" +
 	"\tPongFrame\x12\x14\n" +
-	"\x05nonce\x18\x01 \x01(\tR\x05nonceB]Z[github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/sessionstream/v1;sessionstreamv1b\x06proto3"
+	"\x05nonce\x18\x01 \x01(\tR\x05nonceBcZagithub.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1;sessionstreamv1b\x06proto3"
 
 var (
 	file_proto_sessionstream_v1_transport_proto_rawDescOnce sync.Once
