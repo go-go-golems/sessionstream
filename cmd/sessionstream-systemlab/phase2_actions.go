@@ -154,7 +154,7 @@ func (e *labEnvironment) buildPhase2Response(action, sessionA, sessionB string, 
 			return phase2RunResponse{}, err
 		}
 		encoded := encodeSnapshot(snap)
-		encoded["ordinal"] = fmt.Sprintf("%d", snap.Ordinal)
+		encoded["ordinal"] = fmt.Sprintf("%d", snap.SnapshotOrdinal)
 		snapshots[sid] = encoded
 	}
 

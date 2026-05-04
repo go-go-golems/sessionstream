@@ -20,7 +20,7 @@ func TestChatDemoHappyPath(t *testing.T) {
 
 	snap, err := hub.Snapshot(context.Background(), sessionstream.SessionId("chat-1"))
 	require.NoError(t, err)
-	require.Equal(t, uint64(6), snap.Ordinal)
+	require.Equal(t, uint64(6), snap.SnapshotOrdinal)
 	require.Len(t, snap.Entities, 2)
 
 	assistant, ok := findEntity(snap, "chat-msg-1")

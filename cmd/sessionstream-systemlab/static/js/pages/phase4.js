@@ -88,7 +88,7 @@ function subscribeClient() {
     renderClient({ error: "connect first", frames: client.frames });
     return;
   }
-  client.socket.send(JSON.stringify({ type: "subscribe", sessionId: sessionId(), sinceOrdinal: "0" }));
+  client.socket.send(JSON.stringify({ subscribe: { sessionId: sessionId(), sinceSnapshotOrdinal: "0" } }));
 }
 
 function disconnectClient() {

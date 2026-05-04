@@ -195,7 +195,7 @@ func (e *labEnvironment) buildPhase3Response(action, sessionID, prompt string) (
 		return phase3RunResponse{}, err
 	}
 	encoded := encodeSnapshot(snap)
-	encoded["ordinal"] = fmt.Sprintf("%d", snap.Ordinal)
+	encoded["ordinal"] = fmt.Sprintf("%d", snap.SnapshotOrdinal)
 	connections := wsServer.Connections()
 	resp := phase3RunResponse{
 		Action:      action,
@@ -207,8 +207,8 @@ func (e *labEnvironment) buildPhase3Response(action, sessionID, prompt string) (
 		Checks: map[string]bool{
 			"snapshotBeforeLive": phase3SnapshotBeforeLive(trace),
 			"connectionsTracked": phase3ConnectionsTracked(connections),
-			"sessionHydrated":    snap.Ordinal > 0 || len(snap.Entities) > 0,
-			"clientConvergence":  phase3ClientConvergence(trace, string(snap.SessionId), snap.Ordinal),
+			"sessionHydrated":    snap.SnapshotOrdinal > 0 || len(snap.Entities) > 0,
+			"clientConvergence":  phase3ClientConvergence(trace, string(snap.SessionId), snap.SnapshotOrdinal),
 		},
 	}
 	return resp, nil
@@ -363,6 +363,14 @@ func phase3ClientConvergence(trace []traceEntry, sessionID string, ordinal uint6
 			continue
 		}
 		if entry.Message != "phase 3 snapshot sent" && entry.Message != "phase 3 ui event sent" {
+			continue
+		}
+		if ord := toString(entry.Details["snapshotOrdinal"]); ord != "" {
+			lastSeen[cid] = ord
+			continue
+		}
+		if ord := toString(entry.Details["eventOrdinal"]); ord != "" {
+			lastSeen[cid] = ord
 			continue
 		}
 		if ord := toString(entry.Details["ordinal"]); ord != "" {

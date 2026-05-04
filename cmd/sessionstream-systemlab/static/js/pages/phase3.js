@@ -101,9 +101,10 @@ function subscribeClient(name) {
     return;
   }
   const payload = {
-    type: "subscribe",
-    sessionId: sessionId(),
-    sinceOrdinal: byId(`phase3-client-${name}-since`)?.value || "0",
+    subscribe: {
+      sessionId: sessionId(),
+      sinceSnapshotOrdinal: byId(`phase3-client-${name}-since`)?.value || "0",
+    },
   };
   client.socket.send(JSON.stringify(payload));
 }

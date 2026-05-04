@@ -140,11 +140,11 @@ Event: LabFinished     Ordinal: 4
 
 Ordinals serve three purposes:
 
-1. **Order.** If you know ordinals 1 through 4, you know the sequence.
-2. **Reconnect.** A client that disconnects at ordinal 3 can ask for everything after ordinal 3.
-3. **Hydration.** The store tracks the latest ordinal per session.
+1. **Order.** If you know ordinals 1 through 4, you know the event sequence.
+2. **Hydration.** The store tracks the latest timeline event ordinal materialized for a session.
+3. **Reconnect.** A client hydrates from a snapshot whose `snapshotOrdinal` tells it which timeline state it received.
 
-In Phase 1, ordinals are assigned by the publisher. Phase 2 explains why the consumer assigns ordinals in distributed systems.
+In Phase 1, ordinals are assigned by the publisher. Phase 2 explains why the consumer assigns ordinals in distributed systems. Later phases separate the ordinal concepts more explicitly: live UI frames carry an `eventOrdinal`, while snapshots carry a `snapshotOrdinal`, and each hydrated entity records both `createdOrdinal` and `lastEventOrdinal`.
 
 ---
 
@@ -205,19 +205,19 @@ The hydration store records timeline entities.
 ```go
 type HydrationStore interface {
     Apply(sessionId string, ordinal Ordinal, entities []Entity) error
-    Snapshot(sessionId string) (Snapshot, error)
+    Snapshot(sessionId string, asOf Ordinal) (Snapshot, error)
     View(sessionId string) View
     Cursor(sessionId string) Ordinal
 }
 ```
 
-**`Apply`** updates the store and advances the cursor. This is called after projections run.
+**`Apply`** updates the store and advances the snapshot cursor. This is called after projections run. If an entity does not explicitly set `createdOrdinal` or `lastEventOrdinal`, the store uses the applied event ordinal.
 
-**`Snapshot`** returns the current state for a session. This is what you see in the page's Snapshot panel.
+**`Snapshot`** returns the current state for a session, or an as-of view when requested. This is what you see in the page's Snapshot panel. A snapshot includes `snapshotOrdinal`, and each entity includes `createdOrdinal` plus `lastEventOrdinal` so clients can hydrate in timeline order.
 
 **`View`** gives projections a read-only view of current state.
 
-**`Cursor`** returns the latest applied ordinal for a session.
+**`Cursor`** returns the latest applied timeline snapshot ordinal for a session.
 
 In Phase 1, the store is in-memory. Phase 5 explains how SQL persistence works.
 
@@ -275,10 +275,10 @@ Each check points at a different subsystem. If one goes red, you know where to i
 - The Hub routes commands to handlers. It does not know what commands do.
 - Handlers publish events. They do not return values or format output.
 - One command produces multiple events. This mirrors real work: beginning, intermediate states, end.
-- Ordinals define order, enable reconnect, support hydration.
+- Ordinals define event order, snapshot position, and hydrated entity ordering.
 - Both projections consume the same event stream. They answer different questions.
 - The UI projection produces transient events for live clients. The timeline projection produces durable entities for the store.
-- The hydration store records entities and tracks the cursor per session.
+- The hydration store records entities and tracks the snapshot cursor per session.
 - Read the page in order: Controls → Checks → Trace → Session + UI Events → Snapshot.
 
 ---
@@ -289,10 +289,10 @@ Each check points at a different subsystem. If one goes red, you know where to i
 - **`RegisterCommand(...)`**: Register a handler for a command name.
 - **`RegisterUIProjection(...)`**: Register the UI projection.
 - **`RegisterTimelineProjection(...)`**: Register the timeline projection.
-- **`HydrationStore.Apply(...)`**: Apply entities and advance the cursor.
-- **`HydrationStore.Snapshot(...)`**: Return current state for a session.
+- **`HydrationStore.Apply(...)`**: Apply entities and advance the snapshot cursor.
+- **`HydrationStore.Snapshot(...)`**: Return current or as-of state for a session.
 - **`HydrationStore.View(...)`**: Return a read-only view for projections.
-- **`HydrationStore.Cursor(...)`**: Return the latest applied ordinal.
+- **`HydrationStore.Cursor(...)`**: Return the latest applied snapshot ordinal.
 
 ---
 
@@ -300,12 +300,12 @@ Each check points at a different subsystem. If one goes red, you know where to i
 
 ### Framework files
 
-- `sessionstream/hub.go` — command routing
-- `sessionstream/command_registry.go` — handler registration
-- `sessionstream/session_registry.go` — session lifecycle
-- `sessionstream/projection.go` — projection interfaces
-- `sessionstream/hydration.go` — store interface
-- `sessionstream/hydration/sqlite/store.go` — SQLite-backed Phase 1 store, using in-memory SQLite for local runs
+- `pkg/sessionstream/hub.go` — command routing
+- `pkg/sessionstream/command_registry.go` — handler registration
+- `pkg/sessionstream/session_registry.go` — session lifecycle
+- `pkg/sessionstream/projection.go` — projection interfaces
+- `pkg/sessionstream/hydration.go` — store interface
+- `pkg/sessionstream/hydration/sqlite/store.go` — SQLite-backed Phase 1 store, using in-memory SQLite for local runs
 
 ### Systemlab files
 
@@ -315,6 +315,6 @@ Each check points at a different subsystem. If one goes red, you know where to i
 
 ### Tests
 
-- `sessionstream/hub_test.go`
-- `sessionstream/hydration/sqlite/store_test.go`
+- `pkg/sessionstream/hub_test.go`
+- `pkg/sessionstream/hydration/sqlite/store_test.go`
 - `cmd/sessionstream-systemlab/lab_environment_test.go`

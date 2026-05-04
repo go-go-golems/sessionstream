@@ -29,13 +29,13 @@ func newWebsocketTraceHooks(opts websocketTraceOptions) wstransport.Hooks {
 			appendTrace("transport", phaseLabel+" websocket disconnected", map[string]any{"connectionId": string(cid)})
 		},
 		OnSubscribe: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, since uint64) {
-			appendTrace("transport", phaseLabel+" subscribed", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "sinceOrdinal": fmt.Sprintf("%d", since)})
+			appendTrace("transport", phaseLabel+" subscribed", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "sinceSnapshotOrdinal": fmt.Sprintf("%d", since)})
 		},
 		OnUnsubscribe: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId) {
 			appendTrace("transport", phaseLabel+" unsubscribed", map[string]any{"connectionId": string(cid), "sessionId": string(sid)})
 		},
 		OnSnapshotSent: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, snap sessionstream.Snapshot) {
-			appendTrace("transport", phaseLabel+" snapshot sent", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "ordinal": fmt.Sprintf("%d", snap.Ordinal), "entityCount": len(snap.Entities)})
+			appendTrace("transport", phaseLabel+" snapshot sent", map[string]any{"connectionId": string(cid), "sessionId": string(sid), "snapshotOrdinal": fmt.Sprintf("%d", snap.SnapshotOrdinal), "entityCount": len(snap.Entities)})
 		},
 		OnUIEventSent: func(cid sessionstream.ConnectionId, sid sessionstream.SessionId, ord uint64, event sessionstream.UIEvent) {
 			details := map[string]any{}
@@ -44,7 +44,7 @@ func newWebsocketTraceHooks(opts websocketTraceOptions) wstransport.Hooks {
 			}
 			details["connectionId"] = string(cid)
 			details["sessionId"] = string(sid)
-			details["ordinal"] = fmt.Sprintf("%d", ord)
+			details["eventOrdinal"] = fmt.Sprintf("%d", ord)
 			details["uiEvent"] = event.Name
 			appendTrace("transport", phaseLabel+" ui event sent", details)
 		},

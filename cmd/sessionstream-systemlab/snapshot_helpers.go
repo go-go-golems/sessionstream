@@ -13,15 +13,18 @@ func encodeSnapshot(snap sessionstream.Snapshot) map[string]any {
 	entities := make([]map[string]any, 0, len(snap.Entities))
 	for _, entity := range snap.Entities {
 		entities = append(entities, map[string]any{
-			"kind":    entity.Kind,
-			"id":      entity.Id,
-			"payload": protoStructMap(entity.Payload),
+			"kind":             entity.Kind,
+			"id":               entity.Id,
+			"createdOrdinal":   entity.CreatedOrdinal,
+			"lastEventOrdinal": entity.LastEventOrdinal,
+			"payload":          protoStructMap(entity.Payload),
 		})
 	}
 	return map[string]any{
-		"sessionId": string(snap.SessionId),
-		"ordinal":   snap.Ordinal,
-		"entities":  entities,
+		"sessionId":       string(snap.SessionId),
+		"snapshotOrdinal": snap.SnapshotOrdinal,
+		"ordinal":         snap.SnapshotOrdinal,
+		"entities":        entities,
 	}
 }
 

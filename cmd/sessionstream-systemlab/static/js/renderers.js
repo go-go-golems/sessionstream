@@ -96,7 +96,7 @@ function renderSnapshotBlock(title, snapshot) {
       <header class="snapshot-card-header">
         <span class="snapshot-card-title">${escapeHTML(title)}</span>
         <span class="ordinal-chip">session ${escapeHTML(snapshot?.sessionId || "unknown")}</span>
-        <span class="ordinal-chip">cursor ${escapeHTML(snapshot?.ordinal ?? 0)}</span>
+        <span class="ordinal-chip">snapshot ${escapeHTML(snapshot?.snapshotOrdinal ?? snapshot?.ordinal ?? 0)}</span>
         <span class="ordinal-chip">${entities.length} entities</span>
       </header>
       ${renderEntities(entities)}
@@ -108,12 +108,13 @@ function renderEntities(entities) {
   if (!Array.isArray(entities) || entities.length === 0) return '<div class="empty compact-empty">No entities.</div>';
   return `
     <table class="data-table compact-table snapshot-table">
-      <thead><tr><th>Kind</th><th>ID</th><th>Payload</th></tr></thead>
+      <thead><tr><th>Kind</th><th>ID</th><th>Ordinals</th><th>Payload</th></tr></thead>
       <tbody>
         ${entities.map((entity) => `
           <tr>
             <td>${escapeHTML(entity.kind)}</td>
             <td>${escapeHTML(entity.id)}</td>
+            <td><code>created: ${escapeHTML(entity.createdOrdinal ?? "")} · last: ${escapeHTML(entity.lastEventOrdinal ?? "")}</code></td>
             <td><code>${escapeHTML(inlineObject(entity.payload))}</code></td>
           </tr>
         `).join("")}
@@ -123,17 +124,28 @@ function renderEntities(entities) {
 }
 
 function renderFrame(frame, index) {
+  const normalized = normalizeFrame(frame);
   return `
     <div class="frame-card">
       <span class="ordinal-chip">${index + 1}</span>
-      <span class="frame-type">${escapeHTML(frame.type || "frame")}</span>
-      ${frame.sessionId ? `<span class="frame-detail">session ${escapeHTML(frame.sessionId)}</span>` : ""}
-      ${frame.ordinal ? `<span class="frame-detail">ordinal ${escapeHTML(frame.ordinal)}</span>` : ""}
-      ${frame.name ? `<span class="frame-detail">${escapeHTML(frame.name)}</span>` : ""}
-      ${frame.payload ? `<code>${escapeHTML(inlineObject(frame.payload))}</code>` : ""}
-      ${frame.entities ? `<code>${escapeHTML(`${frame.entities.length} entities`)}</code>` : ""}
+      <span class="frame-type">${escapeHTML(normalized.type || "frame")}</span>
+      ${normalized.sessionId ? `<span class="frame-detail">session ${escapeHTML(normalized.sessionId)}</span>` : ""}
+      ${normalized.snapshotOrdinal ? `<span class="frame-detail">snapshot ${escapeHTML(normalized.snapshotOrdinal)}</span>` : ""}
+      ${normalized.eventOrdinal ? `<span class="frame-detail">event ${escapeHTML(normalized.eventOrdinal)}</span>` : ""}
+      ${normalized.sinceSnapshotOrdinal ? `<span class="frame-detail">since ${escapeHTML(normalized.sinceSnapshotOrdinal)}</span>` : ""}
+      ${normalized.name ? `<span class="frame-detail">${escapeHTML(normalized.name)}</span>` : ""}
+      ${normalized.payload ? `<code>${escapeHTML(inlineObject(normalized.payload))}</code>` : ""}
+      ${normalized.entities ? `<code>${escapeHTML(`${normalized.entities.length} entities`)}</code>` : ""}
     </div>
   `;
+}
+
+function normalizeFrame(frame) {
+  if (!frame || typeof frame !== "object") return { type: "frame" };
+  const oneof = ["hello", "snapshot", "subscribed", "unsubscribed", "uiEvent", "error", "ping", "pong"].find((key) => frame[key]);
+  if (!oneof) return frame;
+  const value = frame[oneof] || {};
+  return { type: oneof, ...value };
 }
 
 function renderErrorTable(errors) {
@@ -150,7 +162,7 @@ function renderErrorTable(errors) {
 }
 
 function compactDetails(details) {
-  const preferred = ["connectionId", "sessionId", "ordinal", "uiEvent", "entityId", "sourceEvent", "action", "sinceOrdinal", "text", "status"];
+  const preferred = ["connectionId", "sessionId", "snapshotOrdinal", "eventOrdinal", "createdOrdinal", "lastEventOrdinal", "ordinal", "uiEvent", "entityId", "sourceEvent", "action", "sinceSnapshotOrdinal", "sinceOrdinal", "text", "status"];
   const parts = [];
   for (const key of preferred) if (details[key] !== undefined && details[key] !== "") parts.push(`${key}: ${formatScalar(details[key])}`);
   for (const [key, value] of Object.entries(details || {})) {

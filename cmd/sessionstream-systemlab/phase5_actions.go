@@ -141,7 +141,7 @@ func (e *labEnvironment) phase5SnapshotFor(runtime *phase5Runtime, sessionID str
 		return nil, err
 	}
 	encoded := encodeSnapshot(snap)
-	encoded["ordinal"] = fmt.Sprintf("%d", snap.Ordinal)
+	encoded["ordinal"] = fmt.Sprintf("%d", snap.SnapshotOrdinal)
 	return encoded, nil
 }
 
