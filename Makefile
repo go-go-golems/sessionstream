@@ -1,4 +1,4 @@
-.PHONY: all fmt lint lintmax docker-lint golangci-lint-install gosec govulncheck test build build-bin boundary-check systemlab-build systemlab-run check goreleaser ensure-svu tag-major tag-minor tag-patch release install
+.PHONY: all fmt lint lintmax docker-lint golangci-lint-install gosec govulncheck test build build-bin boundary-check schema-vet systemlab-build systemlab-run check goreleaser ensure-svu tag-major tag-minor tag-patch release install
 
 all: check
 
@@ -11,6 +11,7 @@ GOLANGCI_LINT_BIN ?= $(CURDIR)/.bin/golangci-lint
 GORELEASER_ARGS ?= --skip=sign --snapshot --clean
 GORELEASER_TARGET ?= --single-target
 SVU ?= svu
+SESSIONSTREAM_LINT ?= /tmp/sessionstream-lint
 
 boundary-check:
 	@! rg -n 'github.com/go-go-golems/pinocchio/' . --glob '*.go' --glob '!ttmp/**' >/dev/null || (echo 'sessionstream must not import pinocchio packages' && exit 1)
@@ -50,12 +51,16 @@ build-bin:
 	@mkdir -p ./dist
 	GOWORK=off go build -o ./dist/$(BINARY) $(CMD_DIR)
 
+schema-vet:
+	GOWORK=off go build -o $(SESSIONSTREAM_LINT) ./cmd/sessionstream-lint
+	GOWORK=off go vet -vettool=$(SESSIONSTREAM_LINT) ./pkg/analysis/sessionstreamschema ./cmd/sessionstream-lint
+
 systemlab-build:
 	@mkdir -p .bin
 	GOWORK=off go build -o ./.bin/$(BINARY) $(CMD_DIR)
 
 systemlab-run:
-	GOWORK=off go run $(CMD_DIR)
+	GOWORK=off go run $(CMD_DIR) serve
 
 goreleaser:
 	GOWORK=off goreleaser release $(GORELEASER_ARGS) $(GORELEASER_TARGET)

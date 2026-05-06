@@ -34,6 +34,25 @@ nav button {
   text-align: left;
 }
 
+nav hr {
+  border: 0;
+  border-top: 1px solid #334155;
+  margin: 16px 0;
+}
+
+nav a {
+  display: block;
+  margin-bottom: 8px;
+  color: #93c5fd;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+nav a:hover {
+  color: #bfdbfe;
+  text-decoration: underline;
+}
+
 main {
   padding: 24px;
 }
