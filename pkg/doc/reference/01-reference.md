@@ -255,6 +255,15 @@ Run the browser-based lab app:
 
 ```bash
 make systemlab-run
+# or directly:
+go run ./cmd/sessionstream-systemlab serve --addr :8091
+```
+
+Browse embedded CLI help entries:
+
+```bash
+go run ./cmd/sessionstream-systemlab help sessionstream-user-guide
+go run ./cmd/sessionstream-systemlab help sessionstream-reference
 ```
 
 Default URL:

@@ -60,7 +60,7 @@ systemlab-build:
 	GOWORK=off go build -o ./.bin/$(BINARY) $(CMD_DIR)
 
 systemlab-run:
-	GOWORK=off go run $(CMD_DIR)
+	GOWORK=off go run $(CMD_DIR) serve
 
 goreleaser:
 	GOWORK=off goreleaser release $(GORELEASER_ARGS) $(GORELEASER_TARGET)

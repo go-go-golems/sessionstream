@@ -73,6 +73,17 @@ Run locally:
 
 ```bash
 make systemlab-run
+# or directly:
+go run ./cmd/sessionstream-systemlab serve --addr :8091
+```
+
+The binary uses a Glazed/Cobra CLI. The HTTP server is exposed as the `serve` verb, and Sessionstream's embedded help entries are available through the CLI:
+
+```bash
+go run ./cmd/sessionstream-systemlab help sessionstream-getting-started
+go run ./cmd/sessionstream-systemlab help sessionstream-user-guide
+go run ./cmd/sessionstream-systemlab help sessionstream-reference
+go run ./cmd/sessionstream-systemlab help sessionstream-schema-vet-playbook
 ```
 
 Validation helpers:
