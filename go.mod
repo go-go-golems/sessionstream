@@ -1,6 +1,6 @@
 module github.com/go-go-golems/sessionstream
 
-go 1.25
+go 1.25.0
 
 toolchain go1.26.2
 
@@ -11,6 +11,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.42
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.8.2
+	golang.org/x/tools v0.43.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -20,5 +21,7 @@ require (
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	golang.org/x/mod v0.34.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

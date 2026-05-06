@@ -66,7 +66,33 @@ Useful commands:
 make test
 make build
 make lint
+make schema-vet
 make goreleaser   # local single-target snapshot release into dist/
+```
+
+## Schema vet analyzer
+
+`sessionstream` owns the shared `sessionstream-lint` vettool for schema registration policy. It rejects top-level `*structpb.Struct` payloads registered through `sessionstream.SchemaRegistry`; use concrete, feature-owned protobuf messages for `RegisterCommand`, `RegisterEvent`, `RegisterUIEvent`, and `RegisterTimelineEntity` payloads. Nested `google.protobuf.Struct` fields are still allowed inside concrete messages when intentionally used for open-ended metadata.
+
+From this repository:
+
+```bash
+go build -o /tmp/sessionstream-lint ./cmd/sessionstream-lint
+go vet -vettool=/tmp/sessionstream-lint ./pkg/analysis/sessionstreamschema ./cmd/sessionstream-lint
+```
+
+Downstream workspace consumers can build the shared tool and run it locally:
+
+```bash
+go build -o /tmp/sessionstream-lint ../sessionstream/cmd/sessionstream-lint
+go vet -vettool=/tmp/sessionstream-lint ./cmd/... ./pkg/...
+```
+
+Outside a workspace, install the command from the module and use it as a vettool:
+
+```bash
+go install github.com/go-go-golems/sessionstream/cmd/sessionstream-lint@latest
+go vet -vettool="$(go env GOPATH)/bin/sessionstream-lint" ./...
 ```
 
 Release tags are cut with [`svu`](https://github.com/caarlos0/svu) and published by the `release` GitHub Actions workflow:
