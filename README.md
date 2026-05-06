@@ -34,10 +34,10 @@ flowchart TD
     I --> K[Snapshot on reconnect]
     K --> J
 
-    style B fill:#ffe8a3,stroke:#8a6d00
-    style D fill:#d9edf7,stroke:#31708f
-    style I fill:#dff0d8,stroke:#3c763d
-    style J fill:#f2dede,stroke:#a94442
+    style B fill:#ffe8a3,stroke:#8a6d00,color:#000
+    style D fill:#d9edf7,stroke:#31708f,color:#000
+    style I fill:#dff0d8,stroke:#3c763d,color:#000
+    style J fill:#f2dede,stroke:#a94442,color:#000
 ```
 
 The `Hub` receives a command for a `SessionId` and routes it to a registered handler. The handler receives an `EventPublisher`; it publishes canonical backend events as work starts, progresses, completes, or fails. UI projections turn those backend events into live client-facing `UIEvent` values. Timeline projections turn the same backend events into durable `TimelineEntity` values that hydration stores can persist and reload.
@@ -248,7 +248,12 @@ ttmp/                           Ticket documentation, design notes, and implemen
 
 ## Embedded help docs
 
-Sessionstream ships reusable Glazed help sections from `pkg/doc`. Downstream CLIs can include these docs in their own help system instead of copying markdown files.
+Sessionstream ships reusable Glazed help sections from `pkg/doc`. Downstream CLIs can include these docs in their own help system instead of copying markdown files. Current entries include:
+
+- `sessionstream-getting-started` — a first-app tutorial.
+- `sessionstream-user-guide` — the conceptual user guide.
+- `sessionstream-reference` — API, package, command, and transport reference.
+- `sessionstream-schema-vet-playbook` — operational playbook for `sessionstream-lint`.
 
 ```go
 package main
@@ -301,37 +306,23 @@ Use Systemlab when you want the framework explained as phases:
 - [`cmd/sessionstream-systemlab/chapters/phase-4-chat-example.md`](cmd/sessionstream-systemlab/chapters/phase-4-chat-example.md)
 - [`cmd/sessionstream-systemlab/chapters/phase-5-persistence-and-restart.md`](cmd/sessionstream-systemlab/chapters/phase-5-persistence-and-restart.md)
 
-## Repository boundary
-
-`sessionstream` owns framework-level infrastructure:
-
-- command routing;
-- backend event publication;
-- schema registration;
-- UI and timeline projection interfaces;
-- hydration abstractions and generic stores;
-- transport adapters and frame contracts;
-- generic examples and labs;
-- framework-owned analysis tools such as `sessionstream-lint`.
-
-It does not own product-specific behavior:
-
-- Pinocchio profile/runtime policy;
-- Pinocchio web-chat HTTP edge behavior;
-- CoinVault inventory widgets and database lookup logic;
-- provider-specific assistant behavior;
-- downstream frontend rendering rules.
-
-If a feature cannot be made honestly generic, keep it in the consumer repository and integrate through the public `sessionstream` APIs.
-
 ## Further reading
 
-Design and migration notes live in `ttmp/`. The most relevant current documents are:
+Start with the user-facing docs and executable examples:
 
-- [`ttmp/2026/05/06/SS-SCHEMA-VET--move-sessionstream-schema-vet-analyzer-into-sessionstream/design/01-sessionstream-schema-vet-analyzer-migration-plan.md`](ttmp/2026/05/06/SS-SCHEMA-VET--move-sessionstream-schema-vet-analyzer-into-sessionstream/design/01-sessionstream-schema-vet-analyzer-migration-plan.md) — why `sessionstream-lint` lives in this repository and how downstream projects consume it.
-- [`ttmp/2026/04/20/EVT-STREAM-013--streaming-custom-backend-events-progressive-widgets-and-authoritative-commit-patterns-for-evtstream-chat-apps/design-doc/01-intern-guide-to-streaming-custom-events-progressive-widgets-and-authoritative-commit-in-evtstream-chat-apps.md`](ttmp/2026/04/20/EVT-STREAM-013--streaming-custom-backend-events-progressive-widgets-and-authoritative-commit-patterns-for-evtstream-chat-apps/design-doc/01-intern-guide-to-streaming-custom-events-progressive-widgets-and-authoritative-commit-in-evtstream-chat-apps.md) — event/projection patterns for richer chat applications.
-- [`ttmp/2026/04/20/EVT-STREAM-006--phase-2-watermill-bus-consumer-and-ordering-lab/design-doc/01-phase-2-implementation-plan.md`](ttmp/2026/04/20/EVT-STREAM-006--phase-2-watermill-bus-consumer-and-ordering-lab/design-doc/01-phase-2-implementation-plan.md) — Watermill bus, consumer ordering, and ordinal assignment design.
+- [`pkg/doc/tutorials/01-getting-started.md`](pkg/doc/tutorials/01-getting-started.md) — first-app tutorial for schemas, hubs, commands, events, projections, and snapshots.
+- [`pkg/doc/topics/01-user-guide.md`](pkg/doc/topics/01-user-guide.md) — conceptual guide to the sessionstream application model.
+- [`pkg/doc/reference/01-reference.md`](pkg/doc/reference/01-reference.md) — API, package, transport, command, and development reference.
+- [`pkg/doc/playbooks/01-sessionstream-schema-vet.md`](pkg/doc/playbooks/01-sessionstream-schema-vet.md) — operational playbook for building and using `sessionstream-lint`.
+- [`examples/chatdemo/chat.go`](examples/chatdemo/chat.go) — runnable reference application using typed schemas, handlers, projections, and snapshots.
+- [`cmd/sessionstream-systemlab/README.md`](cmd/sessionstream-systemlab/README.md) — browser lab overview and local run instructions.
 - [`proto/sessionstream/v1/transport.proto`](proto/sessionstream/v1/transport.proto) — websocket frame schema.
+
+For lower-level implementation history, see the design documents:
+
+- [`ttmp/2026/05/06/SS-SCHEMA-VET--move-sessionstream-schema-vet-analyzer-into-sessionstream/design/01-sessionstream-schema-vet-analyzer-migration-plan.md`](ttmp/2026/05/06/SS-SCHEMA-VET--move-sessionstream-schema-vet-analyzer-into-sessionstream/design/01-sessionstream-schema-vet-analyzer-migration-plan.md)
+- [`ttmp/2026/04/20/EVT-STREAM-013--streaming-custom-backend-events-progressive-widgets-and-authoritative-commit-patterns-for-evtstream-chat-apps/design-doc/01-intern-guide-to-streaming-custom-events-progressive-widgets-and-authoritative-commit-in-evtstream-chat-apps.md`](ttmp/2026/04/20/EVT-STREAM-013--streaming-custom-backend-events-progressive-widgets-and-authoritative-commit-patterns-for-evtstream-chat-apps/design-doc/01-intern-guide-to-streaming-custom-events-progressive-widgets-and-authoritative-commit-in-evtstream-chat-apps.md)
+- [`ttmp/2026/04/20/EVT-STREAM-006--phase-2-watermill-bus-consumer-and-ordering-lab/design-doc/01-phase-2-implementation-plan.md`](ttmp/2026/04/20/EVT-STREAM-006--phase-2-watermill-bus-consumer-and-ordering-lab/design-doc/01-phase-2-implementation-plan.md)
 
 ## Current status
 

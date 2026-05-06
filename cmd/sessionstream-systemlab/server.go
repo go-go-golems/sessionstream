@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+
+	sessionstreamdoc "github.com/go-go-golems/sessionstream/pkg/doc"
 )
 
 //go:embed static chapters
@@ -28,6 +30,7 @@ func (s *systemlabServer) routes() http.Handler {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/reset", s.handleReset)
 	mux.HandleFunc("/api/chapters/", s.handleChapterHTML)
+	mux.Handle("/docs/", http.StripPrefix("/docs/", http.FileServer(http.FS(sessionstreamdoc.FS()))))
 	mux.HandleFunc("/api/phase1/run", s.handlePhase1Run)
 	mux.HandleFunc("/api/phase1/export", s.handlePhase1Export)
 	mux.HandleFunc("/api/phase2/run", s.handlePhase2Run)
@@ -60,6 +63,15 @@ func (s *systemlabServer) handleStatus(w http.ResponseWriter, _ *http.Request) {
 			{"id": "phase3", "title": "Hydration and Reconnect", "implemented": true, "chapter": true},
 			{"id": "phase4", "title": "Chat Example", "implemented": true, "chapter": true},
 			{"id": "phase5", "title": "Persistence and Restart", "implemented": true, "chapter": true},
+		},
+		"docs": map[string]any{
+			"basePath": "/docs/",
+			"entries": []map[string]string{
+				{"title": "Getting Started with Sessionstream", "path": "/docs/tutorials/01-getting-started.md"},
+				{"title": "Sessionstream User Guide", "path": "/docs/topics/01-user-guide.md"},
+				{"title": "Sessionstream Reference", "path": "/docs/reference/01-reference.md"},
+				{"title": "Schema Vet Playbook", "path": "/docs/playbooks/01-sessionstream-schema-vet.md"},
+			},
 		},
 		"boundary": map[string]any{
 			"systemlabCalls":  []string{"public sessionstream package APIs", "its own HTTP endpoints"},
