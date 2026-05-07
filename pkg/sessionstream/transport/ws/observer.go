@@ -20,10 +20,15 @@ const (
 	TransportStageReadError               TransportStage = "read_error"
 	TransportStageProtocolError           TransportStage = "protocol_error"
 	TransportStageSubscribeReceived       TransportStage = "subscribe_received"
+	TransportStageUnsubscribeReceived     TransportStage = "unsubscribe_received"
 	TransportStageSnapshotLoadStarted     TransportStage = "snapshot_load_started"
 	TransportStageSnapshotLoaded          TransportStage = "snapshot_loaded"
+	TransportStageSnapshotSent            TransportStage = "snapshot_sent"
 	TransportStageSubscriptionRegistered  TransportStage = "subscription_registered"
+	TransportStageSubscribed              TransportStage = "subscribed"
+	TransportStageUnsubscribed            TransportStage = "unsubscribed"
 	TransportStageUIEventBuffered         TransportStage = "ui_event_buffered"
+	TransportStageUIEventSent             TransportStage = "ui_event_sent"
 	TransportStageHydrationBufferFlushed  TransportStage = "hydration_buffer_flushed"
 	TransportStageSubscriptionLive        TransportStage = "subscription_live"
 	TransportStageHydrationBufferOverflow TransportStage = "hydration_buffer_overflow"
@@ -76,6 +81,10 @@ type TransportRecord struct {
 	FanoutEventCount int
 	FanoutTargetIds  []sessionstream.ConnectionId
 
+	// UIEvent is present for TransportStageUIEventSent records. Its payload is cloned
+	// before observer delivery so diagnostics can retain it safely.
+	UIEvent sessionstream.UIEvent
+
 	RawBytes int
 	QueueLen int
 	QueueCap int
@@ -116,6 +125,7 @@ func (s *Server) observe(ctx context.Context, rec TransportRecord) {
 
 func cloneTransportRecord(in TransportRecord) TransportRecord {
 	out := in
+	out.UIEvent = cloneUIEvent(in.UIEvent)
 	if len(in.SnapshotEntities) > 0 {
 		out.SnapshotEntities = append([]TimelineEntitySummary(nil), in.SnapshotEntities...)
 	}

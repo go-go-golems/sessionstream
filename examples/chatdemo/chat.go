@@ -31,10 +31,6 @@ const (
 	TimelineEntityChatMessage = "ChatMessage"
 )
 
-type Hooks struct {
-	OnBackendEvent func(sessionID, eventName string, payload map[string]any)
-}
-
 type Option func(*Engine)
 
 type Engine struct {
@@ -42,7 +38,6 @@ type Engine struct {
 	nextID     int
 	active     map[sessionstream.SessionId]*activeRun
 	chunkDelay time.Duration
-	hooks      Hooks
 }
 
 type activeRun struct {
@@ -59,12 +54,6 @@ type Service struct {
 func WithChunkDelay(delay time.Duration) Option {
 	return func(e *Engine) {
 		e.chunkDelay = delay
-	}
-}
-
-func WithHooks(h Hooks) Option {
-	return func(e *Engine) {
-		e.hooks = h
 	}
 }
 
@@ -186,12 +175,7 @@ func (e *Engine) handleStartInference(ctx context.Context, cmd sessionstream.Com
 	messageID := e.nextMessageID()
 	userMessageID := messageID + "-user"
 	userEvent := &chatdemov1.UserMessageAcceptedEvent{MessageId: userMessageID, Role: "user", Content: prompt, Streaming: false}
-	if err := e.publish(ctx, cmd.SessionId, pub, EventUserMessageAccepted, userEvent, map[string]any{
-		"messageId": userMessageID,
-		"role":      "user",
-		"content":   prompt,
-		"streaming": false,
-	}); err != nil {
+	if err := e.publish(ctx, cmd.SessionId, pub, EventUserMessageAccepted, userEvent); err != nil {
 		return err
 	}
 	// The demo stream should continue after the command handler returns; cancellation is
@@ -221,7 +205,7 @@ func (e *Engine) runDemoInference(ctx context.Context, sid sessionstream.Session
 	defer e.clearRun(sid, messageID)
 
 	started := &chatdemov1.InferenceStartedEvent{MessageId: messageID, Prompt: prompt, Role: "assistant", Content: "", Status: "streaming", Streaming: true}
-	if err := e.publish(ctx, sid, pub, EventInferenceStarted, started, map[string]any{"messageId": messageID, "prompt": prompt, "role": "assistant", "content": "", "status": "streaming", "streaming": true}); err != nil {
+	if err := e.publish(ctx, sid, pub, EventInferenceStarted, started); err != nil {
 		return
 	}
 
@@ -232,24 +216,21 @@ func (e *Engine) runDemoInference(ctx context.Context, sid sessionstream.Session
 		select {
 		case <-ctx.Done():
 			stopped := &chatdemov1.InferenceStoppedEvent{MessageId: messageID, Role: "assistant", Text: accumulated, Content: accumulated, Status: "stopped", Streaming: false}
-			_ = e.publish(context.Background(), sid, pub, EventInferenceStopped, stopped, map[string]any{"messageId": messageID, "role": "assistant", "text": accumulated, "content": accumulated, "status": "stopped", "streaming": false})
+			_ = e.publish(context.Background(), sid, pub, EventInferenceStopped, stopped)
 			return
 		case <-time.After(e.chunkDelay):
 		}
 		accumulated += chunk
 		delta := &chatdemov1.TokensDeltaEvent{MessageId: messageID, Role: "assistant", Chunk: chunk, Text: accumulated, Content: accumulated, Status: "streaming", Streaming: true}
-		if err := e.publish(context.Background(), sid, pub, EventTokensDelta, delta, map[string]any{"messageId": messageID, "role": "assistant", "chunk": chunk, "text": accumulated, "content": accumulated, "status": "streaming", "streaming": true}); err != nil {
+		if err := e.publish(context.Background(), sid, pub, EventTokensDelta, delta); err != nil {
 			return
 		}
 	}
 	finished := &chatdemov1.InferenceFinishedEvent{MessageId: messageID, Role: "assistant", Text: accumulated, Content: accumulated, Status: "finished", Streaming: false}
-	_ = e.publish(context.Background(), sid, pub, EventInferenceFinished, finished, map[string]any{"messageId": messageID, "role": "assistant", "text": accumulated, "content": accumulated, "status": "finished", "streaming": false})
+	_ = e.publish(context.Background(), sid, pub, EventInferenceFinished, finished)
 }
 
-func (e *Engine) publish(ctx context.Context, sid sessionstream.SessionId, pub sessionstream.EventPublisher, name string, payload proto.Message, hookPayload map[string]any) error {
-	if e.hooks.OnBackendEvent != nil {
-		e.hooks.OnBackendEvent(string(sid), name, cloneMap(hookPayload))
-	}
+func (e *Engine) publish(ctx context.Context, sid sessionstream.SessionId, pub sessionstream.EventPublisher, name string, payload proto.Message) error {
 	return pub.Publish(ctx, sessionstream.Event{Name: name, SessionId: sid, Payload: payload})
 }
 
@@ -424,17 +405,6 @@ func chunkText(text string, size int) []string {
 		}
 		out = append(out, text[:size])
 		text = text[size:]
-	}
-	return out
-}
-
-func cloneMap(in map[string]any) map[string]any {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
 	}
 	return out
 }

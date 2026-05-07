@@ -1,0 +1,33 @@
+== go test ./... ==
+?   	github.com/go-go-golems/sessionstream/cmd/sessionstream-lint	[no test files]
+ok  	github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab	0.175s
+ok  	github.com/go-go-golems/sessionstream/examples/chatdemo	0.024s
+?   	github.com/go-go-golems/sessionstream/examples/chatdemo/gen/sessionstream/examples/chatdemo/v1	[no test files]
+?   	github.com/go-go-golems/sessionstream/pkg/analysis/sessionstreamschema	[no test files]
+ok  	github.com/go-go-golems/sessionstream/pkg/doc	0.019s
+ok  	github.com/go-go-golems/sessionstream/pkg/sessionstream	0.025s
+ok  	github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite	0.060s
+?   	github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1	[no test files]
+ok  	github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws	0.037s
+== go test ws -race ==
+ok  	github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws	1.060s
+== make lint ==
+mkdir -p /home/manuel/workspaces/2026-05-02/use-sessionstream-coinvault/sessionstream/.bin/
+GOWORK=off GOBIN=/home/manuel/workspaces/2026-05-02/use-sessionstream-coinvault/sessionstream/.bin/ go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.2
+GOWORK=off /home/manuel/workspaces/2026-05-02/use-sessionstream-coinvault/sessionstream/.bin/golangci-lint run -v
+level=info msg="golangci-lint has version 2.11.2 built with go1.26.2 from (unknown, modified: ?, mod sum: \"h1:4Icd3mEqthcFcFww8L67OBtfKB/obXxko8aFUMqP/5w=\") on (unknown)"
+level=info msg="[config_reader] Config search paths: [./ /home/manuel/workspaces/2026-05-02/use-sessionstream-coinvault/sessionstream /home/manuel/workspaces/2026-05-02/use-sessionstream-coinvault /home/manuel/workspaces/2026-05-02 /home/manuel/workspaces /home/manuel /home /]"
+level=info msg="[config_reader] Used config file .golangci.yml"
+level=info msg="[config_reader] Module name \"github.com/go-go-golems/sessionstream\""
+level=info msg="[goenv] Read go env for 6.716482ms: map[string]string{\"GOCACHE\":\"/home/manuel/.cache/go-build\", \"GOROOT\":\"/home/manuel/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.2.linux-amd64\"}"
+level=info msg="[lintersdb] Active 9 linters: [errcheck exhaustive gofmt govet ineffassign nonamedreturns predeclared staticcheck unused]"
+level=info msg="[loader] Go packages loading at mode 8767 (deps|exports_file|imports|name|compiled_files|files|types_sizes) took 165.166805ms"
+level=info msg="[runner/filename_unadjuster] Pre-built 0 adjustments in 8.0342ms"
+level=info msg="[linters_context/goanalysis] analyzers took 0s with no stages"
+level=info msg="[runner/exclusion_rules] Skipped 0 issues by rules: [Text: \"SA1019: cli.CreateProcessorLegacy\", Linters: \"staticcheck\"]"
+level=info msg="[runner] processing took 7.965µs with stages: exclusion_rules: 5.207µs, max_same_issues: 877ns, nolint_filter: 287ns, exclusion_paths: 257ns, max_from_linter: 142ns, path_absoluter: 129ns, path_relativity: 125ns, path_shortener: 125ns, invalid_issue: 120ns, filename_unadjuster: 120ns, uniq_by_line: 118ns, diff: 117ns, path_prettifier: 81ns, fixer: 41ns, source_code: 41ns, sort_results: 36ns, generated_file_filter: 36ns, cgo: 36ns, severity-rules: 35ns, max_per_file_from_linter: 35ns"
+level=info msg="[runner] linters took 107.538373ms with stages: goanalysis_metalinter: 107.506468ms"
+0 issues.
+level=info msg="File cache stats: 0 entries of total size 0B"
+level=info msg="Memory: 4 samples, avg is 64.6MB, max is 92.0MB"
+level=info msg="Execution took 287.756335ms"

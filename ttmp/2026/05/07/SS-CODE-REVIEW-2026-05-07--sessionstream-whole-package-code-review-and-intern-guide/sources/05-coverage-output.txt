@@ -1,0 +1,520 @@
+== go clean -cache ==
+== go test ./... -coverprofile ==
+# github.com/go-go-golems/sessionstream/cmd/sessionstream-lint
+# internal/goarch
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/unsafeheader
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/rtcov
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/godebugs
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/byteorder
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/asan
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/goos
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/goexperiment
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/profilerecord
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/msan
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/runtime/pprof/label
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# unicode/utf8
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/cpu
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# cmp
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# math/bits
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/trace/tracev2
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# log/internal
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# unicode
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# sync/atomic
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/uleb128
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/calloc
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# encoding
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# github.com/go-go-golems/sessionstream/examples/chatdemo/gen/sessionstream/examples/chatdemo/v1
+# internal/goarch
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/unsafeheader
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/godebugs
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/goos
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/rtcov
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/byteorder
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/profilerecord
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/goexperiment
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/asan
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/trace/tracev2
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/msan
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# math/bits
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# log/internal
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/runtime/pprof/label
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# unicode/utf8
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# cmp
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# unicode
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# sync/atomic
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/uleb128
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/cpu
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/calloc
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# encoding
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1
+# internal/unsafeheader
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/byteorder
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/rtcov
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/godebugs
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/goos
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/profilerecord
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/goarch
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/goexperiment
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# math/bits
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/msan
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/asan
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/trace/tracev2
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# cmp
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/runtime/pprof/label
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/cpu
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# unicode
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# sync/atomic
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# unicode/utf8
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# log/internal
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# encoding
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/calloc
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/uleb128
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# github.com/go-go-golems/sessionstream/pkg/analysis/sessionstreamschema
+# internal/byteorder
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/unsafeheader
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/profilerecord
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/goarch
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/godebugs
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# math/bits
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/asan
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/rtcov
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/cpu
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/goos
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/goexperiment
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/runtime/pprof/label
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/msan
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# cmp
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# unicode/utf8
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/trace/tracev2
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/calloc
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# sync/atomic
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# log/internal
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# unicode
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage/uleb128
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# encoding
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+# internal/coverage
+compile: version "go1.26.1" does not match go tool version "go1.25.5"
+ok  	github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab	0.209s	coverage: 62.5% of statements
+ok  	github.com/go-go-golems/sessionstream/examples/chatdemo	0.034s	coverage: 71.6% of statements
+ok  	github.com/go-go-golems/sessionstream/pkg/doc	0.037s	coverage: 50.0% of statements
+ok  	github.com/go-go-golems/sessionstream/pkg/sessionstream	0.032s	coverage: 72.8% of statements
+ok  	github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite	0.120s	coverage: 66.3% of statements
+ok  	github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws	0.059s	coverage: 74.2% of statements
+== cover func ==
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/chapter_api.go:14:		handleChapterHTML			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/chapter_api.go:31:		renderChapterHTML			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/chapter_api.go:46:		readChapterMarkdown			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:70:	newLabEnvironment			75.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:78:	Reset					77.4%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:171:	RunPhase1				83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:232:	ExportPhase1				61.9%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:266:	handlePhase1Command			78.9%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:298:	phase1UIProjection			90.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:320:	phase1TimelineProjection		87.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:358:	nextMessageID				100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:365:	appendTrace				100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:371:	appendTraceLocked			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:377:	recordUIEvent				100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:383:	splitPrompt				75.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:391:	cloneRunResponse			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:401:	renderPhase1Markdown			96.2%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:436:	cloneMap				100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:447:	cloneBoolMap				83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/lab_environment.go:458:	toString				100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/main.go:20:			main					0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/main.go:27:			newRootCommand				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/main.go:66:			NewServeCommand				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/main.go:102:			Run					0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/main.go:110:			runServer				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_actions.go:14:		RunPhase2				69.4%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_actions.go:96:		submitPhase2Command			75.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_actions.go:104:	nextPhase2Label				83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_actions.go:114:	waitForPhase2Consumed			90.9%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_actions.go:131:	buildPhase2Response			87.5%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_actions.go:182:	ExportPhase2				52.6%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_checks.go:7:		normalizeStreamMode			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_checks.go:16:		phase2PublishOrdinalsZero		66.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_checks.go:28:		phase2Monotonic				71.4%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_checks.go:42:		phase2SessionIsolation			66.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_checks.go:54:		phase2ConsumedCount			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_clone.go:3:		clonePhase2MessageRecord		100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_clone.go:10:		clonePhase2Ordinals			83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_clone.go:21:		cloneNamedPayloadMap			88.9%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_clone.go:36:		cloneStringMap				83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_clone.go:47:		clonePhase2RunResponse			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_clone.go:64:		cloneStringSlicesMap			83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_projections.go:14:	handlePhase2Command			81.8%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_projections.go:37:	phase2UIProjection			83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_projections.go:47:	phase2TimelineProjection		83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_projections.go:61:	phase2MessageMutator			81.8%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_projections.go:80:	phase2Published				92.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_projections.go:101:	phase2Consumed				92.9%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_projections.go:124:	phase2RecordLocked			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_projections.go:134:	phase2AppendTraceLocked			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_render.go:10:		phase2MessageHistoryView		100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_render.go:28:		phase2OrdinalStrings			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_render.go:40:		renderPhase2Markdown			96.8%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_render.go:81:		uniqueStrings				87.5%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_runtime.go:14:		newPhase2State				81.1%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_runtime.go:99:		startPhase2				80.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_runtime.go:130:	shutdownPhase2				66.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_runtime.go:144:	restartPhase2Consumer			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase2_runtime.go:173:	resetPhase2Only				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:52:		newPhase3State				77.4%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:118:		resetPhase3Only				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:129:		RunPhase3				72.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:181:		buildPhase3Response			82.4%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:217:		handlePhase3Command			81.2%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:240:		phase3UIProjection			84.6%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:262:		phase3TimelineProjection		85.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:293:		appendPhase3Trace			80.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:302:		phase3AppendTraceLocked			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:306:		nextPhase3MessageID			83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:316:		phase3SnapshotBeforeLive		52.9%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:345:		phase3ConnectionsTracked		50.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:354:		phase3ClientConvergence			40.9%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase3_lab.go:388:		clonePhase3RunResponse			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase4_lab.go:42:		newPhase4State				79.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase4_lab.go:95:		resetPhase4Only				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase4_lab.go:106:		RunPhase4				72.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase4_lab.go:159:		buildPhase4Response			81.2%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase4_lab.go:193:		appendPhase4Trace			80.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase4_lab.go:202:		phase4SnapshotBeforeLive		52.9%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase4_lab.go:231:		phase4TimelineMatchesUI			71.4%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase4_lab.go:253:		phase4StopCoherent			41.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase4_lab.go:272:		clonePhase4RunResponse			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_actions.go:13:		RunPhase5				82.5%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_actions.go:104:	buildPhase5Response			78.6%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_actions.go:138:	phase5SnapshotFor			83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_actions.go:148:	waitForPhase5Cursor			78.6%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_checks.go:8:		normalizePhase5Mode			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_checks.go:15:		phase5CursorPreserved			80.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_checks.go:25:		phase5EntitiesPreserved			85.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_checks.go:37:		phase5ResumeWithoutGaps			78.6%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_clone.go:7:		clonePhase5RunResponse			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_projections.go:13:	handlePhase5Command			77.8%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_projections.go:27:	phase5UIProjection			85.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_projections.go:38:	phase5TimelineProjection		85.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_projections.go:49:	appendPhase5Trace			80.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_runtime.go:15:		newPhase5State				83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_runtime.go:25:		buildPhase5Runtime			66.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_runtime.go:114:	resetPhase5Only				91.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_runtime.go:131:	shutdownPhase5Runtime			75.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/phase5_runtime.go:145:	shutdownPhase5				85.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/replay_api.go:31:		handlePhase5ReplayInspect		0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/replay_api.go:58:		inspectPhase5Replay			78.9%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/replay_api.go:91:		encodeReplayErrors			16.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/replay_api.go:118:		cloneReplayStringMap			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:20:			newSystemlabServer			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:28:			routes					0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:55:			handleStatus				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:83:			handleReset				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:95:			handlePhase1Run				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:113:		handlePhase1Export			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:131:		handlePhase2Run				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:149:		handlePhase2Export			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:166:		handlePhase3Run				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:184:		handlePhase3State			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:201:		handlePhase3WS				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:212:		handlePhase4Run				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:230:		handlePhase4State			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:247:		handlePhase4WS				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:258:		handlePhase5Run				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:276:		handlePhase5State			0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:294:		handlePhase5WS				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/server.go:305:		writeJSON				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/snapshot_helpers.go:12:	encodeSnapshot				100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/snapshot_helpers.go:31:	currentEntityMap			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/snapshot_helpers.go:35:	currentEntityMapForKind			75.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/snapshot_helpers.go:43:	protoStructMap				72.7%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/snapshot_provider.go:13:	Snapshot				0.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/trace_helpers.go:3:		appendTraceEntry			100.0%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/trace_helpers.go:8:		cloneTraceEntries			83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/trace_helpers.go:19:		cloneNamedPayloads			83.3%
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab/ws_hooks.go:17:		newWebsocketTraceHooks			30.4%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:59:				WithChunkDelay				100.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:65:				WithHooks				0.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:71:				NewEngine				100.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:84:				RegisterSchemas				75.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:107:				Install					53.8%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:129:				NewService				0.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:139:				SubmitPrompt				0.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:153:				Stop					0.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:163:				WaitIdle				0.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:170:				Snapshot				0.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:177:				handleStartInference			72.2%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:212:				handleStopInference			100.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:219:				runDemoInference			89.5%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:249:				publish					66.7%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:256:				WaitIdle				83.3%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:270:				nextMessageID				100.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:277:				swapRun					100.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:285:				currentRun				100.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:291:				clearRun				100.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:300:				uiProjection				81.8%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:322:				timelineProjection			93.9%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:366:				chatUpdateFromEvent			85.7%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:383:				eventMessageID				85.7%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:400:				currentChatEntity			83.3%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:411:				renderAnswer				100.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:415:				chunkText				90.0%
+github.com/go-go-golems/sessionstream/examples/chatdemo/chat.go:431:				cloneMap				0.0%
+github.com/go-go-golems/sessionstream/pkg/doc/doc.go:14:					FS					0.0%
+github.com/go-go-golems/sessionstream/pkg/doc/doc.go:19:					AddDocToHelpSystem			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:27:				PartitionKeyForSession			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:65:				Published				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:71:				Consumed				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:77:				WithBusTopic				80.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:87:				WithBusMessageMutator			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:94:				WithBusObserver				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:102:				WithEventBus				69.2%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:138:				Publish					70.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:188:				decodeEventEnvelope			71.4%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:211:				newBusRecord				83.3%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/bus.go:221:				cloneWatermillMetadata			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/command_registry.go:13:			newCommandRegistry			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/command_registry.go:17:			Register				80.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/command_registry.go:33:			Lookup					100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/consumer.go:18:				newEventConsumer			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/consumer.go:29:				start					100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/consumer.go:34:				wait					60.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/consumer.go:46:				consume					50.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/consumer.go:80:				handleMessage				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/fanout.go:14:				PublishUI				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:59:				OnSessionstreamError			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:90:				WithSchemaRegistry			80.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:100:				WithHydrationStore			80.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:110:				WithSessionMetadataFactory		100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:117:				WithProjectionPolicies			0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:124:				WithUIProjectionErrorPolicy		100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:131:				WithTimelineProjectionErrorPolicy	100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:138:				WithProjectionErrorPolicy		0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:142:				WithErrorObserver			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:149:				WithUIFanout				80.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:159:				NewHub					71.4%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:179:				RegisterCommand				66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:186:				RegisterUIProjection			62.5%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:200:				RegisterTimelineProjection		62.5%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:215:				Submit					60.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:232:				Snapshot				66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:239:				Session					66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:246:				Cursor					66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:253:				EventCursor				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:260:				ProjectionCursor			57.1%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:274:				Run					66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:302:				Shutdown				83.3%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:319:				dispatch				85.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:331:				publisher				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:342:				Publish					64.3%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:364:				RetryTimeline				66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:375:				RebuildTimelineFromScratch		55.6%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:390:				RebuildTimeline				65.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:422:				rebuildTimelineEvent			56.2%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:463:				projectAndApply				70.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:552:				cloneUIEvents				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:567:				nextLocalOrdinal			90.9%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:583:				eventCursor				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:590:				reportError				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hub.go:599:				validatePayloadType			66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:29:		New					61.5%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:49:		FileDSN					66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:56:		MemoryDSN				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:63:		NewInMemory				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:67:		Close					66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:74:		Reset					66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:93:		Apply					72.3%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:191:		Snapshot				75.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:278:		View					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:286:		Cursor					69.2%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:307:		ClearTimeline				70.6%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:338:		EventCursor				72.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:356:		AppendEvent				62.5%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:387:		Events					74.3%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:439:		ProjectionCursor			66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:463:		AdvanceProjectionCursor			63.6%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:488:		RecordError				73.3%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:514:		ErrorRecords				83.3%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:581:		migrate					71.4%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:679:		newView					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:691:		Get					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:703:		List					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:724:		Ordinal					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:726:		uint64ToInt64				66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:733:		int64ToUint64				66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite/store.go:740:		boolToInt				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/noop_store.go:7:			newNoopHydrationStore			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/noop_store.go:9:			Apply					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/noop_store.go:16:			Snapshot				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/noop_store.go:20:			View					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/noop_store.go:24:			Cursor					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/noop_store.go:30:			Get					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/noop_store.go:36:			List					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/noop_store.go:41:			Ordinal					0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/ordinals.go:20:				NewOrdinalAssigner			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/ordinals.go:27:				Next					90.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/ordinals.go:60:				ExtractStreamID				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/ordinals.go:73:				DeriveOrdinalFromStreamID		80.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/pipeline_observer.go:63:		OnPipeline				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/pipeline_observer.go:74:		OnPipeline				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/pipeline_observer.go:81:		WithPipelineObserver			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/pipeline_observer.go:88:		observePipeline				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/pipeline_observer.go:97:		clonePipelineRecord			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/pipeline_observer.go:107:		cloneEvent				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/pipeline_observer.go:115:		cloneTimelineEntities			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/projection.go:40:			Project					100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/projection.go:52:			Project					100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:20:				NewSchemaRegistry			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:29:				RegisterCommand				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:33:				RegisterEvent				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:37:				RegisterUIEvent				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:41:				RegisterTimelineEntity			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:45:				CommandSchema				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:49:				EventSchema				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:53:				UIEventSchema				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:57:				TimelineEntitySchema			0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:61:				DecodeCommandJSON			62.5%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:75:				MarshalProtoJSON			66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:85:				register				75.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:104:				lookup					75.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/schema.go:117:				instantiate				75.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/session_registry.go:18:			newSessionRegistry			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/session_registry.go:25:			Get					100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/session_registry.go:32:			GetOrCreate				88.2%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/observer.go:94:		OnTransport				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/observer.go:101:		WithTransportObserver			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/observer.go:108:		observe					100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/observer.go:117:		cloneTransportRecord			83.3%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/observer.go:128:		summarizeEntities			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/observer.go:150:		clientFrameType				33.3%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/observer.go:165:		serverFrameType				66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/observer.go:186:		fanoutTargetIDs				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:52:		WithHooks				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:60:		WithUpgrader				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:70:		WithHydrationBufferLimit		80.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:156:		NewServer				70.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:181:		ServeHTTP				72.2%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:212:		PublishUI				92.3%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:233:		Connections				92.9%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:251:		readLoop				74.1%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:294:		handleClientFrame			60.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:370:		writeLoop				85.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:383:		closeConnection				90.9%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:416:		connectionsForSession			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:432:		registerHydrating			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:453:		deliverUIEvents				81.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:483:		drainHydrationBuffer			86.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:506:		markLive				91.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:522:		sendUIBatch				54.5%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:541:		cloneBufferedUIBatch			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:545:		countBufferedEvents			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:553:		removeSubscription			90.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:568:		sendFrame				59.1%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:602:		newHelloFrame				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:606:		newSubscribedFrame			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:610:		newUnsubscribedFrame			0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:614:		newSnapshotFrame			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:618:		newUIEventFrame				75.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:626:		newErrorFrame				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:630:		newPongFrame				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:634:		encodeSnapshotEntities			100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:652:		packAny					66.7%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:659:		mustPackAny				75.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:667:		protoMessageAsMap			0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:682:		cloneSnapshot				0.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:695:		cloneUIEvent				100.0%
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws/server.go:703:		cloneUIEvents				83.3%
+total:												(statements)				66.9%

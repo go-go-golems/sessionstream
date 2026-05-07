@@ -49,7 +49,7 @@ func (e *labEnvironment) newPhase4State() (*phase4State, error) {
 	if err != nil {
 		return nil, err
 	}
-	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithHooks(newWebsocketTraceHooks(websocketTraceOptions{
+	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithTransportObserver(newWebsocketTraceObserver(websocketTraceOptions{
 		Phase:            4,
 		AppendTrace:      e.appendPhase4Trace,
 		IncludeUIPayload: true,
@@ -57,22 +57,22 @@ func (e *labEnvironment) newPhase4State() (*phase4State, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine := chatdemo.NewEngine(
-		chatdemo.WithChunkDelay(15*time.Millisecond),
-		chatdemo.WithHooks(chatdemo.Hooks{
-			OnBackendEvent: func(sessionID, eventName string, payload map[string]any) {
-				details := cloneMap(payload)
-				details["sessionId"] = sessionID
-				details["eventName"] = eventName
-				e.appendPhase4Trace("backend-event", "phase 4 backend event emitted", details)
-			},
-		}),
-	)
+	engine := chatdemo.NewEngine(chatdemo.WithChunkDelay(15 * time.Millisecond))
 
 	hub, err := sessionstream.NewHub(
 		sessionstream.WithSchemaRegistry(reg),
 		sessionstream.WithHydrationStore(store),
 		sessionstream.WithUIFanout(wsServer),
+		sessionstream.WithPipelineObserver(sessionstream.PipelineObserverFunc(func(_ context.Context, rec sessionstream.PipelineRecord) {
+			if rec.EventName == "" {
+				return
+			}
+			details := protoStructMap(rec.Event.Payload)
+			details["sessionId"] = string(rec.SessionId)
+			details["eventName"] = rec.EventName
+			details["ordinal"] = fmt.Sprintf("%d", rec.Ordinal)
+			e.appendPhase4Trace("backend-event", "phase 4 backend event emitted", details)
+		})),
 	)
 	if err != nil {
 		return nil, err
