@@ -370,3 +370,171 @@ func containsStage(stages []TransportStage, stage TransportStage) bool {
 	}
 	return false
 }
+
+func TestSubscribeBuffersFanoutDuringSnapshotLoad(t *testing.T) {
+	snapshotStarted := make(chan struct{})
+	releaseSnapshot := make(chan struct{})
+	provider := snapshotProviderFunc(func(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		closeOnce(snapshotStarted)
+		select {
+		case <-releaseSnapshot:
+		case <-ctx.Done():
+			return sessionstream.Snapshot{}, ctx.Err()
+		}
+		return sessionstream.Snapshot{SessionId: sid, SnapshotOrdinal: 100}, nil
+	})
+	records := newRecordingTransportObserver()
+	server, err := NewServer(provider, WithTransportObserver(records))
+	require.NoError(t, err)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer func() { require.NoError(t, conn.Close()) }()
+	_ = readServerFrame(t, conn) // hello
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "s-race"}}})
+	<-snapshotStarted
+
+	payload, err := structpb.NewStruct(map[string]any{"text": "during snapshot"})
+	require.NoError(t, err)
+	require.NoError(t, server.PublishUI(context.Background(), "s-race", 101, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
+
+	close(releaseSnapshot)
+	snapshot := readServerFrame(t, conn)
+	require.Equal(t, uint64(100), snapshot.GetSnapshot().GetSnapshotOrdinal())
+	live := readServerFrame(t, conn)
+	require.NotNil(t, live.GetUiEvent())
+	require.Equal(t, uint64(101), live.GetUiEvent().GetEventOrdinal())
+	subscribed := readServerFrame(t, conn)
+	require.NotNil(t, subscribed.GetSubscribed())
+
+	require.Eventually(t, func() bool {
+		stages := records.stages()
+		return containsStage(stages, TransportStageUIEventBuffered) &&
+			containsStage(stages, TransportStageHydrationBufferFlushed) &&
+			containsStage(stages, TransportStageSubscriptionLive)
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestSubscribeDoesNotFlushBufferedEventsAtOrBeforeSnapshotOrdinal(t *testing.T) {
+	snapshotStarted := make(chan struct{})
+	releaseSnapshot := make(chan struct{})
+	provider := snapshotProviderFunc(func(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		closeOnce(snapshotStarted)
+		select {
+		case <-releaseSnapshot:
+		case <-ctx.Done():
+			return sessionstream.Snapshot{}, ctx.Err()
+		}
+		return sessionstream.Snapshot{SessionId: sid, SnapshotOrdinal: 100}, nil
+	})
+	server, err := NewServer(provider)
+	require.NoError(t, err)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer func() { require.NoError(t, conn.Close()) }()
+	_ = readServerFrame(t, conn)
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "s-dup"}}})
+	<-snapshotStarted
+	payload, err := structpb.NewStruct(map[string]any{"text": "already in snapshot"})
+	require.NoError(t, err)
+	require.NoError(t, server.PublishUI(context.Background(), "s-dup", 100, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
+	close(releaseSnapshot)
+
+	snapshot := readServerFrame(t, conn)
+	require.Equal(t, uint64(100), snapshot.GetSnapshot().GetSnapshotOrdinal())
+	subscribed := readServerFrame(t, conn)
+	require.NotNil(t, subscribed.GetSubscribed())
+}
+
+func TestHydratingConnectionDoesNotBlockLiveConnection(t *testing.T) {
+	blockSnapshot := make(chan struct{})
+	releaseSnapshot := make(chan struct{})
+	var snapshotCalls int
+	var mu sync.Mutex
+	provider := snapshotProviderFunc(func(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		mu.Lock()
+		snapshotCalls++
+		call := snapshotCalls
+		mu.Unlock()
+		if call == 2 {
+			closeOnce(blockSnapshot)
+			select {
+			case <-releaseSnapshot:
+			case <-ctx.Done():
+				return sessionstream.Snapshot{}, ctx.Err()
+			}
+		}
+		return sessionstream.Snapshot{SessionId: sid, SnapshotOrdinal: 100}, nil
+	})
+	server, err := NewServer(provider)
+	require.NoError(t, err)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	liveConn := dialWS(t, httpServer.URL)
+	defer func() { require.NoError(t, liveConn.Close()) }()
+	_ = readServerFrame(t, liveConn)
+	writeClientFrame(t, liveConn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "s-multi"}}})
+	_ = readServerFrame(t, liveConn)
+	_ = readServerFrame(t, liveConn)
+
+	hydratingConn := dialWS(t, httpServer.URL)
+	defer func() { require.NoError(t, hydratingConn.Close()) }()
+	_ = readServerFrame(t, hydratingConn)
+	writeClientFrame(t, hydratingConn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "s-multi"}}})
+	<-blockSnapshot
+
+	payload, err := structpb.NewStruct(map[string]any{"text": "both tabs"})
+	require.NoError(t, err)
+	require.NoError(t, server.PublishUI(context.Background(), "s-multi", 101, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
+
+	liveFrame := readServerFrame(t, liveConn)
+	require.Equal(t, uint64(101), liveFrame.GetUiEvent().GetEventOrdinal())
+
+	close(releaseSnapshot)
+	_ = readServerFrame(t, hydratingConn) // snapshot
+	hydratedLive := readServerFrame(t, hydratingConn)
+	require.Equal(t, uint64(101), hydratedLive.GetUiEvent().GetEventOrdinal())
+}
+
+func TestHydrationBufferOverflowClosesConnection(t *testing.T) {
+	snapshotStarted := make(chan struct{})
+	releaseSnapshot := make(chan struct{})
+	records := newRecordingTransportObserver()
+	provider := snapshotProviderFunc(func(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		closeOnce(snapshotStarted)
+		select {
+		case <-releaseSnapshot:
+		case <-ctx.Done():
+			return sessionstream.Snapshot{}, ctx.Err()
+		}
+		return sessionstream.Snapshot{SessionId: sid, SnapshotOrdinal: 0}, nil
+	})
+	server, err := NewServer(provider, WithHydrationBufferLimit(1), WithTransportObserver(records))
+	require.NoError(t, err)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer func() { _ = conn.Close() }()
+	_ = readServerFrame(t, conn)
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "s-overflow"}}})
+	<-snapshotStarted
+	payload, err := structpb.NewStruct(map[string]any{"text": "overflow"})
+	require.NoError(t, err)
+	require.NoError(t, server.PublishUI(context.Background(), "s-overflow", 1, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
+	require.NoError(t, server.PublishUI(context.Background(), "s-overflow", 2, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
+
+	require.Eventually(t, func() bool {
+		return containsStage(records.stages(), TransportStageHydrationBufferOverflow)
+	}, time.Second, 10*time.Millisecond)
+	close(releaseSnapshot)
+}
+
+func closeOnce(ch chan struct{}) {
+	defer func() { _ = recover() }()
+	close(ch)
+}

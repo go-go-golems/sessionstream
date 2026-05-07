@@ -22,6 +22,8 @@ var (
 	unmarshalOpts  = protojson.UnmarshalOptions{DiscardUnknown: false}
 )
 
+const defaultMaxHydrationBufferedBatches = 1024
+
 // SnapshotProvider provides snapshot lookup for subscribe flows.
 type SnapshotProvider interface {
 	Snapshot(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error)
@@ -62,6 +64,19 @@ func WithUpgrader(u websocket.Upgrader) Option {
 	}
 }
 
+// WithHydrationBufferLimit configures how many live UI batches a hydrating
+// subscription may buffer while its snapshot is loading. A non-positive value
+// disables buffering and is rejected.
+func WithHydrationBufferLimit(maxBatches int) Option {
+	return func(s *Server) error {
+		if maxBatches <= 0 {
+			return fmt.Errorf("hydration buffer limit must be positive")
+		}
+		s.maxHydrationBufferedBatches = maxBatches
+		return nil
+	}
+}
+
 // Server is a websocket snapshot/fanout adapter. It is both an HTTP handler
 // and a sessionstream.UIFanout: clients may subscribe/unsubscribe to sessions,
 // receive snapshots, and receive live UI events. Command ingress is deliberately
@@ -84,6 +99,8 @@ type Server struct {
 	hooks     Hooks
 	observer  TransportObserver
 
+	maxHydrationBufferedBatches int
+
 	nextID uint64
 
 	mu        sync.RWMutex
@@ -102,8 +119,23 @@ type connection struct {
 	subs map[sessionstream.SessionId]subscription
 }
 
+type subscriptionState string
+
+const (
+	subscriptionStateHydrating subscriptionState = "hydrating"
+	subscriptionStateLive      subscriptionState = "live"
+)
+
+type bufferedUIBatch struct {
+	ordinal uint64
+	events  []sessionstream.UIEvent
+}
+
 type subscription struct {
 	sinceSnapshotOrdinal uint64
+	state                subscriptionState
+	snapshotOrdinal      uint64
+	buffer               []bufferedUIBatch
 }
 
 type outboundFrame struct {
@@ -126,7 +158,8 @@ func NewServer(snapshots SnapshotProvider, opts ...Option) (*Server, error) {
 		return nil, fmt.Errorf("snapshot provider is nil")
 	}
 	server := &Server{
-		snapshots: snapshots,
+		snapshots:                   snapshots,
+		maxHydrationBufferedBatches: defaultMaxHydrationBufferedBatches,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool { return true },
 		},
@@ -188,21 +221,19 @@ func (s *Server) PublishUI(ctx context.Context, sid sessionstream.SessionId, ord
 	}
 	s.observe(ctx, TransportRecord{Stage: TransportStageFanoutStarted, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), FanoutTargetIds: targetIDs})
 	for _, c := range targets {
-		for _, event := range events {
-			frame, err := newUIEventFrame(sid, ord, event)
-			if err != nil {
-				if s.hooks.OnSendError != nil {
-					s.hooks.OnSendError(c.id, err)
-				}
+		state, ok := s.subscriptionState(c, sid)
+		if !ok {
+			continue
+		}
+		switch state {
+		case subscriptionStateHydrating:
+			if err := s.bufferHydrationEvents(ctx, c, sid, ord, events); err != nil {
+				_ = s.sendFrame(c, newErrorFrame("hydration_buffer_overflow", err.Error(), ""))
 				s.closeConnection(c)
-				continue
 			}
-			if err := s.sendFrame(c, frame); err != nil {
+		case subscriptionStateLive:
+			if err := s.sendUIBatch(c, sid, ord, events); err != nil {
 				s.closeConnection(c)
-				continue
-			}
-			if s.hooks.OnUIEventSent != nil {
-				s.hooks.OnUIEventSent(c.id, sid, ord, cloneUIEvent(event))
 			}
 		}
 	}
@@ -286,6 +317,14 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *se
 		}
 		since := sub.GetSinceSnapshotOrdinal()
 		s.observe(ctx, TransportRecord{Stage: TransportStageSubscribeReceived, Direction: FrameDirectionClientToServer, ConnectionId: c.id, SessionId: sid, FrameType: "subscribe", SinceSnapshotOrdinal: since})
+		s.registerHydrating(c, sid, since)
+		completed := false
+		defer func() {
+			if !completed {
+				s.removeSubscription(c, sid)
+			}
+		}()
+
 		s.observe(ctx, TransportRecord{Stage: TransportStageSnapshotLoadStarted, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since})
 		snap, err := s.snapshots.Snapshot(ctx, sid)
 		if err != nil {
@@ -299,22 +338,24 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *se
 		if s.hooks.OnSnapshotSent != nil {
 			s.hooks.OnSnapshotSent(c.id, sid, cloneSnapshot(snap))
 		}
-		c.mu.Lock()
-		c.subs[sid] = subscription{sinceSnapshotOrdinal: since}
-		c.mu.Unlock()
-		s.mu.Lock()
-		set := s.bySession[sid]
-		if set == nil {
-			set = map[sessionstream.ConnectionId]struct{}{}
-			s.bySession[sid] = set
+		buffered := s.drainHydrationBuffer(c, sid, snap.SnapshotOrdinal)
+		if len(buffered) > 0 {
+			s.observe(ctx, TransportRecord{Stage: TransportStageHydrationBufferFlushed, ConnectionId: c.id, SessionId: sid, SnapshotOrdinal: snap.SnapshotOrdinal, FanoutEventCount: countBufferedEvents(buffered)})
 		}
-		set[c.id] = struct{}{}
-		s.mu.Unlock()
-		s.observe(ctx, TransportRecord{Stage: TransportStageSubscriptionRegistered, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since, SnapshotOrdinal: snap.SnapshotOrdinal})
+		for _, batch := range buffered {
+			if err := s.sendUIBatch(c, sid, batch.ordinal, batch.events); err != nil {
+				return err
+			}
+		}
+		s.markLive(c, sid, snap.SnapshotOrdinal)
 		if s.hooks.OnSubscribe != nil {
 			s.hooks.OnSubscribe(c.id, sid, since)
 		}
-		return s.sendFrame(c, newSubscribedFrame(sid, since))
+		if err := s.sendFrame(c, newSubscribedFrame(sid, since)); err != nil {
+			return err
+		}
+		completed = true
+		return nil
 	case *sessionstreamv1.ClientFrame_Unsubscribe:
 		sid := sessionstream.SessionId(typed.Unsubscribe.GetSessionId())
 		if sid == "" {
@@ -390,6 +431,115 @@ func (s *Server) connectionsForSession(sid sessionstream.SessionId) []*connectio
 		}
 	}
 	return out
+}
+
+func (s *Server) registerHydrating(c *connection, sid sessionstream.SessionId, since uint64) {
+	c.mu.Lock()
+	c.subs[sid] = subscription{sinceSnapshotOrdinal: since, state: subscriptionStateHydrating}
+	c.mu.Unlock()
+
+	s.mu.Lock()
+	set := s.bySession[sid]
+	if set == nil {
+		set = map[sessionstream.ConnectionId]struct{}{}
+		s.bySession[sid] = set
+	}
+	set[c.id] = struct{}{}
+	s.mu.Unlock()
+	s.observe(context.Background(), TransportRecord{Stage: TransportStageSubscriptionRegistered, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since})
+}
+
+func (s *Server) subscriptionState(c *connection, sid sessionstream.SessionId) (subscriptionState, bool) {
+	if c == nil {
+		return "", false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	sub, ok := c.subs[sid]
+	return sub.state, ok
+}
+
+func (s *Server) bufferHydrationEvents(ctx context.Context, c *connection, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	sub, ok := c.subs[sid]
+	if !ok || sub.state != subscriptionStateHydrating {
+		return nil
+	}
+	if len(sub.buffer) >= s.maxHydrationBufferedBatches {
+		err := fmt.Errorf("connection %s hydration buffer full for session %s", c.id, sid)
+		s.observe(ctx, TransportRecord{Stage: TransportStageHydrationBufferOverflow, ConnectionId: c.id, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), Err: err})
+		return err
+	}
+	sub.buffer = append(sub.buffer, bufferedUIBatch{ordinal: ord, events: cloneUIEvents(events)})
+	c.subs[sid] = sub
+	s.observe(ctx, TransportRecord{Stage: TransportStageUIEventBuffered, ConnectionId: c.id, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events)})
+	return nil
+}
+
+func (s *Server) drainHydrationBuffer(c *connection, sid sessionstream.SessionId, snapshotOrdinal uint64) []bufferedUIBatch {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	sub, ok := c.subs[sid]
+	if !ok {
+		return nil
+	}
+	out := make([]bufferedUIBatch, 0, len(sub.buffer))
+	for _, batch := range sub.buffer {
+		if batch.ordinal > snapshotOrdinal {
+			out = append(out, cloneBufferedUIBatch(batch))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ordinal < out[j].ordinal })
+	sub.buffer = nil
+	sub.snapshotOrdinal = snapshotOrdinal
+	c.subs[sid] = sub
+	return out
+}
+
+func (s *Server) markLive(c *connection, sid sessionstream.SessionId, snapshotOrdinal uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	sub, ok := c.subs[sid]
+	if !ok {
+		return
+	}
+	sub.state = subscriptionStateLive
+	sub.snapshotOrdinal = snapshotOrdinal
+	sub.buffer = nil
+	c.subs[sid] = sub
+	s.observe(context.Background(), TransportRecord{Stage: TransportStageSubscriptionLive, ConnectionId: c.id, SessionId: sid, SnapshotOrdinal: snapshotOrdinal})
+}
+
+func (s *Server) sendUIBatch(c *connection, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
+	for _, event := range events {
+		frame, err := newUIEventFrame(sid, ord, event)
+		if err != nil {
+			if s.hooks.OnSendError != nil {
+				s.hooks.OnSendError(c.id, err)
+			}
+			return err
+		}
+		if err := s.sendFrame(c, frame); err != nil {
+			return err
+		}
+		if s.hooks.OnUIEventSent != nil {
+			s.hooks.OnUIEventSent(c.id, sid, ord, cloneUIEvent(event))
+		}
+	}
+	return nil
+}
+
+func cloneBufferedUIBatch(batch bufferedUIBatch) bufferedUIBatch {
+	return bufferedUIBatch{ordinal: batch.ordinal, events: cloneUIEvents(batch.events)}
+}
+
+func countBufferedEvents(batches []bufferedUIBatch) int {
+	total := 0
+	for _, batch := range batches {
+		total += len(batch.events)
+	}
+	return total
 }
 
 func (s *Server) removeSubscription(c *connection, sid sessionstream.SessionId) {
@@ -538,6 +688,17 @@ func cloneUIEvent(ev sessionstream.UIEvent) sessionstream.UIEvent {
 	out := ev
 	if ev.Payload != nil {
 		out.Payload = proto.Clone(ev.Payload)
+	}
+	return out
+}
+
+func cloneUIEvents(in []sessionstream.UIEvent) []sessionstream.UIEvent {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]sessionstream.UIEvent, 0, len(in))
+	for _, event := range in {
+		out = append(out, cloneUIEvent(event))
 	}
 	return out
 }
