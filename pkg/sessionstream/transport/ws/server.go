@@ -292,14 +292,12 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *se
 				return err
 			}
 		}
-		lateBuffered := s.markLive(c, sid, snap.SnapshotOrdinal)
-		if len(lateBuffered) > 0 {
-			s.observe(ctx, TransportRecord{Stage: TransportStageHydrationBufferFlushed, ConnectionId: c.id, SessionId: sid, SnapshotOrdinal: snap.SnapshotOrdinal, FanoutEventCount: countBufferedEvents(lateBuffered)})
+		lateEventCount, err := s.flushLateHydrationBufferAndMarkLive(ctx, c, sid, snap.SnapshotOrdinal)
+		if err != nil {
+			return err
 		}
-		for _, batch := range lateBuffered {
-			if err := s.sendUIBatch(ctx, c, sid, batch.ordinal, batch.events); err != nil {
-				return err
-			}
+		if lateEventCount > 0 {
+			s.observe(ctx, TransportRecord{Stage: TransportStageHydrationBufferFlushed, ConnectionId: c.id, SessionId: sid, SnapshotOrdinal: snap.SnapshotOrdinal, FanoutEventCount: lateEventCount})
 		}
 		if err := s.sendFrame(c, newSubscribedFrame(sid, since)); err != nil {
 			return err
@@ -399,8 +397,8 @@ func (s *Server) registerHydrating(c *connection, sid sessionstream.SessionId, s
 // deliverUIEvents routes a UI event batch to one connection. It checks the
 // subscription state under the connection lock and either buffers (hydrating)
 // or sends directly (live). This eliminates the TOCTOU race where PublishUI
-// read "hydrating" via subscriptionState but markLive changed the state before
-// bufferHydrationEvents could append, silently dropping the event.
+// reads a stale subscription state while another goroutine transitions the
+// subscription between hydration and live delivery.
 func (s *Server) deliverUIEvents(ctx context.Context, c *connection, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
 	c.mu.Lock()
 	sub, ok := c.subs[sid]
@@ -445,23 +443,30 @@ func (s *Server) drainHydrationBuffer(c *connection, sid sessionstream.SessionId
 	return out
 }
 
-// markLive transitions a subscription from hydrating to live and returns any
-// batches that arrived after drainHydrationBuffer ran. The caller must send
-// these batches so they are not silently dropped.
-func (s *Server) markLive(c *connection, sid sessionstream.SessionId, snapshotOrdinal uint64) []bufferedUIBatch {
+// flushLateHydrationBufferAndMarkLive transitions a subscription from hydrating
+// to live only after any batches buffered since drainHydrationBuffer have been
+// queued to the connection. Holding c.mu while queueing those late batches keeps
+// concurrent PublishUI calls from observing the live state and enqueueing newer
+// events ahead of older late-hydration events.
+func (s *Server) flushLateHydrationBufferAndMarkLive(ctx context.Context, c *connection, sid sessionstream.SessionId, snapshotOrdinal uint64) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	sub, ok := c.subs[sid]
 	if !ok {
-		return nil
+		return 0, nil
 	}
 	late := filterBufferedAfterSnapshot(sub.buffer, snapshotOrdinal)
+	for _, batch := range late {
+		if err := s.sendUIBatch(ctx, c, sid, batch.ordinal, batch.events); err != nil {
+			return 0, err
+		}
+	}
 	sub.state = subscriptionStateLive
 	sub.snapshotOrdinal = snapshotOrdinal
 	sub.buffer = nil
 	c.subs[sid] = sub
 	s.observe(context.Background(), TransportRecord{Stage: TransportStageSubscriptionLive, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: sub.sinceSnapshotOrdinal, SnapshotOrdinal: snapshotOrdinal})
-	return late
+	return countBufferedEvents(late), nil
 }
 
 func (s *Server) sendUIBatch(ctx context.Context, c *connection, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {

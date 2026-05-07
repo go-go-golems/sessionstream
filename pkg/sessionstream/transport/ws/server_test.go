@@ -205,6 +205,19 @@ func readServerFrame(t *testing.T, conn *websocket.Conn) *sessionstreamv1.Server
 	return frame
 }
 
+func readQueuedServerFrame(t *testing.T, conn *connection) *sessionstreamv1.ServerFrame {
+	t.Helper()
+	select {
+	case queued := <-conn.send:
+		frame := &sessionstreamv1.ServerFrame{}
+		require.NoError(t, protojson.Unmarshal(queued.body, frame))
+		return frame
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for queued server frame")
+		return nil
+	}
+}
+
 func TestTransportObserverSubscribeAndFanoutSequence(t *testing.T) {
 	records := newRecordingTransportObserver()
 	reg := sessionstream.NewSchemaRegistry()
@@ -541,7 +554,7 @@ func closeOnce(ch chan struct{}) {
 	close(ch)
 }
 
-func TestMarkLiveFiltersLateBufferedBatchesAlreadyCoveredBySnapshot(t *testing.T) {
+func TestFlushLateHydrationBufferAndMarkLiveFiltersBatchesAlreadyCoveredBySnapshot(t *testing.T) {
 	server, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
 		return sessionstream.Snapshot{}, nil
 	}))
@@ -552,6 +565,7 @@ func TestMarkLiveFiltersLateBufferedBatchesAlreadyCoveredBySnapshot(t *testing.T
 	require.NoError(t, err)
 	conn := &connection{
 		id:   "conn-test",
+		send: make(chan outboundFrame, 8),
 		subs: map[sessionstream.SessionId]subscription{},
 	}
 	conn.subs["s-filter"] = subscription{
@@ -563,22 +577,81 @@ func TestMarkLiveFiltersLateBufferedBatchesAlreadyCoveredBySnapshot(t *testing.T
 		},
 	}
 
-	late := server.markLive(conn, "s-filter", 10)
-	require.Len(t, late, 1)
-	require.Equal(t, uint64(11), late[0].ordinal)
+	lateEventCount, err := server.flushLateHydrationBufferAndMarkLive(context.Background(), conn, "s-filter", 10)
+	require.NoError(t, err)
+	require.Equal(t, 1, lateEventCount)
 	require.Equal(t, subscriptionStateLive, conn.subs["s-filter"].state)
+
+	queued := <-conn.send
+	frame := &sessionstreamv1.ServerFrame{}
+	require.NoError(t, unmarshalOpts.Unmarshal(queued.body, frame))
+	require.NotNil(t, frame.GetUiEvent())
+	require.Equal(t, uint64(11), frame.GetUiEvent().GetEventOrdinal())
+	require.Empty(t, conn.send)
 }
 
-// TestSubscribeLateBufferNotDroppedByMarkLive is a regression test for the race
-// where PublishUI buffers events after drainHydrationBuffer clears the buffer
-// but before markLive transitions the subscription to live. markLive must
-// return those late-buffered batches rather than silently discarding them.
-//
-// The test creates a tiny send channel (capacity 1) so that sending the drained
-// batch fills the queue. While the subscribe handler is blocked trying to send
-// the drained batch, PublishUI appends a late event to the hydration buffer.
-// After unblocking, markLive must return that late event.
-func TestSubscribeLateBufferNotDroppedByMarkLive(t *testing.T) {
+func TestFlushLateHydrationBufferAndMarkLiveQueuesLateBeforeConcurrentLiveFanout(t *testing.T) {
+	latePayload, err := structpb.NewStruct(map[string]any{"text": "late"})
+	require.NoError(t, err)
+	livePayload, err := structpb.NewStruct(map[string]any{"text": "live"})
+	require.NoError(t, err)
+
+	conn := &connection{
+		id:   "conn-test",
+		send: make(chan outboundFrame, 8),
+		subs: map[sessionstream.SessionId]subscription{},
+	}
+	conn.subs["s-order"] = subscription{
+		state: subscriptionStateHydrating,
+		buffer: []bufferedUIBatch{
+			{ordinal: 101, events: []sessionstream.UIEvent{{Name: testUIEventName, Payload: latePayload}}},
+		},
+	}
+
+	publishDone := make(chan error, 1)
+	publishStarted := make(chan struct{})
+	var publishOnce sync.Once
+	var server *Server
+	server, err = NewServer(
+		snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+			return sessionstream.Snapshot{}, nil
+		}),
+		WithTransportObserver(TransportObserverFunc(func(ctx context.Context, rec TransportRecord) {
+			if rec.Stage == TransportStageUIEventSent && rec.Ordinal == 101 {
+				publishOnce.Do(func() {
+					close(publishStarted)
+					go func() {
+						publishDone <- server.PublishUI(context.Background(), "s-order", 102, []sessionstream.UIEvent{{Name: testUIEventName, Payload: livePayload}})
+					}()
+				})
+			}
+		})),
+	)
+	require.NoError(t, err)
+	server.mu.Lock()
+	server.conns[conn.id] = conn
+	server.bySession["s-order"] = map[sessionstream.ConnectionId]struct{}{conn.id: {}}
+	server.mu.Unlock()
+
+	lateEventCount, err := server.flushLateHydrationBufferAndMarkLive(context.Background(), conn, "s-order", 100)
+	require.NoError(t, err)
+	require.Equal(t, 1, lateEventCount)
+	<-publishStarted
+	require.NoError(t, <-publishDone)
+
+	first := readQueuedServerFrame(t, conn)
+	require.NotNil(t, first.GetUiEvent())
+	require.Equal(t, uint64(101), first.GetUiEvent().GetEventOrdinal())
+	second := readQueuedServerFrame(t, conn)
+	require.NotNil(t, second.GetUiEvent())
+	require.Equal(t, uint64(102), second.GetUiEvent().GetEventOrdinal())
+}
+
+// TestSubscribeLateBufferNotDroppedByLiveTransition is a regression test for
+// the race where PublishUI buffers events after drainHydrationBuffer clears the
+// buffer but before the subscription transitions to live. The live transition
+// must queue those late-buffered batches rather than silently discarding them.
+func TestSubscribeLateBufferNotDroppedByLiveTransition(t *testing.T) {
 	snapshotReleased := make(chan struct{})
 	provider := snapshotProviderFunc(func(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
 		<-snapshotReleased
@@ -612,12 +685,11 @@ func TestSubscribeLateBufferNotDroppedByMarkLive(t *testing.T) {
 		return containsStage(records.stages(), TransportStageUIEventBuffered)
 	}, time.Second, 10*time.Millisecond)
 
-	// Release the snapshot. The subscribe handler will drain the buffer and send
-	// the buffered event, then call markLive.
+	// Release the snapshot. The subscribe handler will drain the buffer, send the
+	// buffered event, then flush any late-buffered events and go live.
 	close(snapshotReleased)
 
-	// Wait for the subscribe handler to start writing frames (drained buffer send).
-	// Then publish a second event that races with markLive.
+	// Wait for the subscribe handler to complete the live transition.
 	//
 	// We can't deterministically interleave, but with -race and -count=100 this
 	// would surface the bug. Instead, we verify the stronger invariant: both
@@ -650,7 +722,7 @@ func TestSubscribeLateBufferNotDroppedByMarkLive(t *testing.T) {
 // TestDeliverUIEventsSendsDirectlyWhenStateChangedToLive verifies that
 // deliverUIEvents (the unified state check + buffer/send) routes events
 // directly when the subscription has transitioned to live, rather than
-// silently dropping them. This is the TOCTOU companion to the markLive fix.
+// silently dropping them. This is the TOCTOU companion to the live-transition fix.
 func TestDeliverUIEventsSendsDirectlyWhenStateChangedToLive(t *testing.T) {
 	provider := snapshotProviderFunc(func(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
 		return sessionstream.Snapshot{SessionId: sid, SnapshotOrdinal: 10}, nil
