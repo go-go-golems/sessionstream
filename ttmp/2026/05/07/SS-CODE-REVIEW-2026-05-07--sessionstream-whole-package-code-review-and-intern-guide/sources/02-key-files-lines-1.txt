@@ -1,0 +1,1884 @@
+== pkg/sessionstream/hub.go ==
+     1	package sessionstream
+     2	
+     3	import (
+     4		"context"
+     5		"fmt"
+     6		"sync"
+     7	
+     8		"google.golang.org/protobuf/proto"
+     9	)
+    10	
+    11	// ProjectionErrorPolicy controls how event processing reacts to projection failures.
+    12	type ProjectionErrorPolicy int
+    13	
+    14	const (
+    15		// ProjectionErrorPolicyFail stops processing and returns the projection error.
+    16		ProjectionErrorPolicyFail ProjectionErrorPolicy = iota
+    17		// ProjectionErrorPolicyAdvance advances the relevant cursor even if a projection fails.
+    18		ProjectionErrorPolicyAdvance
+    19	)
+    20	
+    21	// ProjectionPolicies configures UI and timeline projection failure handling independently.
+    22	type ProjectionPolicies struct {
+    23		UI       ProjectionErrorPolicy
+    24		Timeline ProjectionErrorPolicy
+    25	}
+    26	
+    27	// ErrorKind classifies framework-observed runtime errors.
+    28	type ErrorKind string
+    29	
+    30	const (
+    31		TimelineProjectorName                 = "timeline"
+    32		ErrorKindDecode             ErrorKind = "decode"
+    33		ErrorKindOrdinal            ErrorKind = "ordinal"
+    34		ErrorKindUIProjection       ErrorKind = "ui-projection"
+    35		ErrorKindTimelineProjection ErrorKind = "timeline-projection"
+    36		ErrorKindFanout             ErrorKind = "fanout"
+    37		ErrorKindStore              ErrorKind = "store"
+    38	)
+    39	
+    40	// ErrorRecord describes an error observed while applying or delivering an event.
+    41	type ErrorRecord struct {
+    42		Kind       ErrorKind
+    43		SessionId  SessionId
+    44		Ordinal    uint64
+    45		EventName  string
+    46		Err        error
+    47		RawMessage []byte
+    48		Metadata   map[string]string
+    49	}
+    50	
+    51	// ErrorObserver receives best-effort runtime error notifications.
+    52	type ErrorObserver interface {
+    53		OnSessionstreamError(ctx context.Context, rec ErrorRecord)
+    54	}
+    55	
+    56	// ErrorObserverFunc adapts a function to ErrorObserver.
+    57	type ErrorObserverFunc func(ctx context.Context, rec ErrorRecord)
+    58	
+    59	func (f ErrorObserverFunc) OnSessionstreamError(ctx context.Context, rec ErrorRecord) {
+    60		f(ctx, rec)
+    61	}
+    62	
+    63	// Hub is the substrate entrypoint.
+    64	type Hub struct {
+    65		reg      *SchemaRegistry
+    66		store    HydrationStore
+    67		sessions *sessionRegistry
+    68		commands *commandRegistry
+    69	
+    70		uiProjection       UIProjection
+    71		timelineProjection TimelineProjection
+    72		fanout             UIFanout
+    73		bus                *busConfig
+    74	
+    75		projectionPolicies ProjectionPolicies
+    76		errorObserver      ErrorObserver
+    77		pipelineObserver   PipelineObserver
+    78	
+    79		mu           sync.Mutex
+    80		localOrdinal map[SessionId]uint64
+    81	
+    82		runMu     sync.Mutex
+    83		runCancel context.CancelFunc
+    84		consumer  *eventConsumer
+    85	}
+    86	
+    87	// HubOption configures a Hub.
+    88	type HubOption func(*Hub) error
+    89	
+    90	func WithSchemaRegistry(r *SchemaRegistry) HubOption {
+    91		return func(h *Hub) error {
+    92			if r == nil {
+    93				return fmt.Errorf("schema registry is nil")
+    94			}
+    95			h.reg = r
+    96			return nil
+    97		}
+    98	}
+    99	
+   100	func WithHydrationStore(s HydrationStore) HubOption {
+   101		return func(h *Hub) error {
+   102			if s == nil {
+   103				return fmt.Errorf("hydration store is nil")
+   104			}
+   105			h.store = s
+   106			return nil
+   107		}
+   108	}
+   109	
+   110	func WithSessionMetadataFactory(f SessionMetadataFactory) HubOption {
+   111		return func(h *Hub) error {
+   112			h.sessions = newSessionRegistry(f)
+   113			return nil
+   114		}
+   115	}
+   116	
+   117	func WithProjectionPolicies(policies ProjectionPolicies) HubOption {
+   118		return func(h *Hub) error {
+   119			h.projectionPolicies = policies
+   120			return nil
+   121		}
+   122	}
+   123	
+   124	func WithUIProjectionErrorPolicy(policy ProjectionErrorPolicy) HubOption {
+   125		return func(h *Hub) error {
+   126			h.projectionPolicies.UI = policy
+   127			return nil
+   128		}
+   129	}
+   130	
+   131	func WithTimelineProjectionErrorPolicy(policy ProjectionErrorPolicy) HubOption {
+   132		return func(h *Hub) error {
+   133			h.projectionPolicies.Timeline = policy
+   134			return nil
+   135		}
+   136	}
+   137	
+   138	func WithProjectionErrorPolicy(policy ProjectionErrorPolicy) HubOption {
+   139		return WithProjectionPolicies(ProjectionPolicies{UI: policy, Timeline: policy})
+   140	}
+   141	
+   142	func WithErrorObserver(observer ErrorObserver) HubOption {
+   143		return func(h *Hub) error {
+   144			h.errorObserver = observer
+   145			return nil
+   146		}
+   147	}
+   148	
+   149	func WithUIFanout(f UIFanout) HubOption {
+   150		return func(h *Hub) error {
+   151			if f == nil {
+   152				return fmt.Errorf("ui fanout is nil")
+   153			}
+   154			h.fanout = f
+   155			return nil
+   156		}
+   157	}
+   158	
+   159	func NewHub(opts ...HubOption) (*Hub, error) {
+   160		h := &Hub{
+   161			reg:                NewSchemaRegistry(),
+   162			store:              newNoopHydrationStore(),
+   163			sessions:           newSessionRegistry(nil),
+   164			commands:           newCommandRegistry(),
+   165			projectionPolicies: ProjectionPolicies{UI: ProjectionErrorPolicyFail, Timeline: ProjectionErrorPolicyFail},
+   166			localOrdinal:       map[SessionId]uint64{},
+   167		}
+   168		for _, opt := range opts {
+   169			if opt == nil {
+   170				continue
+   171			}
+   172			if err := opt(h); err != nil {
+   173				return nil, err
+   174			}
+   175		}
+   176		return h, nil
+   177	}
+   178	
+   179	func (h *Hub) RegisterCommand(name string, handler CommandHandler) error {
+   180		if h == nil {
+   181			return fmt.Errorf("hub is nil")
+   182		}
+   183		return h.commands.Register(name, handler)
+   184	}
+   185	
+   186	func (h *Hub) RegisterUIProjection(p UIProjection) error {
+   187		if h == nil {
+   188			return fmt.Errorf("hub is nil")
+   189		}
+   190		if p == nil {
+   191			return fmt.Errorf("ui projection is nil")
+   192		}
+   193		if h.uiProjection != nil {
+   194			return fmt.Errorf("ui projection already registered")
+   195		}
+   196		h.uiProjection = p
+   197		return nil
+   198	}
+   199	
+   200	func (h *Hub) RegisterTimelineProjection(p TimelineProjection) error {
+   201		if h == nil {
+   202			return fmt.Errorf("hub is nil")
+   203		}
+   204		if p == nil {
+   205			return fmt.Errorf("timeline projection is nil")
+   206		}
+   207		if h.timelineProjection != nil {
+   208			return fmt.Errorf("timeline projection already registered")
+   209		}
+   210		h.timelineProjection = p
+   211		return nil
+   212	}
+   213	
+   214	// Submit executes a command through the configured publisher path.
+   215	func (h *Hub) Submit(ctx context.Context, sid SessionId, name string, payload proto.Message) error {
+   216		if h == nil {
+   217			return fmt.Errorf("hub is nil")
+   218		}
+   219		if payload == nil {
+   220			return fmt.Errorf("submit payload for %q is nil", name)
+== pkg/sessionstream/transport/ws/server.go ==
+     1	package ws
+     2	
+     3	import (
+     4		"context"
+     5		"encoding/json"
+     6		"fmt"
+     7		"net/http"
+     8		"sort"
+     9		"sync"
+    10		"sync/atomic"
+    11	
+    12		sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+    13		sessionstreamv1 "github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1"
+    14		"github.com/gorilla/websocket"
+    15		"google.golang.org/protobuf/encoding/protojson"
+    16		"google.golang.org/protobuf/proto"
+    17		"google.golang.org/protobuf/types/known/anypb"
+    18	)
+    19	
+    20	var (
+    21		marshalOptions = protojson.MarshalOptions{EmitUnpopulated: false, UseProtoNames: false}
+    22		unmarshalOpts  = protojson.UnmarshalOptions{DiscardUnknown: false}
+    23	)
+    24	
+    25	const defaultMaxHydrationBufferedBatches = 1024
+    26	
+    27	// SnapshotProvider provides snapshot lookup for subscribe flows.
+    28	type SnapshotProvider interface {
+    29		Snapshot(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error)
+    30	}
+    31	
+    32	// Hooks observes websocket lifecycle and payload sequencing for debugging and labs.
+    33	type Hooks struct {
+    34		OnUpgradeError  func(*http.Request, error)
+    35		OnConnect       func(sessionstream.ConnectionId)
+    36		OnDisconnect    func(sessionstream.ConnectionId)
+    37		OnReadError     func(sessionstream.ConnectionId, error)
+    38		OnWriteError    func(sessionstream.ConnectionId, error)
+    39		OnSendError     func(sessionstream.ConnectionId, error)
+    40		OnProtocolError func(sessionstream.ConnectionId, error)
+    41		OnSubscribe     func(sessionstream.ConnectionId, sessionstream.SessionId, uint64)
+    42		OnUnsubscribe   func(sessionstream.ConnectionId, sessionstream.SessionId)
+    43		OnSnapshotSent  func(sessionstream.ConnectionId, sessionstream.SessionId, sessionstream.Snapshot)
+    44		OnUIEventSent   func(sessionstream.ConnectionId, sessionstream.SessionId, uint64, sessionstream.UIEvent)
+    45		OnClientFrame   func(sessionstream.ConnectionId, map[string]any)
+    46	}
+    47	
+    48	// Option configures a websocket Server.
+    49	type Option func(*Server) error
+    50	
+    51	// WithHooks installs optional lifecycle hooks.
+    52	func WithHooks(h Hooks) Option {
+    53		return func(s *Server) error {
+    54			s.hooks = h
+    55			return nil
+    56		}
+    57	}
+    58	
+    59	// WithUpgrader overrides the default websocket upgrader.
+    60	func WithUpgrader(u websocket.Upgrader) Option {
+    61		return func(s *Server) error {
+    62			s.upgrader = u
+    63			return nil
+    64		}
+    65	}
+    66	
+    67	// WithHydrationBufferLimit configures how many live UI batches a hydrating
+    68	// subscription may buffer while its snapshot is loading. A non-positive value
+    69	// disables buffering and is rejected.
+    70	func WithHydrationBufferLimit(maxBatches int) Option {
+    71		return func(s *Server) error {
+    72			if maxBatches <= 0 {
+    73				return fmt.Errorf("hydration buffer limit must be positive")
+    74			}
+    75			s.maxHydrationBufferedBatches = maxBatches
+    76			return nil
+    77		}
+    78	}
+    79	
+    80	// Server is a websocket snapshot/fanout adapter. It is both an HTTP handler
+    81	// and a sessionstream.UIFanout: clients may subscribe/unsubscribe to sessions,
+    82	// receive snapshots, and receive live UI events. Command ingress is deliberately
+    83	// out of scope for this adapter.
+    84	//
+    85	// Subscribe always sends a current snapshot followed by future live UI fanout.
+    86	// sinceSnapshotOrdinal is accepted, stored, echoed, and surfaced to hooks for teaching
+    87	// and diagnostics, but it is advisory for now: this reference adapter does not
+    88	// replay missed UI events from the event store. Replayed event history belongs
+    89	// behind an explicit replay API rather than being hidden inside websocket
+    90	// subscribe semantics.
+    91	//
+    92	// Production callers should wrap this handler with their own authentication,
+    93	// authorization, origin policy, and rate limiting. The default upgrader is
+    94	// intentionally permissive for local labs and examples; use WithUpgrader to
+    95	// install a stricter CheckOrigin policy.
+    96	type Server struct {
+    97		snapshots SnapshotProvider
+    98		upgrader  websocket.Upgrader
+    99		hooks     Hooks
+   100		observer  TransportObserver
+   101	
+   102		maxHydrationBufferedBatches int
+   103	
+   104		nextID uint64
+   105	
+   106		mu        sync.RWMutex
+   107		conns     map[sessionstream.ConnectionId]*connection
+   108		bySession map[sessionstream.SessionId]map[sessionstream.ConnectionId]struct{}
+   109	}
+   110	
+   111	type connection struct {
+   112		id     sessionstream.ConnectionId
+   113		ws     *websocket.Conn
+   114		send   chan outboundFrame
+   115		close  sync.Once
+   116		closed atomic.Bool
+   117	
+   118		mu   sync.RWMutex
+   119		subs map[sessionstream.SessionId]subscription
+   120	}
+   121	
+   122	type subscriptionState string
+   123	
+   124	const (
+   125		subscriptionStateHydrating subscriptionState = "hydrating"
+   126		subscriptionStateLive      subscriptionState = "live"
+   127	)
+   128	
+   129	type bufferedUIBatch struct {
+   130		ordinal uint64
+   131		events  []sessionstream.UIEvent
+   132	}
+   133	
+   134	type subscription struct {
+   135		sinceSnapshotOrdinal uint64
+   136		state                subscriptionState
+   137		snapshotOrdinal      uint64
+   138		buffer               []bufferedUIBatch
+   139	}
+   140	
+   141	type outboundFrame struct {
+   142		body      []byte
+   143		frameType string
+   144	}
+   145	
+   146	// ConnectionInfo describes the current transport-visible state of one connection.
+   147	type ConnectionInfo struct {
+   148		ConnectionId  string   `json:"connectionId"`
+   149		Subscriptions []string `json:"subscriptions"`
+   150	}
+   151	
+   152	var _ http.Handler = (*Server)(nil)
+   153	var _ sessionstream.UIFanout = (*Server)(nil)
+   154	
+   155	// NewServer builds a websocket transport server.
+   156	func NewServer(snapshots SnapshotProvider, opts ...Option) (*Server, error) {
+   157		if snapshots == nil {
+   158			return nil, fmt.Errorf("snapshot provider is nil")
+   159		}
+   160		server := &Server{
+   161			snapshots:                   snapshots,
+   162			maxHydrationBufferedBatches: defaultMaxHydrationBufferedBatches,
+   163			upgrader: websocket.Upgrader{
+   164				CheckOrigin: func(_ *http.Request) bool { return true },
+   165			},
+   166			conns:     map[sessionstream.ConnectionId]*connection{},
+   167			bySession: map[sessionstream.SessionId]map[sessionstream.ConnectionId]struct{}{},
+   168		}
+   169		for _, opt := range opts {
+   170			if opt == nil {
+   171				continue
+   172			}
+   173			if err := opt(server); err != nil {
+   174				return nil, err
+   175			}
+   176		}
+   177		return server, nil
+   178	}
+   179	
+   180	// ServeHTTP upgrades a connection and serves the websocket protocol.
+   181	func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+   182		conn, err := s.upgrader.Upgrade(w, r, nil)
+   183		if err != nil {
+   184			s.observe(r.Context(), TransportRecord{Stage: TransportStageUpgradeError, Err: err})
+   185			if s.hooks.OnUpgradeError != nil {
+   186				s.hooks.OnUpgradeError(r, err)
+   187			}
+   188			return
+   189		}
+   190		cid := sessionstream.ConnectionId(fmt.Sprintf("conn-%d", atomic.AddUint64(&s.nextID, 1)))
+   191		c := &connection{
+   192			id:   cid,
+   193			ws:   conn,
+   194			send: make(chan outboundFrame, 128),
+   195			subs: map[sessionstream.SessionId]subscription{},
+   196		}
+   197		s.mu.Lock()
+   198		s.conns[cid] = c
+   199		s.mu.Unlock()
+   200		s.observe(r.Context(), TransportRecord{Stage: TransportStageConnected, ConnectionId: cid})
+   201		if s.hooks.OnConnect != nil {
+   202			s.hooks.OnConnect(cid)
+   203		}
+   204	
+   205		go s.writeLoop(r.Context(), c)
+   206		_ = s.sendFrame(c, newHelloFrame(cid))
+   207		s.readLoop(r.Context(), c)
+   208		s.closeConnection(c)
+   209	}
+   210	
+   211	// PublishUI fans projected UI events out to subscribed websocket clients.
+   212	func (s *Server) PublishUI(ctx context.Context, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
+   213		if len(events) == 0 {
+   214			return nil
+   215		}
+   216		targets := s.connectionsForSession(sid)
+   217		targetIDs := fanoutTargetIDs(targets)
+   218		if len(targets) == 0 {
+   219			s.observe(ctx, TransportRecord{Stage: TransportStageFanoutNoTargets, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events)})
+   220			return nil
+== pkg/sessionstream/hydration/sqlite/store.go ==
+     1	package sqlite
+     2	
+     3	import (
+     4		"context"
+     5		"database/sql"
+     6		"encoding/json"
+     7		"fmt"
+     8		"math"
+     9		"sort"
+    10	
+    11		sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+    12		_ "github.com/mattn/go-sqlite3"
+    13		"google.golang.org/protobuf/encoding/protojson"
+    14		"google.golang.org/protobuf/proto"
+    15	)
+    16	
+    17	type Store struct {
+    18		db  *sql.DB
+    19		reg *sessionstream.SchemaRegistry
+    20	}
+    21	
+    22	var _ sessionstream.HydrationStore = (*Store)(nil)
+    23	var _ sessionstream.EventStore = (*Store)(nil)
+    24	var _ sessionstream.ProjectionCursorStore = (*Store)(nil)
+    25	var _ sessionstream.TimelineResetStore = (*Store)(nil)
+    26	var _ sessionstream.ErrorStore = (*Store)(nil)
+    27	var _ sessionstream.ErrorRecordStore = (*Store)(nil)
+    28	
+    29	func New(dsn string, reg *sessionstream.SchemaRegistry) (*Store, error) {
+    30		if dsn == "" {
+    31			return nil, fmt.Errorf("sqlite hydration store dsn is empty")
+    32		}
+    33		if reg == nil {
+    34			return nil, fmt.Errorf("sqlite hydration store schema registry is nil")
+    35		}
+    36		db, err := sql.Open("sqlite3", dsn)
+    37		if err != nil {
+    38			return nil, err
+    39		}
+    40		db.SetMaxOpenConns(1)
+    41		store := &Store{db: db, reg: reg}
+    42		if err := store.migrate(); err != nil {
+    43			_ = db.Close()
+    44			return nil, err
+    45		}
+    46		return store, nil
+    47	}
+    48	
+    49	func FileDSN(path string) (string, error) {
+    50		if path == "" {
+    51			return "", fmt.Errorf("sqlite hydration store path is empty")
+    52		}
+    53		return fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on", path), nil
+    54	}
+    55	
+    56	func MemoryDSN(name string) string {
+    57		if name == "" {
+    58			name = "sessionstream-memory"
+    59		}
+    60		return fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=5000&_foreign_keys=on", name)
+    61	}
+    62	
+    63	func NewInMemory(reg *sessionstream.SchemaRegistry) (*Store, error) {
+    64		return New(MemoryDSN(""), reg)
+    65	}
+    66	
+    67	func (s *Store) Close() error {
+    68		if s == nil || s.db == nil {
+    69			return nil
+    70		}
+    71		return s.db.Close()
+    72	}
+    73	
+    74	func (s *Store) Reset(ctx context.Context) error {
+    75		if ctx == nil {
+    76			ctx = context.Background()
+    77		}
+    78		for _, stmt := range []string{
+    79			`DELETE FROM sessionstream_errors`,
+    80			`DELETE FROM sessionstream_projection_cursors`,
+    81			`DELETE FROM sessionstream_entity_versions`,
+    82			`DELETE FROM sessionstream_entities`,
+    83			`DELETE FROM sessionstream_events`,
+    84			`DELETE FROM sessionstream_sessions`,
+    85		} {
+    86			if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+    87				return err
+    88			}
+    89		}
+    90		return nil
+    91	}
+    92	
+    93	func (s *Store) Apply(ctx context.Context, sid sessionstream.SessionId, ord uint64, entities []sessionstream.TimelineEntity) error {
+    94		if s == nil || s.db == nil {
+    95			return fmt.Errorf("sqlite hydration store db is nil")
+    96		}
+    97		if ctx == nil {
+    98			ctx = context.Background()
+    99		}
+   100		eventOrdinal, err := uint64ToInt64(ord)
+   101		if err != nil {
+   102			return err
+   103		}
+   104		tx, err := s.db.BeginTx(ctx, nil)
+   105		if err != nil {
+   106			return err
+   107		}
+   108		defer func() { _ = tx.Rollback() }()
+   109	
+   110		for _, entity := range entities {
+   111			payload, err := s.reg.MarshalProtoJSON(entity.Payload)
+   112			if err != nil {
+   113				return err
+   114			}
+   115	
+   116			createdOrdinal := entity.CreatedOrdinal
+   117			lastEventOrdinal := entity.LastEventOrdinal
+   118			if createdOrdinal == 0 {
+   119				createdOrdinal = ord
+   120			}
+   121			if lastEventOrdinal == 0 {
+   122				lastEventOrdinal = ord
+   123			}
+   124	
+   125			var existingCreated sql.NullInt64
+   126			err = tx.QueryRowContext(ctx, `
+   127				SELECT created_ordinal
+   128				FROM sessionstream_entities
+   129				WHERE session_id = ? AND kind = ? AND entity_id = ?
+   130			`, string(sid), entity.Kind, entity.Id).Scan(&existingCreated)
+   131			if err != nil && err != sql.ErrNoRows {
+   132				return err
+   133			}
+   134			if err == nil && existingCreated.Valid && entity.CreatedOrdinal == 0 {
+   135				createdOrdinal, err = int64ToUint64(existingCreated.Int64)
+   136				if err != nil {
+   137					return err
+   138				}
+   139			}
+   140	
+   141			createdOrdinalDB, err := uint64ToInt64(createdOrdinal)
+   142			if err != nil {
+   143				return err
+   144			}
+   145			lastEventOrdinalDB, err := uint64ToInt64(lastEventOrdinal)
+   146			if err != nil {
+   147				return err
+   148			}
+   149	
+   150			if _, err := tx.ExecContext(ctx, `
+   151				INSERT INTO sessionstream_entity_versions(session_id, kind, entity_id, ordinal, created_ordinal, last_event_ordinal, tombstone, payload_json)
+   152				VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+   153				ON CONFLICT(session_id, kind, entity_id, ordinal) DO UPDATE SET
+   154					created_ordinal = excluded.created_ordinal,
+   155					last_event_ordinal = excluded.last_event_ordinal,
+   156					tombstone = excluded.tombstone,
+   157					payload_json = excluded.payload_json
+   158			`, string(sid), entity.Kind, entity.Id, eventOrdinal, createdOrdinalDB, lastEventOrdinalDB, boolToInt(entity.Tombstone), string(payload)); err != nil {
+   159				return err
+   160			}
+   161			if entity.Tombstone {
+   162				if _, err := tx.ExecContext(ctx, `DELETE FROM sessionstream_entities WHERE session_id = ? AND kind = ? AND entity_id = ?`, string(sid), entity.Kind, entity.Id); err != nil {
+   163					return err
+   164				}
+   165				continue
+   166			}
+   167			if _, err := tx.ExecContext(ctx, `
+   168				INSERT INTO sessionstream_entities(session_id, kind, entity_id, created_ordinal, last_event_ordinal, payload_json)
+   169				VALUES(?, ?, ?, ?, ?, ?)
+   170				ON CONFLICT(session_id, kind, entity_id) DO UPDATE SET
+   171					created_ordinal = excluded.created_ordinal,
+   172					last_event_ordinal = excluded.last_event_ordinal,
+   173					payload_json = excluded.payload_json
+   174			`, string(sid), entity.Kind, entity.Id, createdOrdinalDB, lastEventOrdinalDB, string(payload)); err != nil {
+   175				return err
+   176			}
+   177		}
+   178		if _, err := tx.ExecContext(ctx, `
+   179			INSERT INTO sessionstream_sessions(session_id, snapshot_ordinal)
+   180			VALUES(?, ?)
+   181			ON CONFLICT(session_id) DO UPDATE SET snapshot_ordinal = CASE
+   182				WHEN excluded.snapshot_ordinal > sessionstream_sessions.snapshot_ordinal THEN excluded.snapshot_ordinal
+   183				ELSE sessionstream_sessions.snapshot_ordinal
+   184			END
+   185		`, string(sid), eventOrdinal); err != nil {
+   186			return err
+   187		}
+   188		return tx.Commit()
+   189	}
+   190	
+   191	func (s *Store) Snapshot(ctx context.Context, sid sessionstream.SessionId, asOf uint64) (sessionstream.Snapshot, error) {
+   192		if s == nil || s.db == nil {
+   193			return sessionstream.Snapshot{}, fmt.Errorf("sqlite hydration store db is nil")
+   194		}
+   195		if ctx == nil {
+   196			ctx = context.Background()
+   197		}
+   198		snapshotOrdinal, err := s.Cursor(ctx, sid)
+   199		if err != nil {
+   200			return sessionstream.Snapshot{}, err
+   201		}
+   202		if asOf > 0 && asOf < snapshotOrdinal {
+   203			snapshotOrdinal = asOf
+   204		}
+   205	
+   206		var rows *sql.Rows
+   207		if asOf == 0 {
+   208			rows, err = s.db.QueryContext(ctx, `
+   209				SELECT kind, entity_id, created_ordinal, last_event_ordinal, 0 AS tombstone, payload_json
+   210				FROM sessionstream_entities
+   211				WHERE session_id = ?
+   212				ORDER BY created_ordinal ASC, last_event_ordinal ASC, kind ASC, entity_id ASC
+   213			`, string(sid))
+   214		} else {
+   215			var versionOrdinal int64
+   216			versionOrdinal, err = uint64ToInt64(snapshotOrdinal)
+   217			if err != nil {
+   218				return sessionstream.Snapshot{}, err
+   219			}
+   220			rows, err = s.db.QueryContext(ctx, `
+== pkg/sessionstream/consumer.go ==
+     1	package sessionstream
+     2	
+     3	import (
+     4		"context"
+     5		"fmt"
+     6	
+     7		"github.com/ThreeDotsLabs/watermill/message"
+     8		"google.golang.org/protobuf/proto"
+     9	)
+    10	
+    11	type eventConsumer struct {
+    12		hub      *Hub
+    13		ordinals *OrdinalAssigner
+    14		ready    chan error
+    15		done     chan error
+    16	}
+    17	
+    18	func newEventConsumer(h *Hub) *eventConsumer {
+    19		return &eventConsumer{
+    20			hub: h,
+    21			ordinals: NewOrdinalAssigner(func(ctx context.Context, sid SessionId) (uint64, error) {
+    22				return h.eventCursor(ctx, sid)
+    23			}),
+    24			ready: make(chan error, 1),
+    25			done:  make(chan error, 1),
+    26		}
+    27	}
+    28	
+    29	func (c *eventConsumer) start(ctx context.Context) error {
+    30		go c.consume(ctx)
+    31		return <-c.ready
+    32	}
+    33	
+    34	func (c *eventConsumer) wait(ctx context.Context) error {
+    35		if ctx == nil {
+    36			ctx = context.Background()
+    37		}
+    38		select {
+    39		case err := <-c.done:
+    40			return err
+    41		case <-ctx.Done():
+    42			return ctx.Err()
+    43		}
+    44	}
+    45	
+    46	func (c *eventConsumer) consume(ctx context.Context) {
+    47		if c.hub == nil || c.hub.bus == nil {
+    48			c.ready <- fmt.Errorf("event bus is not configured")
+    49			c.done <- fmt.Errorf("event bus is not configured")
+    50			return
+    51		}
+    52		ch, err := c.hub.bus.subscriber.Subscribe(ctx, c.hub.bus.topic)
+    53		if err != nil {
+    54			c.ready <- err
+    55			c.done <- err
+    56			return
+    57		}
+    58		c.ready <- nil
+    59	
+    60		for {
+    61			select {
+    62			case <-ctx.Done():
+    63				c.done <- nil
+    64				return
+    65			case msg, ok := <-ch:
+    66				if !ok {
+    67					c.done <- nil
+    68					return
+    69				}
+    70				if err := c.handleMessage(ctx, msg); err != nil {
+    71					msg.Nack()
+    72					c.done <- err
+    73					return
+    74				}
+    75				msg.Ack()
+    76			}
+    77		}
+    78	}
+    79	
+    80	func (c *eventConsumer) handleMessage(ctx context.Context, msg *message.Message) error {
+    81		ev, err := decodeEventEnvelope(c.hub.reg, msg.Payload)
+    82		if err != nil {
+    83			c.hub.reportError(ctx, ErrorRecord{Kind: ErrorKindDecode, Err: err, RawMessage: append([]byte(nil), msg.Payload...), Metadata: cloneWatermillMetadata(msg.Metadata)})
+    84			return nil
+    85		}
+    86		ord, err := c.ordinals.Next(ctx, ev.SessionId, msg.Metadata)
+    87		if err != nil {
+    88			c.hub.reportError(ctx, ErrorRecord{Kind: ErrorKindOrdinal, SessionId: ev.SessionId, EventName: ev.Name, Err: err, RawMessage: append([]byte(nil), msg.Payload...), Metadata: cloneWatermillMetadata(msg.Metadata)})
+    89			return err
+    90		}
+    91		ev.Ordinal = ord
+    92		if c.hub.bus != nil && c.hub.bus.observer != nil {
+    93			c.hub.bus.observer.Consumed(ctx, Event{
+    94				Name:      ev.Name,
+    95				Payload:   proto.Clone(ev.Payload),
+    96				SessionId: ev.SessionId,
+    97				Ordinal:   ev.Ordinal,
+    98			}, newBusRecord(msg, c.hub.bus.topic))
+    99		}
+   100		_, err = c.hub.projectAndApply(ctx, ev)
+   101		return err
+   102	}
+== pkg/sessionstream/bus.go ==
+     1	package sessionstream
+     2	
+     3	import (
+     4		"context"
+     5		"encoding/json"
+     6		"fmt"
+     7	
+     8		"github.com/ThreeDotsLabs/watermill/message"
+     9		"github.com/google/uuid"
+    10		"google.golang.org/protobuf/encoding/protojson"
+    11		"google.golang.org/protobuf/proto"
+    12	)
+    13	
+    14	const (
+    15		// DefaultEventBusTopic is the default Watermill topic used by sessionstream.
+    16		DefaultEventBusTopic = "sessionstream.events"
+    17	
+    18		MetadataKeyEventName    = "sessionstream_event_name"
+    19		MetadataKeySessionID    = "sessionstream_session_id"
+    20		MetadataKeyPartitionKey = "sessionstream_partition_key"
+    21		MetadataKeyPublishedOrd = "sessionstream_published_ordinal"
+    22		MetadataKeyStreamID     = "sessionstream_stream_id"
+    23	)
+    24	
+    25	// PartitionKeyForSession returns the partition key that backends should use to preserve
+    26	// publish/consume order per SessionId.
+    27	func PartitionKeyForSession(sid SessionId) string {
+    28		return string(sid)
+    29	}
+    30	
+    31	type busConfig struct {
+    32		publisher      message.Publisher
+    33		subscriber     message.Subscriber
+    34		topic          string
+    35		messageMutator BusMessageMutator
+    36		observer       BusObserver
+    37	}
+    38	
+    39	// BusOption configures sessionstream's Watermill integration.
+    40	type BusOption func(*busConfig) error
+    41	
+    42	// BusMessageMutator can attach backend-specific metadata before publish.
+    43	// It is useful for test/lab setups that want to inject synthetic stream ids.
+    44	type BusMessageMutator func(ctx context.Context, ev Event, msg *message.Message) error
+    45	
+    46	// BusRecord captures publish/consume metadata for a Watermill message.
+    47	type BusRecord struct {
+    48		MessageID string            `json:"messageId"`
+    49		Topic     string            `json:"topic"`
+    50		Metadata  map[string]string `json:"metadata"`
+    51	}
+    52	
+    53	// BusObserver receives publish/consume observations from the bus adapter and consumer.
+    54	type BusObserver interface {
+    55		Published(ctx context.Context, ev Event, rec BusRecord)
+    56		Consumed(ctx context.Context, ev Event, rec BusRecord)
+    57	}
+    58	
+    59	// BusObserverHooks adapts callbacks to BusObserver.
+    60	type BusObserverHooks struct {
+    61		OnPublished func(ctx context.Context, ev Event, rec BusRecord)
+    62		OnConsumed  func(ctx context.Context, ev Event, rec BusRecord)
+    63	}
+    64	
+    65	func (h BusObserverHooks) Published(ctx context.Context, ev Event, rec BusRecord) {
+    66		if h.OnPublished != nil {
+    67			h.OnPublished(ctx, ev, rec)
+    68		}
+    69	}
+    70	
+    71	func (h BusObserverHooks) Consumed(ctx context.Context, ev Event, rec BusRecord) {
+    72		if h.OnConsumed != nil {
+    73			h.OnConsumed(ctx, ev, rec)
+    74		}
+    75	}
+    76	
+    77	func WithBusTopic(topic string) BusOption {
+    78		return func(cfg *busConfig) error {
+    79			if topic == "" {
+    80				return fmt.Errorf("event bus topic is empty")
+    81			}
+    82			cfg.topic = topic
+    83			return nil
+    84		}
+    85	}
+    86	
+    87	func WithBusMessageMutator(mutator BusMessageMutator) BusOption {
+    88		return func(cfg *busConfig) error {
+    89			cfg.messageMutator = mutator
+    90			return nil
+    91		}
+    92	}
+    93	
+    94	func WithBusObserver(observer BusObserver) BusOption {
+    95		return func(cfg *busConfig) error {
+    96			cfg.observer = observer
+    97			return nil
+    98		}
+    99	}
+   100	
+   101	// WithEventBus configures a Watermill publisher/subscriber pair owned by the application.
+   102	func WithEventBus(pub message.Publisher, sub message.Subscriber, opts ...BusOption) HubOption {
+   103		return func(h *Hub) error {
+   104			if pub == nil {
+   105				return fmt.Errorf("event bus publisher is nil")
+   106			}
+   107			if sub == nil {
+   108				return fmt.Errorf("event bus subscriber is nil")
+   109			}
+   110			cfg := &busConfig{
+   111				publisher:  pub,
+   112				subscriber: sub,
+   113				topic:      DefaultEventBusTopic,
+   114			}
+   115			for _, opt := range opts {
+   116				if opt == nil {
+   117					continue
+   118				}
+   119				if err := opt(cfg); err != nil {
+   120					return err
+   121				}
+   122			}
+   123			h.bus = cfg
+   124			return nil
+   125		}
+   126	}
+   127	
+   128	type eventEnvelope struct {
+   129		Name      string          `json:"name"`
+   130		SessionID string          `json:"sessionId"`
+   131		Payload   json.RawMessage `json:"payload"`
+   132	}
+   133	
+   134	type watermillEventPublisher struct {
+   135		hub *Hub
+   136	}
+   137	
+   138	func (p watermillEventPublisher) Publish(ctx context.Context, ev Event) error {
+   139		if p.hub == nil {
+   140			return fmt.Errorf("hub is nil")
+   141		}
+   142		if p.hub.bus == nil {
+   143			return fmt.Errorf("event bus is not configured")
+   144		}
+   145		if ev.SessionId == "" {
+   146			return fmt.Errorf("event %q missing session id", ev.Name)
+   147		}
+   148		if ev.Payload == nil {
+   149			return fmt.Errorf("event %q payload is nil", ev.Name)
+   150		}
+   151		if err := p.hub.validatePayloadType(p.hub.reg.events, "event", ev.Name, ev.Payload); err != nil {
+   152			return err
+   153		}
+   154	
+   155		payload, err := p.hub.reg.MarshalProtoJSON(ev.Payload)
+   156		if err != nil {
+   157			return fmt.Errorf("marshal event %q payload: %w", ev.Name, err)
+   158		}
+   159		body, err := json.Marshal(eventEnvelope{
+   160			Name:      ev.Name,
+   161			SessionID: string(ev.SessionId),
+   162			Payload:   payload,
+   163		})
+   164		if err != nil {
+   165			return fmt.Errorf("marshal event %q envelope: %w", ev.Name, err)
+   166		}
+   167	
+   168		msg := message.NewMessage(uuid.NewString(), body)
+   169		msg.SetContext(ctx)
+   170		msg.Metadata.Set(MetadataKeyEventName, ev.Name)
+   171		msg.Metadata.Set(MetadataKeySessionID, string(ev.SessionId))
+   172		msg.Metadata.Set(MetadataKeyPartitionKey, PartitionKeyForSession(ev.SessionId))
+   173		msg.Metadata.Set(MetadataKeyPublishedOrd, "0")
+   174		if p.hub.bus.messageMutator != nil {
+   175			if err := p.hub.bus.messageMutator(ctx, Event{Name: ev.Name, SessionId: ev.SessionId, Payload: proto.Clone(ev.Payload)}, msg); err != nil {
+   176				return fmt.Errorf("mutate event %q message metadata: %w", ev.Name, err)
+   177			}
+   178		}
+   179		if err := p.hub.bus.publisher.Publish(p.hub.bus.topic, msg); err != nil {
+   180			return fmt.Errorf("publish event %q: %w", ev.Name, err)
+   181		}
+   182		if p.hub.bus.observer != nil {
+   183			p.hub.bus.observer.Published(ctx, Event{Name: ev.Name, SessionId: ev.SessionId, Payload: proto.Clone(ev.Payload)}, newBusRecord(msg, p.hub.bus.topic))
+   184		}
+   185		return nil
+   186	}
+   187	
+   188	func decodeEventEnvelope(reg *SchemaRegistry, payload []byte) (Event, error) {
+   189		var env eventEnvelope
+   190		if err := json.Unmarshal(payload, &env); err != nil {
+   191			return Event{}, fmt.Errorf("decode event envelope: %w", err)
+   192		}
+   193		if env.Name == "" {
+   194			return Event{}, fmt.Errorf("event envelope missing name")
+   195		}
+   196		if env.SessionID == "" {
+   197			return Event{}, fmt.Errorf("event envelope missing session id")
+   198		}
+   199		msg, err := reg.instantiate(reg.events, "event", env.Name)
+   200		if err != nil {
+   201			return Event{}, err
+   202		}
+   203		if len(env.Payload) > 0 && string(env.Payload) != "null" {
+   204			if err := protojson.Unmarshal(env.Payload, msg); err != nil {
+   205				return Event{}, fmt.Errorf("decode event %q payload: %w", env.Name, err)
+   206			}
+   207		}
+   208		return Event{Name: env.Name, SessionId: SessionId(env.SessionID), Payload: msg}, nil
+   209	}
+   210	
+   211	func newBusRecord(msg *message.Message, topic string) BusRecord {
+   212		rec := BusRecord{Topic: topic}
+   213		if msg == nil {
+   214			return rec
+   215		}
+   216		rec.MessageID = msg.UUID
+   217		rec.Metadata = cloneWatermillMetadata(msg.Metadata)
+   218		return rec
+   219	}
+   220	
+== pkg/sessionstream/pipeline_observer.go ==
+     1	package sessionstream
+     2	
+     3	import (
+     4		"context"
+     5	
+     6		"google.golang.org/protobuf/proto"
+     7	)
+     8	
+     9	// PipelineMode identifies which Hub processing path produced a PipelineRecord.
+    10	type PipelineMode string
+    11	
+    12	const (
+    13		// PipelineModeLive observes normal command/event processing through projectAndApply.
+    14		PipelineModeLive PipelineMode = "live"
+    15		// PipelineModeRebuild observes timeline replay through rebuildTimelineEvent.
+    16		PipelineModeRebuild PipelineMode = "rebuild"
+    17	)
+    18	
+    19	// PipelineRecord describes how one backend event moved through the Hub pipeline.
+    20	//
+    21	// Observers receive cloned protobuf payloads so they may retain records for
+    22	// diagnostics without mutating the live pipeline state.
+    23	type PipelineRecord struct {
+    24		Mode PipelineMode
+    25	
+    26		SessionId SessionId
+    27		Ordinal   uint64
+    28		EventName string
+    29		Event     Event
+    30	
+    31		EventAppended bool
+    32		AppendErr     error
+    33	
+    34		SessionErr error
+    35	
+    36		ViewOrdinal uint64
+    37		ViewErr     error
+    38	
+    39		UIEvents        []UIEvent
+    40		UIProjectionErr error
+    41	
+    42		TimelineEntities      []TimelineEntity
+    43		TimelineProjectionErr error
+    44	
+    45		AppliedEntities []TimelineEntity
+    46		ApplyErr        error
+    47	
+    48		TimelineCursorAdvanced bool
+    49		CursorErr              error
+    50	
+    51		FanoutEvents []UIEvent
+    52		FanoutErr    error
+    53	}
+    54	
+    55	// PipelineObserver receives best-effort Hub pipeline observations.
+    56	type PipelineObserver interface {
+    57		OnPipeline(ctx context.Context, rec PipelineRecord)
+    58	}
+    59	
+    60	// PipelineObserverFunc adapts a function to PipelineObserver.
+    61	type PipelineObserverFunc func(ctx context.Context, rec PipelineRecord)
+    62	
+    63	func (f PipelineObserverFunc) OnPipeline(ctx context.Context, rec PipelineRecord) {
+    64		if f != nil {
+    65			f(ctx, rec)
+    66		}
+    67	}
+    68	
+    69	// PipelineObserverHooks adapts optional callbacks to PipelineObserver.
+    70	type PipelineObserverHooks struct {
+    71		OnPipelineFunc func(ctx context.Context, rec PipelineRecord)
+    72	}
+    73	
+    74	func (h PipelineObserverHooks) OnPipeline(ctx context.Context, rec PipelineRecord) {
+    75		if h.OnPipelineFunc != nil {
+    76			h.OnPipelineFunc(ctx, rec)
+    77		}
+    78	}
+    79	
+    80	// WithPipelineObserver installs a best-effort Hub pipeline observer.
+    81	func WithPipelineObserver(observer PipelineObserver) HubOption {
+    82		return func(h *Hub) error {
+    83			h.pipelineObserver = observer
+    84			return nil
+    85		}
+    86	}
+    87	
+    88	func (h *Hub) observePipeline(ctx context.Context, rec PipelineRecord) {
+    89		if h == nil || h.pipelineObserver == nil {
+    90			return
+    91		}
+    92		safe := clonePipelineRecord(rec)
+    93		defer func() { _ = recover() }()
+    94		h.pipelineObserver.OnPipeline(ctx, safe)
+    95	}
+    96	
+    97	func clonePipelineRecord(in PipelineRecord) PipelineRecord {
+    98		out := in
+    99		out.Event = cloneEvent(in.Event)
+   100		out.UIEvents = cloneUIEvents(in.UIEvents)
+   101		out.TimelineEntities = cloneTimelineEntities(in.TimelineEntities)
+   102		out.AppliedEntities = cloneTimelineEntities(in.AppliedEntities)
+   103		out.FanoutEvents = cloneUIEvents(in.FanoutEvents)
+   104		return out
+   105	}
+   106	
+   107	func cloneEvent(in Event) Event {
+   108		out := in
+   109		if in.Payload != nil {
+   110			out.Payload = proto.Clone(in.Payload)
+   111		}
+   112		return out
+   113	}
+   114	
+   115	func cloneTimelineEntities(in []TimelineEntity) []TimelineEntity {
+   116		if len(in) == 0 {
+   117			return nil
+   118		}
+   119		out := make([]TimelineEntity, 0, len(in))
+   120		for _, entity := range in {
+   121			cloned := entity
+   122			if entity.Payload != nil {
+   123				cloned.Payload = proto.Clone(entity.Payload)
+   124			}
+   125			out = append(out, cloned)
+   126		}
+   127		return out
+   128	}
+== pkg/sessionstream/transport/ws/observer.go ==
+     1	package ws
+     2	
+     3	import (
+     4		"context"
+     5	
+     6		sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+     7		sessionstreamv1 "github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1"
+     8	)
+     9	
+    10	// TransportStage identifies a websocket transport observation point.
+    11	type TransportStage string
+    12	
+    13	const (
+    14		TransportStageUpgradeError            TransportStage = "upgrade_error"
+    15		TransportStageConnected               TransportStage = "connected"
+    16		TransportStageDisconnected            TransportStage = "disconnected"
+    17		TransportStageClientFrameRead         TransportStage = "client_frame_read"
+    18		TransportStageClientFrameDecoded      TransportStage = "client_frame_decoded"
+    19		TransportStageClientFrameDecodeError  TransportStage = "client_frame_decode_error"
+    20		TransportStageReadError               TransportStage = "read_error"
+    21		TransportStageProtocolError           TransportStage = "protocol_error"
+    22		TransportStageSubscribeReceived       TransportStage = "subscribe_received"
+    23		TransportStageSnapshotLoadStarted     TransportStage = "snapshot_load_started"
+    24		TransportStageSnapshotLoaded          TransportStage = "snapshot_loaded"
+    25		TransportStageSubscriptionRegistered  TransportStage = "subscription_registered"
+    26		TransportStageUIEventBuffered         TransportStage = "ui_event_buffered"
+    27		TransportStageHydrationBufferFlushed  TransportStage = "hydration_buffer_flushed"
+    28		TransportStageSubscriptionLive        TransportStage = "subscription_live"
+    29		TransportStageHydrationBufferOverflow TransportStage = "hydration_buffer_overflow"
+    30		TransportStageServerFrameMarshalError TransportStage = "server_frame_marshal_error"
+    31		TransportStageServerFrameQueued       TransportStage = "server_frame_queued"
+    32		TransportStageServerFrameQueueFull    TransportStage = "server_frame_queue_full"
+    33		TransportStageServerFrameWritten      TransportStage = "server_frame_written"
+    34		TransportStageServerFrameWriteError   TransportStage = "server_frame_write_error"
+    35		TransportStageFanoutStarted           TransportStage = "fanout_started"
+    36		TransportStageFanoutNoTargets         TransportStage = "fanout_no_targets"
+    37		TransportStageFanoutCompleted         TransportStage = "fanout_completed"
+    38	)
+    39	
+    40	// FrameDirection identifies whether a frame moved into or out of the server.
+    41	type FrameDirection string
+    42	
+    43	const (
+    44		FrameDirectionClientToServer FrameDirection = "client_to_server"
+    45		FrameDirectionServerToClient FrameDirection = "server_to_client"
+    46	)
+    47	
+    48	// TimelineEntitySummary is a compact, payload-safe snapshot entity description.
+    49	type TimelineEntitySummary struct {
+    50		Kind             string
+    51		Id               string
+    52		CreatedOrdinal   uint64
+    53		LastEventOrdinal uint64
+    54		PayloadType      string
+    55		Tombstone        bool
+    56	}
+    57	
+    58	// TransportRecord describes one websocket transport observation.
+    59	type TransportRecord struct {
+    60		Stage     TransportStage
+    61		Direction FrameDirection
+    62	
+    63		ConnectionId sessionstream.ConnectionId
+    64		SessionId    sessionstream.SessionId
+    65	
+    66		FrameType   string
+    67		Ordinal     uint64
+    68		EventName   string
+    69		PayloadType string
+    70	
+    71		SinceSnapshotOrdinal uint64
+    72		SnapshotOrdinal      uint64
+    73		SnapshotEntityCount  int
+    74		SnapshotEntities     []TimelineEntitySummary
+    75	
+    76		FanoutEventCount int
+    77		FanoutTargetIds  []sessionstream.ConnectionId
+    78	
+    79		RawBytes int
+    80		QueueLen int
+    81		QueueCap int
+    82	
+    83		Err error
+    84	}
+    85	
+    86	// TransportObserver receives best-effort websocket transport observations.
+    87	type TransportObserver interface {
+    88		OnTransport(ctx context.Context, rec TransportRecord)
+    89	}
+    90	
+    91	// TransportObserverFunc adapts a function to TransportObserver.
+    92	type TransportObserverFunc func(ctx context.Context, rec TransportRecord)
+    93	
+    94	func (f TransportObserverFunc) OnTransport(ctx context.Context, rec TransportRecord) {
+    95		if f != nil {
+    96			f(ctx, rec)
+    97		}
+    98	}
+    99	
+   100	// WithTransportObserver installs a best-effort websocket transport observer.
+   101	func WithTransportObserver(observer TransportObserver) Option {
+   102		return func(s *Server) error {
+   103			s.observer = observer
+   104			return nil
+   105		}
+   106	}
+   107	
+   108	func (s *Server) observe(ctx context.Context, rec TransportRecord) {
+   109		if s == nil || s.observer == nil {
+   110			return
+   111		}
+   112		safe := cloneTransportRecord(rec)
+   113		defer func() { _ = recover() }()
+   114		s.observer.OnTransport(ctx, safe)
+   115	}
+   116	
+   117	func cloneTransportRecord(in TransportRecord) TransportRecord {
+   118		out := in
+   119		if len(in.SnapshotEntities) > 0 {
+   120			out.SnapshotEntities = append([]TimelineEntitySummary(nil), in.SnapshotEntities...)
+   121		}
+   122		if len(in.FanoutTargetIds) > 0 {
+   123			out.FanoutTargetIds = append([]sessionstream.ConnectionId(nil), in.FanoutTargetIds...)
+   124		}
+   125		return out
+   126	}
+   127	
+   128	func summarizeEntities(in []sessionstream.TimelineEntity) []TimelineEntitySummary {
+   129		if len(in) == 0 {
+   130			return nil
+   131		}
+   132		out := make([]TimelineEntitySummary, 0, len(in))
+   133		for _, entity := range in {
+   134			payloadType := ""
+   135			if entity.Payload != nil {
+   136				payloadType = string(entity.Payload.ProtoReflect().Descriptor().FullName())
+   137			}
+   138			out = append(out, TimelineEntitySummary{
+   139				Kind:             entity.Kind,
+   140				Id:               entity.Id,
+   141				CreatedOrdinal:   entity.CreatedOrdinal,
+   142				LastEventOrdinal: entity.LastEventOrdinal,
+   143				PayloadType:      payloadType,
+   144				Tombstone:        entity.Tombstone,
+   145			})
+   146		}
+   147		return out
+   148	}
+   149	
+   150	func clientFrameType(frame *sessionstreamv1.ClientFrame) string {
+   151		switch frame.GetFrame().(type) {
+   152		case *sessionstreamv1.ClientFrame_Subscribe:
+   153			return "subscribe"
+   154		case *sessionstreamv1.ClientFrame_Unsubscribe:
+   155			return "unsubscribe"
+   156		case *sessionstreamv1.ClientFrame_Ping:
+   157			return "ping"
+   158		case *sessionstreamv1.ClientFrame_Pong:
+   159			return "pong"
+   160		default:
+   161			return "unknown"
+   162		}
+   163	}
+   164	
+   165	func serverFrameType(frame *sessionstreamv1.ServerFrame) string {
+   166		switch frame.GetFrame().(type) {
+   167		case *sessionstreamv1.ServerFrame_Hello:
+   168			return "hello"
+   169		case *sessionstreamv1.ServerFrame_Snapshot:
+   170			return "snapshot"
+   171		case *sessionstreamv1.ServerFrame_Subscribed:
+   172			return "subscribed"
+   173		case *sessionstreamv1.ServerFrame_Unsubscribed:
+   174			return "unsubscribed"
+   175		case *sessionstreamv1.ServerFrame_UiEvent:
+   176			return "uiEvent"
+   177		case *sessionstreamv1.ServerFrame_Error:
+   178			return "error"
+   179		case *sessionstreamv1.ServerFrame_Pong:
+   180			return "pong"
+   181		default:
+   182			return "unknown"
+   183		}
+   184	}
+   185	
+   186	func fanoutTargetIDs(targets []*connection) []sessionstream.ConnectionId {
+   187		if len(targets) == 0 {
+   188			return nil
+   189		}
+   190		out := make([]sessionstream.ConnectionId, 0, len(targets))
+   191		for _, target := range targets {
+   192			if target != nil {
+   193				out = append(out, target.id)
+   194			}
+   195		}
+   196		return out
+   197	}
+== examples/chatdemo/chat.go ==
+     1	package chatdemo
+     2	
+     3	import (
+     4		"context"
+     5		"fmt"
+     6		"strings"
+     7		"sync"
+     8		"time"
+     9	
+    10		chatdemov1 "github.com/go-go-golems/sessionstream/examples/chatdemo/gen/sessionstream/examples/chatdemo/v1"
+    11		sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+    12		"google.golang.org/protobuf/proto"
+    13	)
+    14	
+    15	const (
+    16		CommandStartInference = "ChatStartInference"
+    17		CommandStopInference  = "ChatStopInference"
+    18	
+    19		EventUserMessageAccepted = "ChatUserMessageAccepted"
+    20		EventInferenceStarted    = "ChatInferenceStarted"
+    21		EventTokensDelta         = "ChatTokensDelta"
+    22		EventInferenceFinished   = "ChatInferenceFinished"
+    23		EventInferenceStopped    = "ChatInferenceStopped"
+    24	
+    25		UIMessageAccepted = "ChatMessageAccepted"
+    26		UIMessageStarted  = "ChatMessageStarted"
+    27		UIMessageAppended = "ChatMessageAppended"
+    28		UIMessageFinished = "ChatMessageFinished"
+    29		UIMessageStopped  = "ChatMessageStopped"
+    30	
+    31		TimelineEntityChatMessage = "ChatMessage"
+    32	)
+    33	
+    34	type Hooks struct {
+    35		OnBackendEvent func(sessionID, eventName string, payload map[string]any)
+    36	}
+    37	
+    38	type Option func(*Engine)
+    39	
+    40	type Engine struct {
+    41		mu         sync.Mutex
+    42		nextID     int
+    43		active     map[sessionstream.SessionId]*activeRun
+    44		chunkDelay time.Duration
+    45		hooks      Hooks
+    46	}
+    47	
+    48	type activeRun struct {
+    49		messageID string
+    50		cancel    context.CancelFunc
+    51		done      chan struct{}
+    52	}
+    53	
+    54	type Service struct {
+    55		hub    *sessionstream.Hub
+    56		engine *Engine
+    57	}
+    58	
+    59	func WithChunkDelay(delay time.Duration) Option {
+    60		return func(e *Engine) {
+    61			e.chunkDelay = delay
+    62		}
+    63	}
+    64	
+    65	func WithHooks(h Hooks) Option {
+    66		return func(e *Engine) {
+    67			e.hooks = h
+    68		}
+    69	}
+    70	
+    71	func NewEngine(opts ...Option) *Engine {
+    72		engine := &Engine{
+    73			active:     map[sessionstream.SessionId]*activeRun{},
+    74			chunkDelay: 20 * time.Millisecond,
+    75		}
+    76		for _, opt := range opts {
+    77			if opt != nil {
+    78				opt(engine)
+    79			}
+    80		}
+    81		return engine
+    82	}
+    83	
+    84	func RegisterSchemas(reg *sessionstream.SchemaRegistry) error {
+    85		for _, err := range []error{
+    86			reg.RegisterCommand(CommandStartInference, &chatdemov1.StartInferenceCommand{}),
+    87			reg.RegisterCommand(CommandStopInference, &chatdemov1.StopInferenceCommand{}),
+    88			reg.RegisterEvent(EventUserMessageAccepted, &chatdemov1.UserMessageAcceptedEvent{}),
+    89			reg.RegisterEvent(EventInferenceStarted, &chatdemov1.InferenceStartedEvent{}),
+    90			reg.RegisterEvent(EventTokensDelta, &chatdemov1.TokensDeltaEvent{}),
+    91			reg.RegisterEvent(EventInferenceFinished, &chatdemov1.InferenceFinishedEvent{}),
+    92			reg.RegisterEvent(EventInferenceStopped, &chatdemov1.InferenceStoppedEvent{}),
+    93			reg.RegisterUIEvent(UIMessageAccepted, &chatdemov1.ChatMessageUpdate{}),
+    94			reg.RegisterUIEvent(UIMessageStarted, &chatdemov1.ChatMessageUpdate{}),
+    95			reg.RegisterUIEvent(UIMessageAppended, &chatdemov1.ChatMessageUpdate{}),
+    96			reg.RegisterUIEvent(UIMessageFinished, &chatdemov1.ChatMessageUpdate{}),
+    97			reg.RegisterUIEvent(UIMessageStopped, &chatdemov1.ChatMessageUpdate{}),
+    98			reg.RegisterTimelineEntity(TimelineEntityChatMessage, &chatdemov1.ChatMessageEntity{}),
+    99		} {
+   100			if err != nil {
+   101				return err
+   102			}
+   103		}
+   104		return nil
+   105	}
+   106	
+   107	func Install(hub *sessionstream.Hub, engine *Engine) error {
+   108		if hub == nil {
+   109			return fmt.Errorf("hub is nil")
+   110		}
+   111		if engine == nil {
+   112			engine = NewEngine()
+   113		}
+   114		if err := hub.RegisterCommand(CommandStartInference, engine.handleStartInference); err != nil {
+   115			return err
+   116		}
+   117		if err := hub.RegisterCommand(CommandStopInference, engine.handleStopInference); err != nil {
+   118			return err
+   119		}
+   120		if err := hub.RegisterUIProjection(sessionstream.UIProjectionFunc(uiProjection)); err != nil {
+   121			return err
+   122		}
+   123		if err := hub.RegisterTimelineProjection(sessionstream.TimelineProjectionFunc(timelineProjection)); err != nil {
+   124			return err
+   125		}
+   126		return nil
+   127	}
+   128	
+   129	func NewService(hub *sessionstream.Hub, engine *Engine) (*Service, error) {
+   130		if hub == nil {
+   131			return nil, fmt.Errorf("hub is nil")
+   132		}
+   133		if engine == nil {
+   134			engine = NewEngine()
+   135		}
+   136		return &Service{hub: hub, engine: engine}, nil
+   137	}
+   138	
+   139	func (s *Service) SubmitPrompt(ctx context.Context, sid sessionstream.SessionId, prompt string) error {
+   140		if s == nil || s.hub == nil {
+   141			return fmt.Errorf("chat demo service is not initialized")
+   142		}
+   143		prompt = strings.TrimSpace(prompt)
+   144		if sid == "" {
+   145			return fmt.Errorf("session id is empty")
+   146		}
+   147		if prompt == "" {
+   148			return fmt.Errorf("prompt is empty")
+   149		}
+   150		return s.hub.Submit(ctx, sid, CommandStartInference, &chatdemov1.StartInferenceCommand{Prompt: prompt})
+   151	}
+   152	
+   153	func (s *Service) Stop(ctx context.Context, sid sessionstream.SessionId) error {
+   154		if s == nil || s.hub == nil {
+   155			return fmt.Errorf("chat demo service is not initialized")
+   156		}
+   157		if sid == "" {
+   158			return fmt.Errorf("session id is empty")
+   159		}
+   160		return s.hub.Submit(ctx, sid, CommandStopInference, &chatdemov1.StopInferenceCommand{})
+   161	}
+   162	
+   163	func (s *Service) WaitIdle(ctx context.Context, sid sessionstream.SessionId) error {
+   164		if s == nil || s.engine == nil {
+   165			return fmt.Errorf("chat demo engine is not initialized")
+   166		}
+   167		return s.engine.WaitIdle(ctx, sid)
+   168	}
+   169	
+   170	func (s *Service) Snapshot(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
+   171		if s == nil || s.hub == nil {
+   172			return sessionstream.Snapshot{}, fmt.Errorf("chat demo service is not initialized")
+   173		}
+   174		return s.hub.Snapshot(ctx, sid)
+   175	}
+   176	
+   177	func (e *Engine) handleStartInference(ctx context.Context, cmd sessionstream.Command, _ *sessionstream.Session, pub sessionstream.EventPublisher) error {
+   178		payload, ok := cmd.Payload.(*chatdemov1.StartInferenceCommand)
+   179		if !ok {
+   180			return fmt.Errorf("unexpected start inference payload %T", cmd.Payload)
+   181		}
+   182		prompt := strings.TrimSpace(payload.GetPrompt())
+   183		if prompt == "" {
+   184			prompt = "Explain sessionstream"
+   185		}
+   186		messageID := e.nextMessageID()
+   187		userMessageID := messageID + "-user"
+   188		userEvent := &chatdemov1.UserMessageAcceptedEvent{MessageId: userMessageID, Role: "user", Content: prompt, Streaming: false}
+   189		if err := e.publish(ctx, cmd.SessionId, pub, EventUserMessageAccepted, userEvent, map[string]any{
+   190			"messageId": userMessageID,
+   191			"role":      "user",
+   192			"content":   prompt,
+   193			"streaming": false,
+   194		}); err != nil {
+   195			return err
+   196		}
+   197		// The demo stream should continue after the command handler returns; cancellation is
+   198		// controlled by StopInferenceCommand through the activeRun cancel function. Keep
+   199		// context values from the command context, but detach from its cancellation.
+   200		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+   201		run := &activeRun{messageID: messageID, cancel: cancel, done: make(chan struct{})}
+   202		if previous := e.swapRun(cmd.SessionId, run); previous != nil {
+   203			previous.cancel()
+   204			<-previous.done
+   205		}
+   206		// #nosec G118 -- the demo inference goroutine is intentionally detached from
+   207		// the command handler lifetime; StopInferenceCommand owns cancellation.
+   208		go e.runDemoInference(runCtx, cmd.SessionId, messageID, prompt, pub, run.done)
+   209		return nil
+   210	}
+   211	
+   212	func (e *Engine) handleStopInference(_ context.Context, cmd sessionstream.Command, _ *sessionstream.Session, _ sessionstream.EventPublisher) error {
+   213		if current := e.currentRun(cmd.SessionId); current != nil {
+   214			current.cancel()
+   215		}
+   216		return nil
+   217	}
+   218	
+   219	func (e *Engine) runDemoInference(ctx context.Context, sid sessionstream.SessionId, messageID, prompt string, pub sessionstream.EventPublisher, done chan struct{}) {
+   220		defer close(done)
+== cmd/sessionstream-systemlab/server.go ==
+     1	package main
+     2	
+     3	import (
+     4		"embed"
+     5		"encoding/json"
+     6		"fmt"
+     7		"io/fs"
+     8		"net/http"
+     9	
+    10		sessionstreamdoc "github.com/go-go-golems/sessionstream/pkg/doc"
+    11	)
+    12	
+    13	//go:embed static chapters
+    14	var appFS embed.FS
+    15	
+    16	type systemlabServer struct {
+    17		env *labEnvironment
+    18	}
+    19	
+    20	func newSystemlabServer() (*systemlabServer, error) {
+    21		env, err := newLabEnvironment()
+    22		if err != nil {
+    23			return nil, err
+    24		}
+    25		return &systemlabServer{env: env}, nil
+    26	}
+    27	
+    28	func (s *systemlabServer) routes() http.Handler {
+    29		mux := http.NewServeMux()
+    30		mux.HandleFunc("/api/status", s.handleStatus)
+    31		mux.HandleFunc("/api/reset", s.handleReset)
+    32		mux.HandleFunc("/api/chapters/", s.handleChapterHTML)
+    33		mux.Handle("/docs/", http.StripPrefix("/docs/", http.FileServer(http.FS(sessionstreamdoc.FS()))))
+    34		mux.HandleFunc("/api/phase1/run", s.handlePhase1Run)
+    35		mux.HandleFunc("/api/phase1/export", s.handlePhase1Export)
+    36		mux.HandleFunc("/api/phase2/run", s.handlePhase2Run)
+    37		mux.HandleFunc("/api/phase2/export", s.handlePhase2Export)
+    38		mux.HandleFunc("/api/phase3/run", s.handlePhase3Run)
+    39		mux.HandleFunc("/api/phase3/state", s.handlePhase3State)
+    40		mux.HandleFunc("/api/phase3/ws", s.handlePhase3WS)
+    41		mux.HandleFunc("/api/phase4/run", s.handlePhase4Run)
+    42		mux.HandleFunc("/api/phase4/state", s.handlePhase4State)
+    43		mux.HandleFunc("/api/phase4/ws", s.handlePhase4WS)
+    44		mux.HandleFunc("/api/phase5/run", s.handlePhase5Run)
+    45		mux.HandleFunc("/api/phase5/state", s.handlePhase5State)
+    46		mux.HandleFunc("/api/phase5/replay", s.handlePhase5ReplayInspect)
+    47		mux.HandleFunc("/api/phase5/ws", s.handlePhase5WS)
+    48		chaptersSub, _ := fs.Sub(appFS, "chapters")
+    49		mux.Handle("/chapters/", http.StripPrefix("/chapters/", http.FileServer(http.FS(chaptersSub))))
+    50		staticSub, _ := fs.Sub(appFS, "static")
+    51		mux.Handle("/", http.FileServer(http.FS(staticSub)))
+    52		return mux
+    53	}
+    54	
+    55	func (s *systemlabServer) handleStatus(w http.ResponseWriter, _ *http.Request) {
+    56		writeJSON(w, http.StatusOK, map[string]any{
+    57			"app":    "sessionstream-systemlab",
+    58			"phases": []string{"phase0", "phase1", "phase2", "phase3", "phase4", "phase5"},
+    59			"labs": []map[string]any{
+    60				{"id": "phase0", "title": "Foundations", "implemented": true, "chapter": true},
+    61				{"id": "phase1", "title": "Command → Event → Projection", "implemented": true, "chapter": true},
+    62				{"id": "phase2", "title": "Ordering and Ordinals", "implemented": true, "chapter": true},
+    63				{"id": "phase3", "title": "Hydration and Reconnect", "implemented": true, "chapter": true},
+    64				{"id": "phase4", "title": "Chat Example", "implemented": true, "chapter": true},
+    65				{"id": "phase5", "title": "Persistence and Restart", "implemented": true, "chapter": true},
+    66			},
+    67			"docs": map[string]any{
+    68				"basePath": "/docs/",
+    69				"entries": []map[string]string{
+    70					{"title": "Getting Started with Sessionstream", "path": "/docs/tutorials/01-getting-started.md"},
+    71					{"title": "Sessionstream User Guide", "path": "/docs/topics/01-user-guide.md"},
+    72					{"title": "Sessionstream Reference", "path": "/docs/reference/01-reference.md"},
+    73					{"title": "Schema Vet Playbook", "path": "/docs/playbooks/01-sessionstream-schema-vet.md"},
+    74				},
+    75			},
+    76			"boundary": map[string]any{
+    77				"systemlabCalls":  []string{"public sessionstream package APIs", "its own HTTP endpoints"},
+    78				"systemlabAvoids": []string{"legacy webchat internals", "package-global registries", "SEM-specific substrate types"},
+    79			},
+    80		})
+    81	}
+    82	
+    83	func (s *systemlabServer) handleReset(w http.ResponseWriter, req *http.Request) {
+    84		if req.Method != http.MethodPost {
+    85			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+    86			return
+    87		}
+    88		if err := s.env.Reset(); err != nil {
+    89			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+    90			return
+    91		}
+    92		writeJSON(w, http.StatusOK, map[string]any{"status": "reset"})
+    93	}
+    94	
+    95	func (s *systemlabServer) handlePhase1Run(w http.ResponseWriter, req *http.Request) {
+    96		if req.Method != http.MethodPost {
+    97			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+    98			return
+    99		}
+   100		var in phase1RunRequest
+   101		if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
+   102			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("decode request: %v", err)})
+   103			return
+   104		}
+   105		resp, err := s.env.RunPhase1(req.Context(), in)
+   106		if err != nil {
+   107			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+   108			return
+   109		}
+   110		writeJSON(w, http.StatusOK, resp)
+   111	}
+   112	
+   113	func (s *systemlabServer) handlePhase1Export(w http.ResponseWriter, req *http.Request) {
+   114		if req.Method != http.MethodGet {
+   115			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+   116			return
+   117		}
+   118		sessionID := req.URL.Query().Get("sessionId")
+   119		format := req.URL.Query().Get("format")
+   120		filename, contentType, body, err := s.env.ExportPhase1(sessionID, format)
+   121		if err != nil {
+   122			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+   123			return
+   124		}
+   125		w.Header().Set("Content-Type", contentType)
+   126		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+   127		w.WriteHeader(http.StatusOK)
+   128		_, _ = w.Write(body)
+   129	}
+   130	
+   131	func (s *systemlabServer) handlePhase2Run(w http.ResponseWriter, req *http.Request) {
+   132		if req.Method != http.MethodPost {
+   133			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+   134			return
+   135		}
+   136		var in phase2RunRequest
+   137		if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
+   138			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("decode request: %v", err)})
+   139			return
+   140		}
+   141		resp, err := s.env.RunPhase2(req.Context(), in)
+   142		if err != nil {
+   143			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+   144			return
+   145		}
+   146		writeJSON(w, http.StatusOK, resp)
+   147	}
+   148	
+   149	func (s *systemlabServer) handlePhase2Export(w http.ResponseWriter, req *http.Request) {
+   150		if req.Method != http.MethodGet {
+   151			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+   152			return
+   153		}
+   154		format := req.URL.Query().Get("format")
+   155		filename, contentType, body, err := s.env.ExportPhase2(format)
+   156		if err != nil {
+   157			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+   158			return
+   159		}
+   160		w.Header().Set("Content-Type", contentType)
+   161		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+   162		w.WriteHeader(http.StatusOK)
+   163		_, _ = w.Write(body)
+   164	}
+   165	
+   166	func (s *systemlabServer) handlePhase3Run(w http.ResponseWriter, req *http.Request) {
+   167		if req.Method != http.MethodPost {
+   168			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+   169			return
+   170		}
+   171		var in phase3RunRequest
+   172		if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
+   173			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("decode request: %v", err)})
+   174			return
+   175		}
+   176		resp, err := s.env.RunPhase3(req.Context(), in)
+   177		if err != nil {
+   178			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+   179			return
+   180		}
+   181		writeJSON(w, http.StatusOK, resp)
+   182	}
+   183	
+   184	func (s *systemlabServer) handlePhase3State(w http.ResponseWriter, req *http.Request) {
+   185		if req.Method != http.MethodGet {
+   186			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+   187			return
+   188		}
+   189		resp, err := s.env.RunPhase3(req.Context(), phase3RunRequest{
+   190			Action:    "state",
+   191			SessionID: req.URL.Query().Get("sessionId"),
+   192			Prompt:    req.URL.Query().Get("prompt"),
+   193		})
+   194		if err != nil {
+   195			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+   196			return
+   197		}
+   198		writeJSON(w, http.StatusOK, resp)
+   199	}
+   200	
+   201	func (s *systemlabServer) handlePhase3WS(w http.ResponseWriter, req *http.Request) {
+   202		s.env.mu.Lock()
+   203		state := s.env.phase3
+   204		s.env.mu.Unlock()
+   205		if state == nil || state.ws == nil {
+   206			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "phase 3 websocket transport is not initialized"})
+   207			return
+   208		}
+   209		state.ws.ServeHTTP(w, req)
+   210	}
+   211	
+   212	func (s *systemlabServer) handlePhase4Run(w http.ResponseWriter, req *http.Request) {
+   213		if req.Method != http.MethodPost {
+   214			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+   215			return
+   216		}
+   217		var in phase4RunRequest
+   218		if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
+   219			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("decode request: %v", err)})
+   220			return
+== cmd/sessionstream-systemlab/replay_api.go ==
+     1	package main
+     2	
+     3	import (
+     4		"context"
+     5		"encoding/base64"
+     6		"fmt"
+     7		"net/http"
+     8		"strconv"
+     9	
+    10		sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+    11	)
+    12	
+    13	type replayInspectResponse struct {
+    14		Phase          string              `json:"phase"`
+    15		SessionID      string              `json:"sessionId"`
+    16		EventCursor    uint64              `json:"eventCursor"`
+    17		TimelineCursor uint64              `json:"timelineCursor"`
+    18		Errors         []replayErrorRecord `json:"errors"`
+    19	}
+    20	
+    21	type replayErrorRecord struct {
+    22		Kind             string            `json:"kind"`
+    23		SessionID        string            `json:"sessionId,omitempty"`
+    24		Ordinal          uint64            `json:"ordinal,omitempty"`
+    25		EventName        string            `json:"eventName,omitempty"`
+    26		Error            string            `json:"error,omitempty"`
+    27		RawMessageBase64 string            `json:"rawMessageBase64,omitempty"`
+    28		Metadata         map[string]string `json:"metadata,omitempty"`
+    29	}
+    30	
+    31	func (s *systemlabServer) handlePhase5ReplayInspect(w http.ResponseWriter, req *http.Request) {
+    32		if req.Method != http.MethodGet {
+    33			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+    34			return
+    35		}
+    36		sessionID := req.URL.Query().Get("sessionId")
+    37		if sessionID == "" {
+    38			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "sessionId is required"})
+    39			return
+    40		}
+    41		limit := 25
+    42		if raw := req.URL.Query().Get("limit"); raw != "" {
+    43			parsed, err := strconv.Atoi(raw)
+    44			if err != nil || parsed < 0 {
+    45				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "limit must be a non-negative integer"})
+    46				return
+    47			}
+    48			limit = parsed
+    49		}
+    50		resp, err := s.env.inspectPhase5Replay(req.Context(), sessionstream.SessionId(sessionID), limit)
+    51		if err != nil {
+    52			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+    53			return
+    54		}
+    55		writeJSON(w, http.StatusOK, resp)
+    56	}
+    57	
+    58	func (e *labEnvironment) inspectPhase5Replay(ctx context.Context, sid sessionstream.SessionId, limit int) (replayInspectResponse, error) {
+    59		e.mu.Lock()
+    60		state := e.phase5
+    61		e.mu.Unlock()
+    62		if state == nil || state.runtime == nil || state.runtime.hub == nil {
+    63			return replayInspectResponse{}, fmt.Errorf("phase 5 runtime is not initialized")
+    64		}
+    65		hub := state.runtime.hub
+    66		eventCursor, err := hub.EventCursor(ctx, sid)
+    67		if err != nil {
+    68			return replayInspectResponse{}, err
+    69		}
+    70		timelineCursor, err := hub.ProjectionCursor(ctx, sessionstream.TimelineProjectorName, sid)
+    71		if err != nil {
+    72			return replayInspectResponse{}, err
+    73		}
+    74		var errorsOut []replayErrorRecord
+    75		if errorStore, ok := state.runtime.store.(sessionstream.ErrorRecordStore); ok {
+    76			records, err := errorStore.ErrorRecords(ctx, sid, limit)
+    77			if err != nil {
+    78				return replayInspectResponse{}, err
+    79			}
+    80			errorsOut = encodeReplayErrors(records)
+    81		}
+    82		return replayInspectResponse{
+    83			Phase:          "phase5",
+    84			SessionID:      string(sid),
+    85			EventCursor:    eventCursor,
+    86			TimelineCursor: timelineCursor,
+    87			Errors:         errorsOut,
+    88		}, nil
+    89	}
+    90	
+    91	func encodeReplayErrors(records []sessionstream.ErrorRecord) []replayErrorRecord {
+    92		if len(records) == 0 {
+    93			return []replayErrorRecord{}
+    94		}
+    95		out := make([]replayErrorRecord, 0, len(records))
+    96		for _, rec := range records {
+    97			errText := ""
+    98			if rec.Err != nil {
+    99				errText = rec.Err.Error()
+   100			}
+   101			raw := ""
+   102			if len(rec.RawMessage) > 0 {
+   103				raw = base64.StdEncoding.EncodeToString(rec.RawMessage)
+   104			}
+   105			out = append(out, replayErrorRecord{
+   106				Kind:             string(rec.Kind),
+   107				SessionID:        string(rec.SessionId),
+   108				Ordinal:          rec.Ordinal,
+   109				EventName:        rec.EventName,
+   110				Error:            errText,
+   111				RawMessageBase64: raw,
+   112				Metadata:         cloneReplayStringMap(rec.Metadata),
+   113			})
+   114		}
+   115		return out
+   116	}
+   117	
+   118	func cloneReplayStringMap(in map[string]string) map[string]string {
+   119		if in == nil {
+   120			return nil
+   121		}
+   122		out := make(map[string]string, len(in))
+   123		for k, v := range in {
+   124			out[k] = v
+   125		}
+   126		return out
+   127	}

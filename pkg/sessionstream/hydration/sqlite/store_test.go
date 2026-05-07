@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -81,6 +82,25 @@ func TestStoreAppendsAndReplaysEvents(t *testing.T) {
 	require.Equal(t, "two", events[0].Payload.(*structpb.Struct).AsMap()["text"])
 }
 
+func TestStoreAppendEventAllowsOnlyIdenticalDuplicate(t *testing.T) {
+	store := newTestStore(t)
+	payload1, err := structpb.NewStruct(map[string]any{"text": "one"})
+	require.NoError(t, err)
+	payload2, err := structpb.NewStruct(map[string]any{"text": "two"})
+	require.NoError(t, err)
+	require.NoError(t, store.AppendEvent(context.Background(), sessionstream.Event{Name: "TestEvent", SessionId: "s-conflict", Ordinal: 1, Payload: payload1}))
+	require.NoError(t, store.AppendEvent(context.Background(), sessionstream.Event{Name: "TestEvent", SessionId: "s-conflict", Ordinal: 1, Payload: payload1}))
+
+	err = store.AppendEvent(context.Background(), sessionstream.Event{Name: "TestEvent", SessionId: "s-conflict", Ordinal: 1, Payload: payload2})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "event conflict")
+
+	events, err := store.Events(context.Background(), "s-conflict", 0, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, "one", events[0].Payload.(*structpb.Struct).AsMap()["text"])
+}
+
 func TestStoreSnapshotAsOfUsesEntityVersions(t *testing.T) {
 	store := newTestStore(t)
 	payload1, err := structpb.NewStruct(map[string]any{"text": "one"})
@@ -153,6 +173,23 @@ func TestNewInMemoryStore(t *testing.T) {
 	require.Len(t, snap.Entities, 1)
 }
 
+func TestNewInMemoryStoresAreIsolated(t *testing.T) {
+	reg := newTestRegistry(t)
+	first, err := NewInMemory(reg)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, first.Close()) }()
+	second, err := NewInMemory(reg)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, second.Close()) }()
+	payload, err := structpb.NewStruct(map[string]any{"text": "isolated"})
+	require.NoError(t, err)
+	require.NoError(t, first.Apply(context.Background(), "s-isolated", 1, []sessionstream.TimelineEntity{{Kind: "TestEntity", Id: "msg-1", Payload: payload}}))
+
+	snap, err := second.Snapshot(context.Background(), "s-isolated", 0)
+	require.NoError(t, err)
+	require.Empty(t, snap.Entities)
+}
+
 func TestProjectionCursorAdvancesMonotonically(t *testing.T) {
 	store := newTestStore(t)
 	cursor, err := store.ProjectionCursor(context.Background(), sessionstream.TimelineProjectorName, "s-8")
@@ -187,6 +224,40 @@ func TestStoreRecordsAndReadsErrors(t *testing.T) {
 	require.Equal(t, []byte(`{"broken":true}`), records[0].RawMessage)
 	require.Equal(t, "m-1", records[0].Metadata["messageId"])
 	require.ErrorContains(t, records[0].Err, "test failure")
+}
+
+func TestMigratePreservesExistingRowsAndAddsErrorColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sessionstream.sqlite")
+	dsn, err := FileDSN(path)
+	require.NoError(t, err)
+	db, err := sql.Open("sqlite3", dsn)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+		CREATE TABLE sessionstream_sessions (
+		  session_id TEXT PRIMARY KEY,
+		  snapshot_ordinal INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE TABLE sessionstream_errors (
+		  id INTEGER PRIMARY KEY AUTOINCREMENT,
+		  kind TEXT NOT NULL,
+		  session_id TEXT,
+		  ordinal INTEGER,
+		  event_name TEXT,
+		  error TEXT NOT NULL
+		);
+		INSERT INTO sessionstream_sessions(session_id, snapshot_ordinal) VALUES('s-old', 12);
+		PRAGMA user_version = 1;
+	`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	store, err := New(dsn, newTestRegistry(t))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, store.Close()) }()
+	cursor, err := store.Cursor(context.Background(), "s-old")
+	require.NoError(t, err)
+	require.Equal(t, uint64(12), cursor)
+	require.NoError(t, store.RecordError(context.Background(), sessionstream.ErrorRecord{Kind: sessionstream.ErrorKindDecode, RawMessage: []byte("raw"), Metadata: map[string]string{"k": "v"}, Err: errTestFailure}))
 }
 
 func TestClearTimelineClearsMaterializedStateButKeepsEvents(t *testing.T) {

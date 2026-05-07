@@ -1,0 +1,256 @@
+== go packages ==
+github.com/go-go-golems/sessionstream/cmd/sessionstream-lint
+github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab
+github.com/go-go-golems/sessionstream/examples/chatdemo
+github.com/go-go-golems/sessionstream/examples/chatdemo/gen/sessionstream/examples/chatdemo/v1
+github.com/go-go-golems/sessionstream/pkg/analysis/sessionstreamschema
+github.com/go-go-golems/sessionstream/pkg/doc
+github.com/go-go-golems/sessionstream/pkg/sessionstream
+github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite
+github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1
+github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws
+
+== non-generated source files ==
+AGENT.md
+buf.gen.yaml
+buf.yaml
+cmd/sessionstream-lint/main.go
+cmd/sessionstream-systemlab/chapter_api.go
+cmd/sessionstream-systemlab/chapters/phase-0-foundations.md
+cmd/sessionstream-systemlab/chapters/phase-1-command-to-projection.md
+cmd/sessionstream-systemlab/chapters/phase-2-ordering-and-ordinals.md
+cmd/sessionstream-systemlab/chapters/phase-3-hydration-and-reconnect.md
+cmd/sessionstream-systemlab/chapters/phase-4-chat-example.md
+cmd/sessionstream-systemlab/chapters/phase-5-persistence-and-restart.md
+cmd/sessionstream-systemlab/lab_environment.go
+cmd/sessionstream-systemlab/lab_environment_test.go
+cmd/sessionstream-systemlab/main.go
+cmd/sessionstream-systemlab/phase2_actions.go
+cmd/sessionstream-systemlab/phase2_checks.go
+cmd/sessionstream-systemlab/phase2_clone.go
+cmd/sessionstream-systemlab/phase2_lab.go
+cmd/sessionstream-systemlab/phase2_projections.go
+cmd/sessionstream-systemlab/phase2_render.go
+cmd/sessionstream-systemlab/phase2_runtime.go
+cmd/sessionstream-systemlab/phase3_lab.go
+cmd/sessionstream-systemlab/phase4_lab.go
+cmd/sessionstream-systemlab/phase5_actions.go
+cmd/sessionstream-systemlab/phase5_checks.go
+cmd/sessionstream-systemlab/phase5_clone.go
+cmd/sessionstream-systemlab/phase5_lab.go
+cmd/sessionstream-systemlab/phase5_projections.go
+cmd/sessionstream-systemlab/phase5_runtime.go
+cmd/sessionstream-systemlab/README.md
+cmd/sessionstream-systemlab/replay_api.go
+cmd/sessionstream-systemlab/server.go
+cmd/sessionstream-systemlab/snapshot_helpers.go
+cmd/sessionstream-systemlab/snapshot_provider.go
+cmd/sessionstream-systemlab/static/app.css
+cmd/sessionstream-systemlab/static/index.html
+cmd/sessionstream-systemlab/static/js/api.js
+cmd/sessionstream-systemlab/static/js/dom.js
+cmd/sessionstream-systemlab/static/js/main.js
+cmd/sessionstream-systemlab/static/js/pages/overview.js
+cmd/sessionstream-systemlab/static/js/pages/phase1.js
+cmd/sessionstream-systemlab/static/js/pages/phase2.js
+cmd/sessionstream-systemlab/static/js/pages/phase3.js
+cmd/sessionstream-systemlab/static/js/pages/phase4.js
+cmd/sessionstream-systemlab/static/js/pages/phase5.js
+cmd/sessionstream-systemlab/static/js/renderers.js
+cmd/sessionstream-systemlab/static/partials/components.html
+cmd/sessionstream-systemlab/static/partials/overview.html
+cmd/sessionstream-systemlab/static/partials/phase1.html
+cmd/sessionstream-systemlab/static/partials/phase2.html
+cmd/sessionstream-systemlab/static/partials/phase3.html
+cmd/sessionstream-systemlab/static/partials/phase4.html
+cmd/sessionstream-systemlab/static/partials/phase5.html
+cmd/sessionstream-systemlab/trace_helpers.go
+cmd/sessionstream-systemlab/ws_hooks.go
+examples/chatdemo/chat.go
+examples/chatdemo/chat_test.go
+examples/chatdemo/generate.go
+examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go
+examples/chatdemo/proto/sessionstream/examples/chatdemo/v1/chat.proto
+go.mod
+go.sum
+lefthook.yml
+LICENSE
+Makefile
+pkg/analysis/sessionstreamschema/analyzer.go
+pkg/doc/doc.go
+pkg/doc/doc_test.go
+pkg/doc/playbooks/01-sessionstream-schema-vet.md
+pkg/doc/reference/01-reference.md
+pkg/doc/topics/01-user-guide.md
+pkg/doc/tutorials/01-getting-started.md
+pkg/sessionstream/bus.go
+pkg/sessionstream/bus_test.go
+pkg/sessionstream/command_registry.go
+pkg/sessionstream/command_registry_test.go
+pkg/sessionstream/consumer.go
+pkg/sessionstream/doc.go
+pkg/sessionstream/fanout.go
+pkg/sessionstream/handler.go
+pkg/sessionstream/hub.go
+pkg/sessionstream/hub_test.go
+pkg/sessionstream/hydration.go
+pkg/sessionstream/hydration/sqlite/store.go
+pkg/sessionstream/hydration/sqlite/store_test.go
+pkg/sessionstream/noop_store.go
+pkg/sessionstream/ordinals.go
+pkg/sessionstream/ordinals_test.go
+pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go
+pkg/sessionstream/pipeline_observer.go
+pkg/sessionstream/projection.go
+pkg/sessionstream/schema.go
+pkg/sessionstream/schema_test.go
+pkg/sessionstream/session_registry.go
+pkg/sessionstream/session_registry_test.go
+pkg/sessionstream/transport/ws/observer.go
+pkg/sessionstream/transport/ws/server.go
+pkg/sessionstream/transport/ws/server_test.go
+pkg/sessionstream/types.go
+proto/sessionstream/v1/transport.proto
+README.md
+
+== top line counts ==
+ 16808 total
+  1081 ./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go
+   838 ./examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go
+   745 ./pkg/sessionstream/hydration/sqlite/store.go
+   712 ./pkg/sessionstream/transport/ws/server.go
+   708 ./cmd/sessionstream-systemlab/static/app.css
+   650 ./pkg/sessionstream/transport/ws/server_test.go
+   608 ./pkg/sessionstream/hub.go
+   575 ./pkg/sessionstream/hub_test.go
+   463 ./cmd/sessionstream-systemlab/lab_environment.go
+   440 ./examples/chatdemo/chat.go
+   395 ./cmd/sessionstream-systemlab/phase3_lab.go
+   329 ./README.md
+   328 ./cmd/sessionstream-systemlab/chapters/phase-2-ordering-and-ordinals.md
+   320 ./cmd/sessionstream-systemlab/chapters/phase-1-command-to-projection.md
+   318 ./pkg/doc/reference/01-reference.md
+   309 ./cmd/sessionstream-systemlab/server.go
+   301 ./cmd/sessionstream-systemlab/chapters/phase-3-hydration-and-reconnect.md
+   279 ./cmd/sessionstream-systemlab/phase4_lab.go
+   264 ./cmd/sessionstream-systemlab/chapters/phase-0-foundations.md
+   247 ./cmd/sessionstream-systemlab/chapters/phase-5-persistence-and-restart.md
+   240 ./cmd/sessionstream-systemlab/static/js/pages/phase2.js
+   237 ./cmd/sessionstream-systemlab/static/js/pages/phase1.js
+   232 ./pkg/doc/playbooks/01-sessionstream-schema-vet.md
+   230 ./pkg/sessionstream/bus.go
+   228 ./pkg/sessionstream/hydration/sqlite/store_test.go
+   210 ./cmd/sessionstream-systemlab/phase2_actions.go
+   205 ./cmd/sessionstream-systemlab/chapters/phase-4-chat-example.md
+   202 ./pkg/sessionstream/bus_test.go
+   199 ./cmd/sessionstream-systemlab/static/js/renderers.js
+   197 ./pkg/sessionstream/transport/ws/observer.go
+   194 ./cmd/sessionstream-systemlab/phase2_runtime.go
+   169 ./pkg/doc/tutorials/01-getting-started.md
+   167 ./cmd/sessionstream-systemlab/phase5_actions.go
+   163 ./pkg/doc/topics/01-user-guide.md
+   155 ./cmd/sessionstream-systemlab/lab_environment_test.go
+   154 ./cmd/sessionstream-systemlab/phase5_runtime.go
+   150 ./cmd/sessionstream-systemlab/static/js/pages/phase3.js
+   149 ./cmd/sessionstream-systemlab/static/js/pages/phase5.js
+   145 ./cmd/sessionstream-systemlab/static/js/api.js
+   136 ./cmd/sessionstream-systemlab/phase2_projections.go
+   128 ./pkg/sessionstream/schema.go
+   128 ./pkg/sessionstream/pipeline_observer.go
+   127 ./cmd/sessionstream-systemlab/static/js/pages/phase4.js
+   127 ./cmd/sessionstream-systemlab/replay_api.go
+   125 ./cmd/sessionstream-systemlab/main.go
+   113 ./cmd/sessionstream-systemlab/static/partials/components.html
+   102 ./pkg/sessionstream/consumer.go
+    99 ./cmd/sessionstream-systemlab/README.md
+    92 ./cmd/sessionstream-systemlab/phase2_render.go
+    88 ./proto/sessionstream/v1/transport.proto
+    87 ./pkg/sessionstream/ordinals.go
+    81 ./examples/chatdemo/chat_test.go
+    77 ./examples/chatdemo/proto/sessionstream/examples/chatdemo/v1/chat.proto
+    76 ./cmd/sessionstream-systemlab/static/js/pages/overview.js
+    73 ./pkg/analysis/sessionstreamschema/analyzer.go
+    73 ./cmd/sessionstream-systemlab/phase2_clone.go
+    66 ./cmd/sessionstream-systemlab/phase2_lab.go
+    65 ./cmd/sessionstream-systemlab/static/partials/phase5.html
+    65 ./cmd/sessionstream-systemlab/static/partials/phase3.html
+    63 ./cmd/sessionstream-systemlab/static/partials/phase2.html
+    63 ./cmd/sessionstream-systemlab/static/partials/phase1.html
+    63 ./cmd/sessionstream-systemlab/chapter_api.go
+    62 ./cmd/sessionstream-systemlab/phase2_checks.go
+    61 ./cmd/sessionstream-systemlab/ws_hooks.go
+    59 ./cmd/sessionstream-systemlab/snapshot_helpers.go
+    57 ./cmd/sessionstream-systemlab/phase5_checks.go
+    56 ./cmd/sessionstream-systemlab/phase5_projections.go
+    55 ./pkg/sessionstream/session_registry.go
+    55 ./cmd/sessionstream-systemlab/phase5_lab.go
+    54 ./pkg/sessionstream/projection.go
+    53 ./AGENT.md
+    52 ./pkg/sessionstream/ordinals_test.go
+    51 ./cmd/sessionstream-systemlab/static/js/dom.js
+    48 ./pkg/sessionstream/hydration.go
+    48 ./cmd/sessionstream-systemlab/static/partials/phase4.html
+    41 ./pkg/sessionstream/schema_test.go
+    41 ./pkg/sessionstream/noop_store.go
+    39 ./cmd/sessionstream-systemlab/static/index.html
+    38 ./pkg/sessionstream/command_registry.go
+
+== TODO/FIXME/deprecated markers ==
+./examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go:56:// Deprecated: Use StartInferenceCommand.ProtoReflect.Descriptor instead.
+./examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go:99:// Deprecated: Use StopInferenceCommand.ProtoReflect.Descriptor instead.
+./examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go:139:// Deprecated: Use UserMessageAcceptedEvent.ProtoReflect.Descriptor instead.
+./examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go:209:// Deprecated: Use InferenceStartedEvent.ProtoReflect.Descriptor instead.
+./examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go:294:// Deprecated: Use TokensDeltaEvent.ProtoReflect.Descriptor instead.
+./examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go:385:// Deprecated: Use InferenceFinishedEvent.ProtoReflect.Descriptor instead.
+./examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go:469:// Deprecated: Use InferenceStoppedEvent.ProtoReflect.Descriptor instead.
+./examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go:556:// Deprecated: Use ChatMessageUpdate.ProtoReflect.Descriptor instead.
+./examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go:662:// Deprecated: Use ChatMessageEntity.ProtoReflect.Descriptor instead.
+./cmd/sessionstream-systemlab/server.go:78:			"systemlabAvoids": []string{"legacy webchat internals", "package-global registries", "SEM-specific substrate types"},
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:63:// Deprecated: Use ClientFrame.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:181:// Deprecated: Use ServerFrame.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:349:// Deprecated: Use HelloFrame.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:394:// Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:445:// Deprecated: Use UnsubscribeRequest.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:490:// Deprecated: Use SubscribedFrame.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:541:// Deprecated: Use UnsubscribedFrame.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:587:// Deprecated: Use SnapshotFrame.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:650:// Deprecated: Use SnapshotEntity.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:732:// Deprecated: Use UiEventFrame.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:800:// Deprecated: Use ErrorFrame.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:865:// Deprecated: Use PingFrame.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/pb/proto/sessionstream/v1/transport.pb.go:909:// Deprecated: Use PongFrame.ProtoReflect.Descriptor instead.
+./pkg/sessionstream/transport/ws/server_test.go:267:		panic("observer panic should be recovered")
+./pkg/sessionstream/hub_test.go:532:			panic("observer panic should be recovered")
+./pkg/sessionstream/doc.go:10:// agents, or legacy webchat envelopes belong in consuming packages and apps.
+
+== recent commits ==
+157345c (HEAD -> task/add-observers) :ambulance: Fix race condition where PublishUI buffers events after drainHydrationBuffer clears
+7e54f49 (wesen/task/add-observers, task/add-vet-tool) docs: update observer and websocket race diaries
+53ad2ff fix(ws): buffer fanout during subscribe hydration
+c0a4b66 feat(ws): observe websocket transport stages
+7cd6789 feat(sessionstream): observe hub pipeline stages
+3937338 docs: design sessionstream observers and websocket race fix
+70a5730 (tag: v0.0.4, origin/main, origin/HEAD) Merge pull request #4 from wesen/task/add-vet-tool
+052177a (wesen/task/add-vet-tool) :art: Make serve a glazed verb
+5e8d2e3 Add embedded docs and systemlab help
+4a4e876 :books: Add doc (reusable)
+6ac0a64 (task/use-sessionstream-coinvault) Add sessionstream schema vettool
+544bb66 docs: plan shared sessionstream schema vet analyzer
+ab89dde (tag: v0.0.3) Merge pull request #3 from wesen/task/use-sessionstream-coinvault
+58cc6a4 fix(proto): align transport go_package with generated path
+c2e067a ci: exclude generated protobuf code from gosec
+ca3f9cd chore(ws): remove obsolete frame type constants
+f7c1024 docs: align systemlab with protobuf transport ordinals
+60496e9 Use generated websocket transport frames
+39fc58c Add sessionstream websocket transport protos
+779f841 Reset old hydration schemas during ordinal rollout
+a6c132e Clean up snapshot and entity ordinals
+f501171 Add websocket diagnostic hooks
+6a4a8ee (tag: v0.0.2, task/extract-webchat, main) Import EVT-STREAM tickets
+a2f18fe Merge pull request #2 from wesen/task/extract-webchat
+77c910a (wesen/task/extract-webchat) Fix gosec CI findings
+8b29441 :art: Update go version
+4bc0bb8 Install protobuf tools in CI
+473811b Render phase3-5 panels with compact widgets
+3b9da8e Render phase2 panels as tables
+4c4c9e4 Refine systemlab widget density

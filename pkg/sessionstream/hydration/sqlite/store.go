@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -61,7 +62,7 @@ func MemoryDSN(name string) string {
 }
 
 func NewInMemory(reg *sessionstream.SchemaRegistry) (*Store, error) {
-	return New(MemoryDSN(""), reg)
+	return New(MemoryDSN("sessionstream-memory-"+uuid.NewString()), reg)
 }
 
 func (s *Store) Close() error {
@@ -374,14 +375,32 @@ func (s *Store) AppendEvent(ctx context.Context, ev sessionstream.Event) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO sessionstream_events(session_id, ordinal, name, payload_json)
+	result, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO sessionstream_events(session_id, ordinal, name, payload_json)
 		VALUES(?, ?, ?, ?)
-		ON CONFLICT(session_id, ordinal) DO UPDATE SET
-			name = excluded.name,
-			payload_json = excluded.payload_json
 	`, string(ev.SessionId), ordinal, ev.Name, string(payload))
-	return err
+	if err != nil {
+		return err
+	}
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if inserted > 0 {
+		return nil
+	}
+	var existingName, existingPayload string
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT name, payload_json
+		FROM sessionstream_events
+		WHERE session_id = ? AND ordinal = ?
+	`, string(ev.SessionId), ordinal).Scan(&existingName, &existingPayload); err != nil {
+		return err
+	}
+	if existingName == ev.Name && existingPayload == string(payload) {
+		return nil
+	}
+	return fmt.Errorf("event conflict for session %s ordinal %d: existing event %q differs from %q", ev.SessionId, ev.Ordinal, existingName, ev.Name)
 }
 
 func (s *Store) Events(ctx context.Context, sid sessionstream.SessionId, after uint64, limit int) ([]sessionstream.Event, error) {
@@ -580,23 +599,8 @@ func (s *Store) ErrorRecords(ctx context.Context, sid sessionstream.SessionId, l
 
 func (s *Store) migrate() error {
 	const targetUserVersion = 2
-	var userVersion int
-	if err := s.db.QueryRow(`PRAGMA user_version;`).Scan(&userVersion); err != nil {
+	if err := s.db.QueryRow(`PRAGMA user_version;`).Scan(new(int)); err != nil {
 		return err
-	}
-	if userVersion < targetUserVersion {
-		for _, stmt := range []string{
-			`DROP TABLE IF EXISTS sessionstream_errors;`,
-			`DROP TABLE IF EXISTS sessionstream_projection_cursors;`,
-			`DROP TABLE IF EXISTS sessionstream_entity_versions;`,
-			`DROP TABLE IF EXISTS sessionstream_entities;`,
-			`DROP TABLE IF EXISTS sessionstream_events;`,
-			`DROP TABLE IF EXISTS sessionstream_sessions;`,
-		} {
-			if _, err := s.db.Exec(stmt); err != nil {
-				return err
-			}
-		}
 	}
 	for _, stmt := range []string{
 		`CREATE TABLE IF NOT EXISTS sessionstream_sessions (
@@ -660,10 +664,56 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
+	for _, migration := range []struct {
+		table  string
+		column string
+		stmt   string
+	}{
+		{table: "sessionstream_errors", column: "raw_message", stmt: `ALTER TABLE sessionstream_errors ADD COLUMN raw_message BLOB`},
+		{table: "sessionstream_errors", column: "metadata_json", stmt: `ALTER TABLE sessionstream_errors ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'`},
+	} {
+		exists, err := s.columnExists(migration.table, migration.column)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := s.db.Exec(migration.stmt); err != nil {
+				return err
+			}
+		}
+	}
 	if _, err := s.db.Exec(fmt.Sprintf(`PRAGMA user_version = %d;`, targetUserVersion)); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *Store) columnExists(table, column string) (bool, error) {
+	rows, err := s.db.Query(fmt.Sprintf(`PRAGMA table_info(%s);`, table))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			typeName  string
+			notNull   int
+			defaultV  sql.NullString
+			primaryKV int
+		)
+		if err := rows.Scan(&cid, &name, &typeName, &notNull, &defaultV, &primaryKV); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 type entityKey struct {

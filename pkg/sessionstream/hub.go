@@ -74,6 +74,7 @@ type Hub struct {
 
 	projectionPolicies ProjectionPolicies
 	errorObserver      ErrorObserver
+	pipelineObserver   PipelineObserver
 
 	mu           sync.Mutex
 	localOrdinal map[SessionId]uint64
@@ -419,49 +420,70 @@ func (h *Hub) RebuildTimeline(ctx context.Context, sid SessionId, from uint64) e
 }
 
 func (h *Hub) rebuildTimelineEvent(ctx context.Context, ev Event) error {
+	rec := PipelineRecord{Mode: PipelineModeRebuild, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Event: cloneEvent(ev)}
+	defer func() { h.observePipeline(ctx, rec) }()
+
 	sess, err := h.sessions.GetOrCreate(ctx, ev.SessionId)
 	if err != nil {
+		rec.SessionErr = err
 		return err
 	}
 	view, err := h.store.View(ctx, ev.SessionId)
 	if err != nil {
+		rec.ViewErr = err
 		h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
 		return err
 	}
+	rec.ViewOrdinal = view.Ordinal()
 	entities, err := h.timelineProjection.Project(ctx, ev, sess, view)
+	rec.TimelineEntities = cloneTimelineEntities(entities)
+	rec.TimelineProjectionErr = err
 	if err != nil {
 		h.reportError(ctx, ErrorRecord{Kind: ErrorKindTimelineProjection, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
 		return err
 	}
 	if err := h.store.Apply(ctx, ev.SessionId, ev.Ordinal, entities); err != nil {
+		rec.AppliedEntities = cloneTimelineEntities(entities)
+		rec.ApplyErr = err
 		h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
 		return err
 	}
+	rec.AppliedEntities = cloneTimelineEntities(entities)
 	if projectionStore, ok := h.store.(ProjectionCursorStore); ok {
 		if err := projectionStore.AdvanceProjectionCursor(ctx, TimelineProjectorName, ev.SessionId, ev.Ordinal); err != nil {
+			rec.CursorErr = err
 			h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
 			return err
 		}
+		rec.TimelineCursorAdvanced = true
 	}
 	return nil
 }
 
 func (h *Hub) projectAndApply(ctx context.Context, ev Event) ([]UIEvent, error) {
+	rec := PipelineRecord{Mode: PipelineModeLive, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Event: cloneEvent(ev)}
+	defer func() { h.observePipeline(ctx, rec) }()
+
 	if eventStore, ok := h.store.(EventStore); ok {
 		if err := eventStore.AppendEvent(ctx, ev); err != nil {
+			rec.AppendErr = err
 			h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
 			return nil, err
 		}
+		rec.EventAppended = true
 	}
 
 	sess, err := h.sessions.GetOrCreate(ctx, ev.SessionId)
 	if err != nil {
+		rec.SessionErr = err
 		return nil, err
 	}
 	view, err := h.store.View(ctx, ev.SessionId)
 	if err != nil {
+		rec.ViewErr = err
 		return nil, err
 	}
+	rec.ViewOrdinal = view.Ordinal()
 
 	var (
 		uiEvents []UIEvent
@@ -471,9 +493,13 @@ func (h *Hub) projectAndApply(ctx context.Context, ev Event) ([]UIEvent, error) 
 	)
 	if h.uiProjection != nil {
 		uiEvents, uiErr = h.uiProjection.Project(ctx, ev, sess, view)
+		rec.UIEvents = cloneUIEvents(uiEvents)
+		rec.UIProjectionErr = uiErr
 	}
 	if h.timelineProjection != nil {
 		entities, tlErr = h.timelineProjection.Project(ctx, ev, sess, view)
+		rec.TimelineEntities = cloneTimelineEntities(entities)
+		rec.TimelineProjectionErr = tlErr
 	}
 
 	if uiErr != nil {
@@ -494,22 +520,31 @@ func (h *Hub) projectAndApply(ctx context.Context, ev Event) ([]UIEvent, error) 
 		entitiesToApply = nil
 	}
 	if err := h.store.Apply(ctx, ev.SessionId, ev.Ordinal, entitiesToApply); err != nil {
+		rec.AppliedEntities = cloneTimelineEntities(entitiesToApply)
+		rec.ApplyErr = err
 		h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
 		return nil, err
 	}
+	rec.AppliedEntities = cloneTimelineEntities(entitiesToApply)
 	if tlErr == nil {
 		if projectionStore, ok := h.store.(ProjectionCursorStore); ok {
 			if err := projectionStore.AdvanceProjectionCursor(ctx, TimelineProjectorName, ev.SessionId, ev.Ordinal); err != nil {
+				rec.CursorErr = err
 				h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
 				return nil, err
 			}
+			rec.TimelineCursorAdvanced = true
 		}
 	}
 	if uiErr == nil && h.fanout != nil && len(uiEvents) > 0 {
-		if err := h.fanout.PublishUI(ctx, ev.SessionId, ev.Ordinal, cloneUIEvents(uiEvents)); err != nil {
+		fanoutEvents := cloneUIEvents(uiEvents)
+		if err := h.fanout.PublishUI(ctx, ev.SessionId, ev.Ordinal, fanoutEvents); err != nil {
+			rec.FanoutEvents = cloneUIEvents(fanoutEvents)
+			rec.FanoutErr = err
 			h.reportError(ctx, ErrorRecord{Kind: ErrorKindFanout, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
 			return nil, err
 		}
+		rec.FanoutEvents = cloneUIEvents(fanoutEvents)
 	}
 	return uiEvents, nil
 }
@@ -554,11 +589,41 @@ func (h *Hub) eventCursor(ctx context.Context, sid SessionId) (uint64, error) {
 
 func (h *Hub) reportError(ctx context.Context, rec ErrorRecord) {
 	if errorStore, ok := h.store.(ErrorStore); ok {
-		_ = errorStore.RecordError(ctx, rec)
+		if err := errorStore.RecordError(ctx, rec); err != nil {
+			h.observeError(ctx, ErrorRecord{
+				Kind:      ErrorKindStore,
+				SessionId: rec.SessionId,
+				Ordinal:   rec.Ordinal,
+				EventName: rec.EventName,
+				Err:       fmt.Errorf("record sessionstream error: %w", err),
+				Metadata:  map[string]string{"originalKind": string(rec.Kind)},
+			})
+		}
 	}
-	if h.errorObserver != nil {
-		h.errorObserver.OnSessionstreamError(ctx, rec)
+	h.observeError(ctx, rec)
+}
+
+func (h *Hub) observeError(ctx context.Context, rec ErrorRecord) {
+	if h == nil || h.errorObserver == nil {
+		return
 	}
+	safe := cloneErrorRecord(rec)
+	defer func() { _ = recover() }()
+	h.errorObserver.OnSessionstreamError(ctx, safe)
+}
+
+func cloneErrorRecord(in ErrorRecord) ErrorRecord {
+	out := in
+	if len(in.RawMessage) > 0 {
+		out.RawMessage = append([]byte(nil), in.RawMessage...)
+	}
+	if len(in.Metadata) > 0 {
+		out.Metadata = make(map[string]string, len(in.Metadata))
+		for k, v := range in.Metadata {
+			out.Metadata[k] = v
+		}
+	}
+	return out
 }
 
 func (h *Hub) validatePayloadType(m map[string]proto.Message, kind, name string, payload proto.Message) error {

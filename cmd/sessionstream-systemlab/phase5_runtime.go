@@ -70,7 +70,7 @@ func (e *labEnvironment) buildPhase5Runtime(mode string, existingDBPath string) 
 		closeFn = memStore.Close
 	}
 
-	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithHooks(newWebsocketTraceHooks(websocketTraceOptions{
+	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithTransportObserver(newWebsocketTraceObserver(websocketTraceOptions{
 		Phase:            5,
 		AppendTrace:      e.appendPhase5Trace,
 		IncludeUIPayload: true,

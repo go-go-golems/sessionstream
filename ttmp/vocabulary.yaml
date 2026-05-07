@@ -29,6 +29,18 @@ topics:
       description: User experience, readability, density, and workflow refinement.
     - slug: css
       description: Styling, layout, and visual presentation work.
+    - slug: sessionstream
+      description: Topic for sessionstream work
+    - slug: observability
+      description: Topic for observability work
+    - slug: hydration
+      description: Topic for hydration work
+    - slug: debugging
+      description: Topic for debugging work
+    - slug: reconnect
+      description: Topic for reconnect work
+    - slug: streaming
+      description: Topic for streaming work
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes

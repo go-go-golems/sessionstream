@@ -72,7 +72,7 @@ func (e *labEnvironment) newPhase3State() (*phase3State, error) {
 		return nil, err
 	}
 
-	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithHooks(newWebsocketTraceHooks(websocketTraceOptions{
+	wsServer, err := wstransport.NewServer(hydrationSnapshotProvider{store: store}, wstransport.WithTransportObserver(newWebsocketTraceObserver(websocketTraceOptions{
 		Phase:             3,
 		AppendTrace:       e.appendPhase3Trace,
 		RecordClientFrame: true,

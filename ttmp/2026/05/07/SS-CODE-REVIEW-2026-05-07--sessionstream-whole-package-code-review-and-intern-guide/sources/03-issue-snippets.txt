@@ -1,0 +1,854 @@
+== pkg/sessionstream/transport/ws/server.go:296-360 ==
+   296		case *sessionstreamv1.ClientFrame_Ping:
+   297			return s.sendFrame(c, newPongFrame(typed.Ping.GetNonce()))
+   298		case *sessionstreamv1.ClientFrame_Pong:
+   299			return nil
+   300		case *sessionstreamv1.ClientFrame_Subscribe:
+   301			sub := typed.Subscribe
+   302			sid := sessionstream.SessionId(sub.GetSessionId())
+   303			if sid == "" {
+   304				return fmt.Errorf("subscribe missing session id")
+   305			}
+   306			since := sub.GetSinceSnapshotOrdinal()
+   307			s.observe(ctx, TransportRecord{Stage: TransportStageSubscribeReceived, Direction: FrameDirectionClientToServer, ConnectionId: c.id, SessionId: sid, FrameType: "subscribe", SinceSnapshotOrdinal: since})
+   308			s.registerHydrating(c, sid, since)
+   309			completed := false
+   310			defer func() {
+   311				if !completed {
+   312					s.removeSubscription(c, sid)
+   313				}
+   314			}()
+   315	
+   316			s.observe(ctx, TransportRecord{Stage: TransportStageSnapshotLoadStarted, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since})
+   317			snap, err := s.snapshots.Snapshot(ctx, sid)
+   318			if err != nil {
+   319				s.observe(ctx, TransportRecord{Stage: TransportStageProtocolError, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since, Err: err})
+   320				return fmt.Errorf("load snapshot for %q: %w", sid, err)
+   321			}
+   322			s.observe(ctx, TransportRecord{Stage: TransportStageSnapshotLoaded, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since, SnapshotOrdinal: snap.SnapshotOrdinal, SnapshotEntityCount: len(snap.Entities), SnapshotEntities: summarizeEntities(snap.Entities)})
+   323			if err := s.sendFrame(c, newSnapshotFrame(sid, snap)); err != nil {
+   324				return err
+   325			}
+   326			if s.hooks.OnSnapshotSent != nil {
+   327				s.hooks.OnSnapshotSent(c.id, sid, cloneSnapshot(snap))
+   328			}
+   329			buffered := s.drainHydrationBuffer(c, sid, snap.SnapshotOrdinal)
+   330			if len(buffered) > 0 {
+   331				s.observe(ctx, TransportRecord{Stage: TransportStageHydrationBufferFlushed, ConnectionId: c.id, SessionId: sid, SnapshotOrdinal: snap.SnapshotOrdinal, FanoutEventCount: countBufferedEvents(buffered)})
+   332			}
+   333			for _, batch := range buffered {
+   334				if err := s.sendUIBatch(c, sid, batch.ordinal, batch.events); err != nil {
+   335					return err
+   336				}
+   337			}
+   338			lateBuffered := s.markLive(c, sid, snap.SnapshotOrdinal)
+   339			if len(lateBuffered) > 0 {
+   340				s.observe(ctx, TransportRecord{Stage: TransportStageHydrationBufferFlushed, ConnectionId: c.id, SessionId: sid, SnapshotOrdinal: snap.SnapshotOrdinal, FanoutEventCount: countBufferedEvents(lateBuffered)})
+   341			}
+   342			for _, batch := range lateBuffered {
+   343				if err := s.sendUIBatch(c, sid, batch.ordinal, batch.events); err != nil {
+   344					return err
+   345				}
+   346			}
+   347			if s.hooks.OnSubscribe != nil {
+   348				s.hooks.OnSubscribe(c.id, sid, since)
+   349			}
+   350			if err := s.sendFrame(c, newSubscribedFrame(sid, since)); err != nil {
+   351				return err
+   352			}
+   353			completed = true
+   354			return nil
+   355		case *sessionstreamv1.ClientFrame_Unsubscribe:
+   356			sid := sessionstream.SessionId(typed.Unsubscribe.GetSessionId())
+   357			if sid == "" {
+   358				return fmt.Errorf("unsubscribe missing session id")
+   359			}
+   360			s.removeSubscription(c, sid)
+== pkg/sessionstream/transport/ws/server.go:190-215 ==
+   190		cid := sessionstream.ConnectionId(fmt.Sprintf("conn-%d", atomic.AddUint64(&s.nextID, 1)))
+   191		c := &connection{
+   192			id:   cid,
+   193			ws:   conn,
+   194			send: make(chan outboundFrame, 128),
+   195			subs: map[sessionstream.SessionId]subscription{},
+   196		}
+   197		s.mu.Lock()
+   198		s.conns[cid] = c
+   199		s.mu.Unlock()
+   200		s.observe(r.Context(), TransportRecord{Stage: TransportStageConnected, ConnectionId: cid})
+   201		if s.hooks.OnConnect != nil {
+   202			s.hooks.OnConnect(cid)
+   203		}
+   204	
+   205		go s.writeLoop(r.Context(), c)
+   206		_ = s.sendFrame(c, newHelloFrame(cid))
+   207		s.readLoop(r.Context(), c)
+   208		s.closeConnection(c)
+   209	}
+   210	
+   211	// PublishUI fans projected UI events out to subscribed websocket clients.
+   212	func (s *Server) PublishUI(ctx context.Context, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
+   213		if len(events) == 0 {
+   214			return nil
+   215		}
+== pkg/sessionstream/transport/ws/server.go:451-520 ==
+   451	// read "hydrating" via subscriptionState but markLive changed the state before
+   452	// bufferHydrationEvents could append, silently dropping the event.
+   453	func (s *Server) deliverUIEvents(ctx context.Context, c *connection, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
+   454		c.mu.Lock()
+   455		sub, ok := c.subs[sid]
+   456		if !ok {
+   457			c.mu.Unlock()
+   458			return nil
+   459		}
+   460		switch sub.state {
+   461		case subscriptionStateLive:
+   462			c.mu.Unlock()
+   463			return s.sendUIBatch(c, sid, ord, events)
+   464		case subscriptionStateHydrating:
+   465			if len(sub.buffer) >= s.maxHydrationBufferedBatches {
+   466				err := fmt.Errorf("connection %s hydration buffer full for session %s", c.id, sid)
+   467				c.mu.Unlock()
+   468				s.observe(ctx, TransportRecord{Stage: TransportStageHydrationBufferOverflow, ConnectionId: c.id, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), Err: err})
+   469				_ = s.sendFrame(c, newErrorFrame("hydration_buffer_overflow", err.Error(), ""))
+   470				return err
+   471			}
+   472			sub.buffer = append(sub.buffer, bufferedUIBatch{ordinal: ord, events: cloneUIEvents(events)})
+   473			c.subs[sid] = sub
+   474			c.mu.Unlock()
+   475			s.observe(ctx, TransportRecord{Stage: TransportStageUIEventBuffered, ConnectionId: c.id, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events)})
+   476			return nil
+   477		default:
+   478			c.mu.Unlock()
+   479			return nil
+   480		}
+   481	}
+   482	
+   483	func (s *Server) drainHydrationBuffer(c *connection, sid sessionstream.SessionId, snapshotOrdinal uint64) []bufferedUIBatch {
+   484		c.mu.Lock()
+   485		defer c.mu.Unlock()
+   486		sub, ok := c.subs[sid]
+   487		if !ok {
+   488			return nil
+   489		}
+   490		out := make([]bufferedUIBatch, 0, len(sub.buffer))
+   491		for _, batch := range sub.buffer {
+   492			if batch.ordinal > snapshotOrdinal {
+   493				out = append(out, cloneBufferedUIBatch(batch))
+   494			}
+   495		}
+   496		sort.SliceStable(out, func(i, j int) bool { return out[i].ordinal < out[j].ordinal })
+   497		sub.buffer = nil
+   498		sub.snapshotOrdinal = snapshotOrdinal
+   499		c.subs[sid] = sub
+   500		return out
+   501	}
+   502	
+   503	// markLive transitions a subscription from hydrating to live and returns any
+   504	// batches that arrived after drainHydrationBuffer ran. The caller must send
+   505	// these batches so they are not silently dropped.
+   506	func (s *Server) markLive(c *connection, sid sessionstream.SessionId, snapshotOrdinal uint64) []bufferedUIBatch {
+   507		c.mu.Lock()
+   508		defer c.mu.Unlock()
+   509		sub, ok := c.subs[sid]
+   510		if !ok {
+   511			return nil
+   512		}
+   513		late := sub.buffer
+   514		sub.state = subscriptionStateLive
+   515		sub.snapshotOrdinal = snapshotOrdinal
+   516		sub.buffer = nil
+   517		c.subs[sid] = sub
+   518		s.observe(context.Background(), TransportRecord{Stage: TransportStageSubscriptionLive, ConnectionId: c.id, SessionId: sid, SnapshotOrdinal: snapshotOrdinal})
+   519		return late
+   520	}
+== pkg/sessionstream/transport/ws/server.go:550-590 ==
+   550		return total
+   551	}
+   552	
+   553	func (s *Server) removeSubscription(c *connection, sid sessionstream.SessionId) {
+   554		if c == nil || sid == "" {
+   555			return
+   556		}
+   557		c.mu.Lock()
+   558		delete(c.subs, sid)
+   559		c.mu.Unlock()
+   560		s.mu.Lock()
+   561		delete(s.bySession[sid], c.id)
+   562		if len(s.bySession[sid]) == 0 {
+   563			delete(s.bySession, sid)
+   564		}
+   565		s.mu.Unlock()
+   566	}
+   567	
+   568	func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) (err error) {
+   569		frameType := serverFrameType(frame)
+   570		if c == nil {
+   571			return fmt.Errorf("connection is nil")
+   572		}
+   573		if c.closed.Load() {
+   574			return fmt.Errorf("connection %s is closed", c.id)
+   575		}
+   576		body, err := marshalOptions.Marshal(frame)
+   577		if err != nil {
+   578			s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameMarshalError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, Err: err})
+   579			return err
+   580		}
+   581		defer func() {
+   582			if r := recover(); r != nil {
+   583				err = fmt.Errorf("connection %s is closed", c.id)
+   584			}
+   585		}()
+   586		queueLen := len(c.send)
+   587		queueCap := cap(c.send)
+   588		select {
+   589		case c.send <- outboundFrame{body: body, frameType: frameType}:
+   590			s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameQueued, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, RawBytes: len(body), QueueLen: queueLen, QueueCap: queueCap})
+== pkg/sessionstream/hub.go:386-470 ==
+   386		}
+   387		return h.RebuildTimeline(ctx, sid, 0)
+   388	}
+   389	
+   390	func (h *Hub) RebuildTimeline(ctx context.Context, sid SessionId, from uint64) error {
+   391		if h == nil {
+   392			return fmt.Errorf("hub is nil")
+   393		}
+   394		if sid == "" {
+   395			return fmt.Errorf("session id is empty")
+   396		}
+   397		if h.timelineProjection == nil {
+   398			return fmt.Errorf("timeline projection is not registered")
+   399		}
+   400		eventStore, ok := h.store.(EventStore)
+   401		if !ok {
+   402			return fmt.Errorf("hydration store does not support event replay")
+   403		}
+   404		for {
+   405			events, err := eventStore.Events(ctx, sid, from, 100)
+   406			if err != nil {
+   407				h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: sid, Ordinal: from, Err: err})
+   408				return err
+   409			}
+   410			if len(events) == 0 {
+   411				return nil
+   412			}
+   413			for _, ev := range events {
+   414				if err := h.rebuildTimelineEvent(ctx, ev); err != nil {
+   415					return err
+   416				}
+   417				from = ev.Ordinal
+   418			}
+   419		}
+   420	}
+   421	
+   422	func (h *Hub) rebuildTimelineEvent(ctx context.Context, ev Event) error {
+   423		rec := PipelineRecord{Mode: PipelineModeRebuild, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Event: cloneEvent(ev)}
+   424		defer func() { h.observePipeline(ctx, rec) }()
+   425	
+   426		sess, err := h.sessions.GetOrCreate(ctx, ev.SessionId)
+   427		if err != nil {
+   428			rec.SessionErr = err
+   429			return err
+   430		}
+   431		view, err := h.store.View(ctx, ev.SessionId)
+   432		if err != nil {
+   433			rec.ViewErr = err
+   434			h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
+   435			return err
+   436		}
+   437		rec.ViewOrdinal = view.Ordinal()
+   438		entities, err := h.timelineProjection.Project(ctx, ev, sess, view)
+   439		rec.TimelineEntities = cloneTimelineEntities(entities)
+   440		rec.TimelineProjectionErr = err
+   441		if err != nil {
+   442			h.reportError(ctx, ErrorRecord{Kind: ErrorKindTimelineProjection, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
+   443			return err
+   444		}
+   445		if err := h.store.Apply(ctx, ev.SessionId, ev.Ordinal, entities); err != nil {
+   446			rec.AppliedEntities = cloneTimelineEntities(entities)
+   447			rec.ApplyErr = err
+   448			h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
+   449			return err
+   450		}
+   451		rec.AppliedEntities = cloneTimelineEntities(entities)
+   452		if projectionStore, ok := h.store.(ProjectionCursorStore); ok {
+   453			if err := projectionStore.AdvanceProjectionCursor(ctx, TimelineProjectorName, ev.SessionId, ev.Ordinal); err != nil {
+   454				rec.CursorErr = err
+   455				h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
+   456				return err
+   457			}
+   458			rec.TimelineCursorAdvanced = true
+   459		}
+   460		return nil
+   461	}
+   462	
+   463	func (h *Hub) projectAndApply(ctx context.Context, ev Event) ([]UIEvent, error) {
+   464		rec := PipelineRecord{Mode: PipelineModeLive, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Event: cloneEvent(ev)}
+   465		defer func() { h.observePipeline(ctx, rec) }()
+   466	
+   467		if eventStore, ok := h.store.(EventStore); ok {
+   468			if err := eventStore.AppendEvent(ctx, ev); err != nil {
+   469				rec.AppendErr = err
+   470				h.reportError(ctx, ErrorRecord{Kind: ErrorKindStore, SessionId: ev.SessionId, Ordinal: ev.Ordinal, EventName: ev.Name, Err: err})
+== pkg/sessionstream/hub.go:548-565 ==
+   548		}
+   549		return uiEvents, nil
+   550	}
+   551	
+   552	func cloneUIEvents(in []UIEvent) []UIEvent {
+   553		if len(in) == 0 {
+   554			return nil
+   555		}
+   556		out := make([]UIEvent, 0, len(in))
+   557		for _, event := range in {
+   558			clonedEvent := event
+   559			if event.Payload != nil {
+   560				clonedEvent.Payload = proto.Clone(event.Payload)
+   561			}
+   562			out = append(out, clonedEvent)
+   563		}
+   564		return out
+   565	}
+== pkg/sessionstream/hydration/sqlite/store.go:22-62 ==
+    22	var _ sessionstream.HydrationStore = (*Store)(nil)
+    23	var _ sessionstream.EventStore = (*Store)(nil)
+    24	var _ sessionstream.ProjectionCursorStore = (*Store)(nil)
+    25	var _ sessionstream.TimelineResetStore = (*Store)(nil)
+    26	var _ sessionstream.ErrorStore = (*Store)(nil)
+    27	var _ sessionstream.ErrorRecordStore = (*Store)(nil)
+    28	
+    29	func New(dsn string, reg *sessionstream.SchemaRegistry) (*Store, error) {
+    30		if dsn == "" {
+    31			return nil, fmt.Errorf("sqlite hydration store dsn is empty")
+    32		}
+    33		if reg == nil {
+    34			return nil, fmt.Errorf("sqlite hydration store schema registry is nil")
+    35		}
+    36		db, err := sql.Open("sqlite3", dsn)
+    37		if err != nil {
+    38			return nil, err
+    39		}
+    40		db.SetMaxOpenConns(1)
+    41		store := &Store{db: db, reg: reg}
+    42		if err := store.migrate(); err != nil {
+    43			_ = db.Close()
+    44			return nil, err
+    45		}
+    46		return store, nil
+    47	}
+    48	
+    49	func FileDSN(path string) (string, error) {
+    50		if path == "" {
+    51			return "", fmt.Errorf("sqlite hydration store path is empty")
+    52		}
+    53		return fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on", path), nil
+    54	}
+    55	
+    56	func MemoryDSN(name string) string {
+    57		if name == "" {
+    58			name = "sessionstream-memory"
+    59		}
+    60		return fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=5000&_foreign_keys=on", name)
+    61	}
+    62	
+== pkg/sessionstream/hydration/sqlite/store.go:315-345 ==
+   315		if err != nil {
+   316			return err
+   317		}
+   318		defer func() { _ = tx.Rollback() }()
+   319		for _, stmt := range []string{
+   320			`DELETE FROM sessionstream_entities WHERE session_id = ?`,
+   321			`DELETE FROM sessionstream_entity_versions WHERE session_id = ?`,
+   322			`DELETE FROM sessionstream_projection_cursors WHERE session_id = ? AND projector = ?`,
+   323			`UPDATE sessionstream_sessions SET snapshot_ordinal = 0 WHERE session_id = ?`,
+   324		} {
+   325			if stmt == `DELETE FROM sessionstream_projection_cursors WHERE session_id = ? AND projector = ?` {
+   326				if _, err := tx.ExecContext(ctx, stmt, string(sid), sessionstream.TimelineProjectorName); err != nil {
+   327					return err
+   328				}
+   329				continue
+   330			}
+   331			if _, err := tx.ExecContext(ctx, stmt, string(sid)); err != nil {
+   332				return err
+   333			}
+   334		}
+   335		return tx.Commit()
+   336	}
+   337	
+   338	func (s *Store) EventCursor(ctx context.Context, sid sessionstream.SessionId) (uint64, error) {
+   339		if s == nil || s.db == nil {
+   340			return 0, fmt.Errorf("sqlite hydration store db is nil")
+   341		}
+   342		if ctx == nil {
+   343			ctx = context.Background()
+   344		}
+   345		var cursor sql.NullInt64
+== pkg/sessionstream/hydration/sqlite/store.go:488-585 ==
+   488	func (s *Store) RecordError(ctx context.Context, rec sessionstream.ErrorRecord) error {
+   489		if s == nil || s.db == nil {
+   490			return fmt.Errorf("sqlite hydration store db is nil")
+   491		}
+   492		if ctx == nil {
+   493			ctx = context.Background()
+   494		}
+   495		ordinal, err := uint64ToInt64(rec.Ordinal)
+   496		if err != nil {
+   497			return err
+   498		}
+   499		metadata, err := json.Marshal(rec.Metadata)
+   500		if err != nil {
+   501			return err
+   502		}
+   503		errText := ""
+   504		if rec.Err != nil {
+   505			errText = rec.Err.Error()
+   506		}
+   507		_, err = s.db.ExecContext(ctx, `
+   508			INSERT INTO sessionstream_errors(kind, session_id, ordinal, event_name, error, raw_message, metadata_json)
+   509			VALUES(?, ?, ?, ?, ?, ?, ?)
+   510		`, string(rec.Kind), string(rec.SessionId), ordinal, rec.EventName, errText, rec.RawMessage, string(metadata))
+   511		return err
+   512	}
+   513	
+   514	func (s *Store) ErrorRecords(ctx context.Context, sid sessionstream.SessionId, limit int) ([]sessionstream.ErrorRecord, error) {
+   515		if s == nil || s.db == nil {
+   516			return nil, fmt.Errorf("sqlite hydration store db is nil")
+   517		}
+   518		if ctx == nil {
+   519			ctx = context.Background()
+   520		}
+   521		query := `SELECT kind, session_id, ordinal, event_name, error, raw_message, metadata_json FROM sessionstream_errors`
+   522		args := []any{}
+   523		if sid != "" {
+   524			query += ` WHERE session_id = ?`
+   525			args = append(args, string(sid))
+   526		}
+   527		query += ` ORDER BY id ASC`
+   528		if limit > 0 {
+   529			query += ` LIMIT ?`
+   530			args = append(args, limit)
+   531		}
+   532		rows, err := s.db.QueryContext(ctx, query, args...)
+   533		if err != nil {
+   534			return nil, err
+   535		}
+   536		defer func() { _ = rows.Close() }()
+   537		out := make([]sessionstream.ErrorRecord, 0)
+   538		for rows.Next() {
+   539			var (
+   540				kind        string
+   541				sessionID   sql.NullString
+   542				ordinal     sql.NullInt64
+   543				eventName   sql.NullString
+   544				errText     string
+   545				rawMessage  []byte
+   546				metadataRaw string
+   547			)
+   548			if err := rows.Scan(&kind, &sessionID, &ordinal, &eventName, &errText, &rawMessage, &metadataRaw); err != nil {
+   549				return nil, err
+   550			}
+   551			rec := sessionstream.ErrorRecord{Kind: sessionstream.ErrorKind(kind), RawMessage: append([]byte(nil), rawMessage...)}
+   552			if sessionID.Valid {
+   553				rec.SessionId = sessionstream.SessionId(sessionID.String)
+   554			}
+   555			if ordinal.Valid {
+   556				ord, err := int64ToUint64(ordinal.Int64)
+   557				if err != nil {
+   558					return nil, err
+   559				}
+   560				rec.Ordinal = ord
+   561			}
+   562			if eventName.Valid {
+   563				rec.EventName = eventName.String
+   564			}
+   565			if errText != "" {
+   566				rec.Err = fmt.Errorf("%s", errText)
+   567			}
+   568			if metadataRaw != "" {
+   569				if err := json.Unmarshal([]byte(metadataRaw), &rec.Metadata); err != nil {
+   570					return nil, err
+   571				}
+   572			}
+   573			out = append(out, rec)
+   574		}
+   575		if err := rows.Err(); err != nil {
+   576			return nil, err
+   577		}
+   578		return out, nil
+   579	}
+   580	
+   581	func (s *Store) migrate() error {
+   582		const targetUserVersion = 2
+   583		var userVersion int
+   584		if err := s.db.QueryRow(`PRAGMA user_version;`).Scan(&userVersion); err != nil {
+   585			return err
+== pkg/sessionstream/hydration/sqlite/store.go:654-735 ==
+   654			`CREATE INDEX IF NOT EXISTS sessionstream_entity_versions_by_session ON sessionstream_entity_versions(session_id, ordinal);`,
+   655			`CREATE INDEX IF NOT EXISTS sessionstream_entity_versions_ordering ON sessionstream_entity_versions(session_id, created_ordinal, last_event_ordinal);`,
+   656			`CREATE INDEX IF NOT EXISTS sessionstream_projection_cursors_by_session ON sessionstream_projection_cursors(session_id, cursor);`,
+   657			`CREATE INDEX IF NOT EXISTS sessionstream_errors_by_session ON sessionstream_errors(session_id, ordinal);`,
+   658		} {
+   659			if _, err := s.db.Exec(stmt); err != nil {
+   660				return err
+   661			}
+   662		}
+   663		if _, err := s.db.Exec(fmt.Sprintf(`PRAGMA user_version = %d;`, targetUserVersion)); err != nil {
+   664			return err
+   665		}
+   666		return nil
+   667	}
+   668	
+   669	type entityKey struct {
+   670		kind string
+   671		id   string
+   672	}
+   673	
+   674	type view struct {
+   675		ordinal uint64
+   676		index   map[entityKey]sessionstream.TimelineEntity
+   677	}
+   678	
+   679	func newView(snap sessionstream.Snapshot) *view {
+   680		index := map[entityKey]sessionstream.TimelineEntity{}
+   681		for _, entity := range snap.Entities {
+   682			cloned := entity
+   683			if entity.Payload != nil {
+   684				cloned.Payload = proto.Clone(entity.Payload)
+   685			}
+   686			index[entityKey{kind: entity.Kind, id: entity.Id}] = cloned
+   687		}
+   688		return &view{ordinal: snap.SnapshotOrdinal, index: index}
+   689	}
+   690	
+   691	func (v *view) Get(kind, id string) (sessionstream.TimelineEntity, bool) {
+   692		entity, ok := v.index[entityKey{kind: kind, id: id}]
+   693		if !ok {
+   694			return sessionstream.TimelineEntity{}, false
+   695		}
+   696		cloned := entity
+   697		if entity.Payload != nil {
+   698			cloned.Payload = proto.Clone(entity.Payload)
+   699		}
+   700		return cloned, true
+   701	}
+   702	
+   703	func (v *view) List(kind string) []sessionstream.TimelineEntity {
+   704		out := make([]sessionstream.TimelineEntity, 0)
+   705		for _, entity := range v.index {
+   706			if kind != "" && entity.Kind != kind {
+   707				continue
+   708			}
+   709			cloned := entity
+   710			if entity.Payload != nil {
+   711				cloned.Payload = proto.Clone(entity.Payload)
+   712			}
+   713			out = append(out, cloned)
+   714		}
+   715		sort.Slice(out, func(i, j int) bool {
+   716			if out[i].Kind == out[j].Kind {
+   717				return out[i].Id < out[j].Id
+   718			}
+   719			return out[i].Kind < out[j].Kind
+   720		})
+   721		return out
+   722	}
+   723	
+   724	func (v *view) Ordinal() uint64 { return v.ordinal }
+   725	
+   726	func uint64ToInt64(v uint64) (int64, error) {
+   727		if v > math.MaxInt64 {
+   728			return 0, fmt.Errorf("value %d overflows int64", v)
+   729		}
+   730		return int64(v), nil
+   731	}
+   732	
+   733	func int64ToUint64(v int64) (uint64, error) {
+   734		if v < 0 {
+   735			return 0, fmt.Errorf("value %d cannot be represented as uint64", v)
+== examples/chatdemo/chat.go:164-235 ==
+   164		if s == nil || s.engine == nil {
+   165			return fmt.Errorf("chat demo engine is not initialized")
+   166		}
+   167		return s.engine.WaitIdle(ctx, sid)
+   168	}
+   169	
+   170	func (s *Service) Snapshot(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
+   171		if s == nil || s.hub == nil {
+   172			return sessionstream.Snapshot{}, fmt.Errorf("chat demo service is not initialized")
+   173		}
+   174		return s.hub.Snapshot(ctx, sid)
+   175	}
+   176	
+   177	func (e *Engine) handleStartInference(ctx context.Context, cmd sessionstream.Command, _ *sessionstream.Session, pub sessionstream.EventPublisher) error {
+   178		payload, ok := cmd.Payload.(*chatdemov1.StartInferenceCommand)
+   179		if !ok {
+   180			return fmt.Errorf("unexpected start inference payload %T", cmd.Payload)
+   181		}
+   182		prompt := strings.TrimSpace(payload.GetPrompt())
+   183		if prompt == "" {
+   184			prompt = "Explain sessionstream"
+   185		}
+   186		messageID := e.nextMessageID()
+   187		userMessageID := messageID + "-user"
+   188		userEvent := &chatdemov1.UserMessageAcceptedEvent{MessageId: userMessageID, Role: "user", Content: prompt, Streaming: false}
+   189		if err := e.publish(ctx, cmd.SessionId, pub, EventUserMessageAccepted, userEvent, map[string]any{
+   190			"messageId": userMessageID,
+   191			"role":      "user",
+   192			"content":   prompt,
+   193			"streaming": false,
+   194		}); err != nil {
+   195			return err
+   196		}
+   197		// The demo stream should continue after the command handler returns; cancellation is
+   198		// controlled by StopInferenceCommand through the activeRun cancel function. Keep
+   199		// context values from the command context, but detach from its cancellation.
+   200		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+   201		run := &activeRun{messageID: messageID, cancel: cancel, done: make(chan struct{})}
+   202		if previous := e.swapRun(cmd.SessionId, run); previous != nil {
+   203			previous.cancel()
+   204			<-previous.done
+   205		}
+   206		// #nosec G118 -- the demo inference goroutine is intentionally detached from
+   207		// the command handler lifetime; StopInferenceCommand owns cancellation.
+   208		go e.runDemoInference(runCtx, cmd.SessionId, messageID, prompt, pub, run.done)
+   209		return nil
+   210	}
+   211	
+   212	func (e *Engine) handleStopInference(_ context.Context, cmd sessionstream.Command, _ *sessionstream.Session, _ sessionstream.EventPublisher) error {
+   213		if current := e.currentRun(cmd.SessionId); current != nil {
+   214			current.cancel()
+   215		}
+   216		return nil
+   217	}
+   218	
+   219	func (e *Engine) runDemoInference(ctx context.Context, sid sessionstream.SessionId, messageID, prompt string, pub sessionstream.EventPublisher, done chan struct{}) {
+   220		defer close(done)
+   221		defer e.clearRun(sid, messageID)
+   222	
+   223		started := &chatdemov1.InferenceStartedEvent{MessageId: messageID, Prompt: prompt, Role: "assistant", Content: "", Status: "streaming", Streaming: true}
+   224		if err := e.publish(ctx, sid, pub, EventInferenceStarted, started, map[string]any{"messageId": messageID, "prompt": prompt, "role": "assistant", "content": "", "status": "streaming", "streaming": true}); err != nil {
+   225			return
+   226		}
+   227	
+   228		answer := renderAnswer(prompt)
+   229		chunks := chunkText(answer, 10)
+   230		accumulated := ""
+   231		for _, chunk := range chunks {
+   232			select {
+   233			case <-ctx.Done():
+   234				stopped := &chatdemov1.InferenceStoppedEvent{MessageId: messageID, Role: "assistant", Text: accumulated, Content: accumulated, Status: "stopped", Streaming: false}
+   235				_ = e.publish(context.Background(), sid, pub, EventInferenceStopped, stopped, map[string]any{"messageId": messageID, "role": "assistant", "text": accumulated, "content": accumulated, "status": "stopped", "streaming": false})
+== examples/chatdemo/chat.go:249-333 ==
+   249	func (e *Engine) publish(ctx context.Context, sid sessionstream.SessionId, pub sessionstream.EventPublisher, name string, payload proto.Message, hookPayload map[string]any) error {
+   250		if e.hooks.OnBackendEvent != nil {
+   251			e.hooks.OnBackendEvent(string(sid), name, cloneMap(hookPayload))
+   252		}
+   253		return pub.Publish(ctx, sessionstream.Event{Name: name, SessionId: sid, Payload: payload})
+   254	}
+   255	
+   256	func (e *Engine) WaitIdle(ctx context.Context, sid sessionstream.SessionId) error {
+   257		for {
+   258			run := e.currentRun(sid)
+   259			if run == nil {
+   260				return nil
+   261			}
+   262			select {
+   263			case <-run.done:
+   264			case <-ctx.Done():
+   265				return ctx.Err()
+   266			}
+   267		}
+   268	}
+   269	
+   270	func (e *Engine) nextMessageID() string {
+   271		e.mu.Lock()
+   272		defer e.mu.Unlock()
+   273		e.nextID++
+   274		return fmt.Sprintf("chat-msg-%d", e.nextID)
+   275	}
+   276	
+   277	func (e *Engine) swapRun(sid sessionstream.SessionId, run *activeRun) *activeRun {
+   278		e.mu.Lock()
+   279		defer e.mu.Unlock()
+   280		prev := e.active[sid]
+   281		e.active[sid] = run
+   282		return prev
+   283	}
+   284	
+   285	func (e *Engine) currentRun(sid sessionstream.SessionId) *activeRun {
+   286		e.mu.Lock()
+   287		defer e.mu.Unlock()
+   288		return e.active[sid]
+   289	}
+   290	
+   291	func (e *Engine) clearRun(sid sessionstream.SessionId, messageID string) {
+   292		e.mu.Lock()
+   293		defer e.mu.Unlock()
+   294		current := e.active[sid]
+   295		if current != nil && current.messageID == messageID {
+   296			delete(e.active, sid)
+   297		}
+   298	}
+   299	
+   300	func uiProjection(_ context.Context, ev sessionstream.Event, _ *sessionstream.Session, _ sessionstream.TimelineView) ([]sessionstream.UIEvent, error) {
+   301		update, ok := chatUpdateFromEvent(ev)
+   302		if !ok {
+   303			return nil, nil
+   304		}
+   305		update.Ordinal = fmt.Sprintf("%d", ev.Ordinal)
+   306		switch ev.Name {
+   307		case EventUserMessageAccepted:
+   308			return []sessionstream.UIEvent{{Name: UIMessageAccepted, Payload: update}}, nil
+   309		case EventInferenceStarted:
+   310			return []sessionstream.UIEvent{{Name: UIMessageStarted, Payload: update}}, nil
+   311		case EventTokensDelta:
+   312			return []sessionstream.UIEvent{{Name: UIMessageAppended, Payload: update}}, nil
+   313		case EventInferenceFinished:
+   314			return []sessionstream.UIEvent{{Name: UIMessageFinished, Payload: update}}, nil
+   315		case EventInferenceStopped:
+   316			return []sessionstream.UIEvent{{Name: UIMessageStopped, Payload: update}}, nil
+   317		default:
+   318			return nil, nil
+   319		}
+   320	}
+   321	
+   322	func timelineProjection(_ context.Context, ev sessionstream.Event, _ *sessionstream.Session, view sessionstream.TimelineView) ([]sessionstream.TimelineEntity, error) {
+   323		messageID := eventMessageID(ev.Payload)
+   324		if messageID == "" {
+   325			return nil, nil
+   326		}
+   327		entity := currentChatEntity(view, TimelineEntityChatMessage, messageID)
+   328		entity.MessageId = messageID
+   329		switch payload := ev.Payload.(type) {
+   330		case *chatdemov1.UserMessageAcceptedEvent:
+   331			entity.Role = "user"
+   332			entity.Content = payload.GetContent()
+   333			entity.Text = payload.GetContent()
+== cmd/sessionstream-systemlab/replay_api.go:1-160 ==
+     1	package main
+     2	
+     3	import (
+     4		"context"
+     5		"encoding/base64"
+     6		"fmt"
+     7		"net/http"
+     8		"strconv"
+     9	
+    10		sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+    11	)
+    12	
+    13	type replayInspectResponse struct {
+    14		Phase          string              `json:"phase"`
+    15		SessionID      string              `json:"sessionId"`
+    16		EventCursor    uint64              `json:"eventCursor"`
+    17		TimelineCursor uint64              `json:"timelineCursor"`
+    18		Errors         []replayErrorRecord `json:"errors"`
+    19	}
+    20	
+    21	type replayErrorRecord struct {
+    22		Kind             string            `json:"kind"`
+    23		SessionID        string            `json:"sessionId,omitempty"`
+    24		Ordinal          uint64            `json:"ordinal,omitempty"`
+    25		EventName        string            `json:"eventName,omitempty"`
+    26		Error            string            `json:"error,omitempty"`
+    27		RawMessageBase64 string            `json:"rawMessageBase64,omitempty"`
+    28		Metadata         map[string]string `json:"metadata,omitempty"`
+    29	}
+    30	
+    31	func (s *systemlabServer) handlePhase5ReplayInspect(w http.ResponseWriter, req *http.Request) {
+    32		if req.Method != http.MethodGet {
+    33			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+    34			return
+    35		}
+    36		sessionID := req.URL.Query().Get("sessionId")
+    37		if sessionID == "" {
+    38			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "sessionId is required"})
+    39			return
+    40		}
+    41		limit := 25
+    42		if raw := req.URL.Query().Get("limit"); raw != "" {
+    43			parsed, err := strconv.Atoi(raw)
+    44			if err != nil || parsed < 0 {
+    45				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "limit must be a non-negative integer"})
+    46				return
+    47			}
+    48			limit = parsed
+    49		}
+    50		resp, err := s.env.inspectPhase5Replay(req.Context(), sessionstream.SessionId(sessionID), limit)
+    51		if err != nil {
+    52			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+    53			return
+    54		}
+    55		writeJSON(w, http.StatusOK, resp)
+    56	}
+    57	
+    58	func (e *labEnvironment) inspectPhase5Replay(ctx context.Context, sid sessionstream.SessionId, limit int) (replayInspectResponse, error) {
+    59		e.mu.Lock()
+    60		state := e.phase5
+    61		e.mu.Unlock()
+    62		if state == nil || state.runtime == nil || state.runtime.hub == nil {
+    63			return replayInspectResponse{}, fmt.Errorf("phase 5 runtime is not initialized")
+    64		}
+    65		hub := state.runtime.hub
+    66		eventCursor, err := hub.EventCursor(ctx, sid)
+    67		if err != nil {
+    68			return replayInspectResponse{}, err
+    69		}
+    70		timelineCursor, err := hub.ProjectionCursor(ctx, sessionstream.TimelineProjectorName, sid)
+    71		if err != nil {
+    72			return replayInspectResponse{}, err
+    73		}
+    74		var errorsOut []replayErrorRecord
+    75		if errorStore, ok := state.runtime.store.(sessionstream.ErrorRecordStore); ok {
+    76			records, err := errorStore.ErrorRecords(ctx, sid, limit)
+    77			if err != nil {
+    78				return replayInspectResponse{}, err
+    79			}
+    80			errorsOut = encodeReplayErrors(records)
+    81		}
+    82		return replayInspectResponse{
+    83			Phase:          "phase5",
+    84			SessionID:      string(sid),
+    85			EventCursor:    eventCursor,
+    86			TimelineCursor: timelineCursor,
+    87			Errors:         errorsOut,
+    88		}, nil
+    89	}
+    90	
+    91	func encodeReplayErrors(records []sessionstream.ErrorRecord) []replayErrorRecord {
+    92		if len(records) == 0 {
+    93			return []replayErrorRecord{}
+    94		}
+    95		out := make([]replayErrorRecord, 0, len(records))
+    96		for _, rec := range records {
+    97			errText := ""
+    98			if rec.Err != nil {
+    99				errText = rec.Err.Error()
+   100			}
+   101			raw := ""
+   102			if len(rec.RawMessage) > 0 {
+   103				raw = base64.StdEncoding.EncodeToString(rec.RawMessage)
+   104			}
+   105			out = append(out, replayErrorRecord{
+   106				Kind:             string(rec.Kind),
+   107				SessionID:        string(rec.SessionId),
+   108				Ordinal:          rec.Ordinal,
+   109				EventName:        rec.EventName,
+   110				Error:            errText,
+   111				RawMessageBase64: raw,
+   112				Metadata:         cloneReplayStringMap(rec.Metadata),
+   113			})
+   114		}
+   115		return out
+   116	}
+   117	
+   118	func cloneReplayStringMap(in map[string]string) map[string]string {
+   119		if in == nil {
+   120			return nil
+   121		}
+   122		out := make(map[string]string, len(in))
+   123		for k, v := range in {
+   124			out[k] = v
+   125		}
+   126		return out
+   127	}
