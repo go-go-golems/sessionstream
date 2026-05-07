@@ -18,10 +18,22 @@ RelatedFiles:
       Note: Systemlab observer adapter replacing ws_hooks.go
     - Path: examples/chatdemo/chat.go
       Note: Removed demo engine Hooks API after Phase 4 moved to PipelineObserver
+    - Path: pkg/sessionstream/hub.go
+      Note: Made ErrorObserver panic-safe and surfaced error persistence failures
+    - Path: pkg/sessionstream/hub_test.go
+      Note: Added error observer panic and persistence-failure tests
+    - Path: pkg/sessionstream/hydration/sqlite/store.go
+      Note: Implemented additive migration behavior
+    - Path: pkg/sessionstream/hydration/sqlite/store_test.go
+      Note: Added SQLite tests for migration preservation
     - Path: pkg/sessionstream/transport/ws/observer.go
       Note: Extended TransportObserver stages and records so Systemlab can replace websocket hooks
     - Path: pkg/sessionstream/transport/ws/server.go
-      Note: Removed websocket Hooks dispatch and emitted observer records for semantic transport events
+      Note: |-
+        Removed websocket Hooks dispatch and emitted observer records for semantic transport events
+        Implemented hydration late-buffer filtering and aggregate fanout error returns
+    - Path: pkg/sessionstream/transport/ws/server_test.go
+      Note: Added/updated websocket tests for late-buffer filtering and fanout error propagation
     - Path: ttmp/2026/05/07/SS-CODE-REVIEW-2026-05-07--sessionstream-whole-package-code-review-and-intern-guide/design-doc/01-whole-package-code-review-and-intern-implementation-guide.md
       Note: Primary review deliverable whose investigation and validation are recorded by this diary
     - Path: ttmp/2026/05/07/SS-CODE-REVIEW-2026-05-07--sessionstream-whole-package-code-review-and-intern-guide/sources/01-inventory-output.txt
@@ -34,6 +46,7 @@ LastUpdated: 2026-05-07T17:02:00-04:00
 WhatFor: Use this to understand how the package review was performed, what evidence was gathered, what failed, and how the final bundle was validated and delivered.
 WhenToUse: Read before continuing this ticket, implementing findings, or reviewing the uploaded report.
 ---
+
 
 
 
@@ -716,4 +729,114 @@ go test ./cmd/sessionstream-systemlab ./pkg/sessionstream/transport/ws ./example
 go test ./...
 go test ./pkg/sessionstream/transport/ws -race -count=1
 make lint
+```
+
+## Step 8: Implemented review findings 1 through 6
+
+I addressed the six highest-priority findings from the review in one focused implementation slice. The changes cover websocket hydration ordering, websocket fanout error propagation, SQLite migration safety, event-log conflict semantics, in-memory SQLite isolation, and error observer robustness.
+
+This is the first direct remediation pass after the review. I kept the changes targeted and backed each behavior change with tests before committing.
+
+### Prompt Context
+
+**User prompt (verbatim):**
+
+```text
+address finding 1 -6 , commit at appropriate intervals, keep a diary
+```
+
+**Assistant interpretation:** Implement the first six findings from the code review, keep the docmgr diary updated, validate, and create focused git commits.
+
+**Inferred user intent:** The user wants the highest-value correctness and API cleanup recommendations from the review to move from documentation into code while preserving a reviewable history.
+
+**Commit (code):** `f4da70b50d8c6d67902d54f3369cc6e3f8c18aa3` — "fix(sessionstream): address review findings 1-6"
+
+### What I did
+
+- Finding 1: Added shared buffered-batch filtering and made `markLive` return only late batches with `ordinal > snapshotOrdinal`.
+- Finding 1: Added `TestMarkLiveFiltersLateBufferedBatchesAlreadyCoveredBySnapshot`.
+- Finding 2: Changed websocket `PublishUI` to aggregate delivery failures with `errors.Join` and return them to the Hub.
+- Finding 2: Updated hydration-buffer overflow test to assert the returned fanout error.
+- Finding 3: Removed destructive SQLite migration table drops and made migration additive.
+- Finding 3: Added compatibility handling for older `sessionstream_errors` tables missing `raw_message` / `metadata_json` columns.
+- Finding 3: Added `TestMigratePreservesExistingRowsAndAddsErrorColumns`.
+- Finding 4: Changed `AppendEvent` from overwrite-upsert to `INSERT OR IGNORE` plus identity check: exact duplicate is idempotent, conflicting duplicate returns an error.
+- Finding 4: Added `TestStoreAppendEventAllowsOnlyIdenticalDuplicate`.
+- Finding 5: Changed `NewInMemory` to use a unique UUID-backed memory DSN by default.
+- Finding 5: Added `TestNewInMemoryStoresAreIsolated`.
+- Finding 6: Made `ErrorObserver` delivery panic-safe and added `cloneErrorRecord` for raw bytes and metadata.
+- Finding 6: Surfaced `ErrorStore.RecordError` failures as `ErrorKindStore` observer records without recursive error persistence.
+- Finding 6: Added tests for panic recovery and error persistence failure visibility.
+- Updated `tasks.md` to mark findings 1-6 remediation tasks complete.
+
+### Why
+
+These findings were the highest-value review outcomes because they affect correctness and operational trust more than style:
+
+- reconnect hydration should not duplicate snapshot-covered live events;
+- fanout failures should be visible to Hub-level error reporting;
+- durable stores should not drop data during migration;
+- event logs should not silently mutate canonical events;
+- in-memory stores should not share hidden state by default;
+- diagnostic observers must not be able to crash the pipeline.
+
+### What worked
+
+All targeted and full validation passed:
+
+```text
+go test ./pkg/sessionstream/transport/ws ./pkg/sessionstream/hydration/sqlite ./pkg/sessionstream
+go test ./...
+go test ./pkg/sessionstream/transport/ws -race -count=1
+make lint
+```
+
+### What didn't work
+
+No validation failure occurred during this implementation slice. The main risk was deciding the fanout error policy for Finding 2; I chose to return aggregate delivery errors to the Hub so `ErrorKindFanout` can be emitted by the existing Hub path.
+
+### What I learned
+
+The late-buffer duplicate fix was small once the buffer filtering was extracted into a helper. The bigger semantic change is actually Finding 2: returning fanout errors means callers may now see command failures when websocket delivery fails. That is stricter and more observable, but it is an API behavior change worth reviewing.
+
+SQLite migration was also less invasive than expected because the current schema can be created additively with `CREATE TABLE IF NOT EXISTS`; only older `sessionstream_errors` columns needed explicit `ALTER TABLE` support.
+
+### What was tricky to build
+
+`reportError` needed to surface error persistence failures without recursively trying to persist that new store-error record. I split observer delivery into `observeError`, which is panic-safe and clone-based, and kept persistence only in `reportError` for the original record.
+
+`AppendEvent` needed to preserve idempotent retry semantics while rejecting mismatched duplicate ordinals. I avoided driver-specific conflict error handling by using `INSERT OR IGNORE`, checking `RowsAffected`, and comparing the existing event row when the insert was ignored.
+
+### What warrants a second pair of eyes
+
+- Returning websocket fanout errors may alter command success semantics for applications with flaky clients.
+- The additive migration helper currently adds known missing columns; future migrations should become explicitly versioned functions if schema changes continue.
+- The event conflict error currently reports event names but not both payloads; that is safer but less diagnostic.
+
+### What should be done in the future
+
+- Add release notes for the stricter fanout error behavior.
+- Consider a configurable websocket fanout failure policy only if callers need close-and-continue semantics.
+- Convert future SQLite schema changes into named `migrateFromNToM` functions.
+
+### Code review instructions
+
+Start with:
+
+- `pkg/sessionstream/transport/ws/server.go`
+- `pkg/sessionstream/transport/ws/server_test.go`
+- `pkg/sessionstream/hydration/sqlite/store.go`
+- `pkg/sessionstream/hydration/sqlite/store_test.go`
+- `pkg/sessionstream/hub.go`
+- `pkg/sessionstream/hub_test.go`
+
+Validate with:
+
+```bash
+cd sessionstream
+go test ./pkg/sessionstream/transport/ws ./pkg/sessionstream/hydration/sqlite ./pkg/sessionstream
+go test ./...
+go test ./pkg/sessionstream/transport/ws -race -count=1
+make lint
+docmgr doctor --ticket SS-CODE-REVIEW-2026-05-07 --stale-after 30
 ```

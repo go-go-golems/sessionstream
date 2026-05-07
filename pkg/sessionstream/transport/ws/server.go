@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -188,13 +189,15 @@ func (s *Server) PublishUI(ctx context.Context, sid sessionstream.SessionId, ord
 		return nil
 	}
 	s.observe(ctx, TransportRecord{Stage: TransportStageFanoutStarted, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), FanoutTargetIds: targetIDs})
+	deliveryErrs := make([]error, 0)
 	for _, c := range targets {
 		if err := s.deliverUIEvents(ctx, c, sid, ord, events); err != nil {
+			deliveryErrs = append(deliveryErrs, fmt.Errorf("connection %s: %w", c.id, err))
 			s.closeConnection(c)
 		}
 	}
-	s.observe(ctx, TransportRecord{Stage: TransportStageFanoutCompleted, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), FanoutTargetIds: targetIDs})
-	return nil
+	s.observe(ctx, TransportRecord{Stage: TransportStageFanoutCompleted, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), FanoutTargetIds: targetIDs, Err: errors.Join(deliveryErrs...)})
+	return errors.Join(deliveryErrs...)
 }
 
 // Connections returns a stable snapshot of current connections and subscriptions.
@@ -435,13 +438,7 @@ func (s *Server) drainHydrationBuffer(c *connection, sid sessionstream.SessionId
 	if !ok {
 		return nil
 	}
-	out := make([]bufferedUIBatch, 0, len(sub.buffer))
-	for _, batch := range sub.buffer {
-		if batch.ordinal > snapshotOrdinal {
-			out = append(out, cloneBufferedUIBatch(batch))
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].ordinal < out[j].ordinal })
+	out := filterBufferedAfterSnapshot(sub.buffer, snapshotOrdinal)
 	sub.buffer = nil
 	sub.snapshotOrdinal = snapshotOrdinal
 	c.subs[sid] = sub
@@ -458,7 +455,7 @@ func (s *Server) markLive(c *connection, sid sessionstream.SessionId, snapshotOr
 	if !ok {
 		return nil
 	}
-	late := sub.buffer
+	late := filterBufferedAfterSnapshot(sub.buffer, snapshotOrdinal)
 	sub.state = subscriptionStateLive
 	sub.snapshotOrdinal = snapshotOrdinal
 	sub.buffer = nil
@@ -479,6 +476,17 @@ func (s *Server) sendUIBatch(ctx context.Context, c *connection, sid sessionstre
 		s.observe(ctx, TransportRecord{Stage: TransportStageUIEventSent, Direction: FrameDirectionServerToClient, ConnectionId: c.id, SessionId: sid, Ordinal: ord, EventName: event.Name, PayloadType: payloadType(event.Payload), UIEvent: cloneUIEvent(event)})
 	}
 	return nil
+}
+
+func filterBufferedAfterSnapshot(batches []bufferedUIBatch, snapshotOrdinal uint64) []bufferedUIBatch {
+	out := make([]bufferedUIBatch, 0, len(batches))
+	for _, batch := range batches {
+		if batch.ordinal > snapshotOrdinal {
+			out = append(out, cloneBufferedUIBatch(batch))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ordinal < out[j].ordinal })
+	return out
 }
 
 func cloneBufferedUIBatch(batch bufferedUIBatch) bufferedUIBatch {

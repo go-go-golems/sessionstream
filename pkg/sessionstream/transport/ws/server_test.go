@@ -526,7 +526,9 @@ func TestHydrationBufferOverflowClosesConnection(t *testing.T) {
 	payload, err := structpb.NewStruct(map[string]any{"text": "overflow"})
 	require.NoError(t, err)
 	require.NoError(t, server.PublishUI(context.Background(), "s-overflow", 1, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
-	require.NoError(t, server.PublishUI(context.Background(), "s-overflow", 2, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
+	err = server.PublishUI(context.Background(), "s-overflow", 2, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "hydration buffer full")
 
 	require.Eventually(t, func() bool {
 		return containsStage(records.stages(), TransportStageHydrationBufferOverflow)
@@ -537,6 +539,34 @@ func TestHydrationBufferOverflowClosesConnection(t *testing.T) {
 func closeOnce(ch chan struct{}) {
 	defer func() { _ = recover() }()
 	close(ch)
+}
+
+func TestMarkLiveFiltersLateBufferedBatchesAlreadyCoveredBySnapshot(t *testing.T) {
+	server, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{}, nil
+	}))
+	require.NoError(t, err)
+	oldPayload, err := structpb.NewStruct(map[string]any{"text": "already in snapshot"})
+	require.NoError(t, err)
+	newPayload, err := structpb.NewStruct(map[string]any{"text": "after snapshot"})
+	require.NoError(t, err)
+	conn := &connection{
+		id:   "conn-test",
+		subs: map[sessionstream.SessionId]subscription{},
+	}
+	conn.subs["s-filter"] = subscription{
+		state: subscriptionStateHydrating,
+		buffer: []bufferedUIBatch{
+			{ordinal: 9, events: []sessionstream.UIEvent{{Name: testUIEventName, Payload: oldPayload}}},
+			{ordinal: 10, events: []sessionstream.UIEvent{{Name: testUIEventName, Payload: oldPayload}}},
+			{ordinal: 11, events: []sessionstream.UIEvent{{Name: testUIEventName, Payload: newPayload}}},
+		},
+	}
+
+	late := server.markLive(conn, "s-filter", 10)
+	require.Len(t, late, 1)
+	require.Equal(t, uint64(11), late[0].ordinal)
+	require.Equal(t, subscriptionStateLive, conn.subs["s-filter"].state)
 }
 
 // TestSubscribeLateBufferNotDroppedByMarkLive is a regression test for the race

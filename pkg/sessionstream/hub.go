@@ -589,11 +589,41 @@ func (h *Hub) eventCursor(ctx context.Context, sid SessionId) (uint64, error) {
 
 func (h *Hub) reportError(ctx context.Context, rec ErrorRecord) {
 	if errorStore, ok := h.store.(ErrorStore); ok {
-		_ = errorStore.RecordError(ctx, rec)
+		if err := errorStore.RecordError(ctx, rec); err != nil {
+			h.observeError(ctx, ErrorRecord{
+				Kind:      ErrorKindStore,
+				SessionId: rec.SessionId,
+				Ordinal:   rec.Ordinal,
+				EventName: rec.EventName,
+				Err:       fmt.Errorf("record sessionstream error: %w", err),
+				Metadata:  map[string]string{"originalKind": string(rec.Kind)},
+			})
+		}
 	}
-	if h.errorObserver != nil {
-		h.errorObserver.OnSessionstreamError(ctx, rec)
+	h.observeError(ctx, rec)
+}
+
+func (h *Hub) observeError(ctx context.Context, rec ErrorRecord) {
+	if h == nil || h.errorObserver == nil {
+		return
 	}
+	safe := cloneErrorRecord(rec)
+	defer func() { _ = recover() }()
+	h.errorObserver.OnSessionstreamError(ctx, safe)
+}
+
+func cloneErrorRecord(in ErrorRecord) ErrorRecord {
+	out := in
+	if len(in.RawMessage) > 0 {
+		out.RawMessage = append([]byte(nil), in.RawMessage...)
+	}
+	if len(in.Metadata) > 0 {
+		out.Metadata = make(map[string]string, len(in.Metadata))
+		for k, v := range in.Metadata {
+			out.Metadata[k] = v
+		}
+	}
+	return out
 }
 
 func (h *Hub) validatePayloadType(m map[string]proto.Message, kind, name string, payload proto.Message) error {

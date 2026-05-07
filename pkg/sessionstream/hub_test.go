@@ -129,6 +129,50 @@ func TestHubProjectionPoliciesSplitUIAndTimeline(t *testing.T) {
 	require.ErrorIs(t, observed[0].Err, uiBoom)
 }
 
+func TestHubErrorObserverPanicRecovered(t *testing.T) {
+	hub := newTestHub(t, WithErrorObserver(ErrorObserverFunc(func(context.Context, ErrorRecord) {
+		panic("observer panic should be recovered")
+	})))
+	registerTestHandler(t, hub)
+	boom := errors.New("ui projection exploded")
+	require.NoError(t, hub.RegisterUIProjection(UIProjectionFunc(func(context.Context, Event, *Session, TimelineView) ([]UIEvent, error) {
+		return nil, boom
+	})))
+
+	cmdPayload, err := structpb.NewStruct(map[string]any{"prompt": "hello"})
+	require.NoError(t, err)
+	err = hub.Submit(context.Background(), "s-1", testCommandName, cmdPayload)
+	require.ErrorIs(t, err, boom)
+}
+
+func TestHubReportsErrorPersistenceFailureToObserver(t *testing.T) {
+	storeErr := errors.New("error store unavailable")
+	store := &failingErrorStore{testHydrationStore: newTestHydrationStore().(*testHydrationStore), err: storeErr}
+	observed := make([]ErrorRecord, 0)
+	hub := newTestHub(t,
+		WithHydrationStore(store),
+		WithErrorObserver(ErrorObserverFunc(func(_ context.Context, rec ErrorRecord) {
+			observed = append(observed, rec)
+		})),
+	)
+	registerTestHandler(t, hub)
+	boom := errors.New("ui projection exploded")
+	require.NoError(t, hub.RegisterUIProjection(UIProjectionFunc(func(context.Context, Event, *Session, TimelineView) ([]UIEvent, error) {
+		return nil, boom
+	})))
+
+	cmdPayload, err := structpb.NewStruct(map[string]any{"prompt": "hello"})
+	require.NoError(t, err)
+	err = hub.Submit(context.Background(), "s-1", testCommandName, cmdPayload)
+	require.ErrorIs(t, err, boom)
+	require.Len(t, observed, 2)
+	require.Equal(t, ErrorKindStore, observed[0].Kind)
+	require.ErrorIs(t, observed[0].Err, storeErr)
+	require.Equal(t, string(ErrorKindUIProjection), observed[0].Metadata["originalKind"])
+	require.Equal(t, ErrorKindUIProjection, observed[1].Kind)
+	require.ErrorIs(t, observed[1].Err, boom)
+}
+
 func TestHubLocalOrdinalSeedsFromStoreCursor(t *testing.T) {
 	store := newTestHydrationStore().(*testHydrationStore)
 	store.snapshots["s-1"] = Snapshot{SessionId: "s-1", SnapshotOrdinal: 41}
@@ -425,6 +469,13 @@ func (s *testEventStore) RecordError(_ context.Context, rec ErrorRecord) error {
 	s.errors = append(s.errors, rec)
 	return nil
 }
+
+type failingErrorStore struct {
+	*testHydrationStore
+	err error
+}
+
+func (s *failingErrorStore) RecordError(context.Context, ErrorRecord) error { return s.err }
 
 type failingEventCursorStore struct {
 	*testHydrationStore

@@ -12,12 +12,12 @@
 
 ## Recommended follow-up implementation tasks
 
-- [ ] Add a deterministic websocket test for late hydration-buffer batches and filter late batches by `ordinal > snapshotOrdinal`.
-- [ ] Decide websocket fanout failure policy: close-and-continue with explicit docs, or return aggregate errors to Hub.
-- [ ] Replace destructive SQLite migrations with additive versioned migrations and preservation tests.
-- [ ] Change SQLite `AppendEvent` to allow only idempotent identical duplicates and reject conflicting duplicates.
-- [ ] Make `sqlite.NewInMemory` isolated by default; add explicit shared-memory constructor if needed.
-- [ ] Make `ErrorObserver` panic-safe and clone error records before delivery.
+- [x] Add a deterministic websocket test for late hydration-buffer batches and filter late batches by `ordinal > snapshotOrdinal`.
+- [x] Decide websocket fanout failure policy: return aggregate delivery errors to Hub.
+- [x] Replace destructive SQLite migrations with additive migrations and preservation tests.
+- [x] Change SQLite `AppendEvent` to allow only idempotent identical duplicates and reject conflicting duplicates.
+- [x] Make `sqlite.NewInMemory` isolated by default.
+- [x] Make `ErrorObserver` panic-safe, clone error records before delivery, and surface error persistence failures to observers.
 - [ ] Split `transport/ws/server.go`, `hydration/sqlite/store.go`, `pkg/sessionstream/hub.go`, and optionally `examples/chatdemo/chat.go` after correctness fixes.
 - [ ] Add focused coverage tests for websocket ping/unsubscribe/helper branches, store view helpers, and noop-store behavior.
 - [ ] Update README historical `evtstream` link context after this review is accepted.
