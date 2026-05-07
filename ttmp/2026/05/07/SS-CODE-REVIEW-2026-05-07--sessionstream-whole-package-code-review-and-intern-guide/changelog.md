@@ -58,7 +58,7 @@ Implemented findings 1-6: websocket hydration filtering, fanout error returns, a
 
 ## 2026-05-07
 
-Committed findings 1-6 remediation as f4da70b50d8c6d67902d54f3369cc6e3f8c18aa3.
+Committed findings 1-6 remediation as c23c9e98b581e633ec8dc3dd40ab41b1f93ef5fd.
 
 ### Related Files
 

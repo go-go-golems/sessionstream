@@ -749,7 +749,7 @@ address finding 1 -6 , commit at appropriate intervals, keep a diary
 
 **Inferred user intent:** The user wants the highest-value correctness and API cleanup recommendations from the review to move from documentation into code while preserving a reviewable history.
 
-**Commit (code):** `f4da70b50d8c6d67902d54f3369cc6e3f8c18aa3` — "fix(sessionstream): address review findings 1-6"
+**Commit (code):** `c23c9e98b581e633ec8dc3dd40ab41b1f93ef5fd` — "fix(sessionstream): address review findings 1-6"
 
 ### What I did
 
