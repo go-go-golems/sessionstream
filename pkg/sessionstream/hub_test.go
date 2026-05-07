@@ -484,3 +484,92 @@ func cloneTestEntity(entity TimelineEntity) TimelineEntity {
 	}
 	return out
 }
+
+func TestHubPipelineObserverSuccess(t *testing.T) {
+	observed := make([]PipelineRecord, 0)
+	fanout := UIFanoutFunc(func(context.Context, SessionId, uint64, []UIEvent) error { return nil })
+	hub := newTestHub(t,
+		WithHydrationStore(newTestEventStore()),
+		WithUIFanout(fanout),
+		WithPipelineObserver(PipelineObserverFunc(func(_ context.Context, rec PipelineRecord) {
+			observed = append(observed, rec)
+		})),
+	)
+	registerTestHandler(t, hub)
+	require.NoError(t, hub.RegisterUIProjection(UIProjectionFunc(func(_ context.Context, ev Event, _ *Session, _ TimelineView) ([]UIEvent, error) {
+		return []UIEvent{{Name: "LabMessageStarted", Payload: ev.Payload}}, nil
+	})))
+	require.NoError(t, hub.RegisterTimelineProjection(TimelineProjectionFunc(func(_ context.Context, ev Event, _ *Session, _ TimelineView) ([]TimelineEntity, error) {
+		return []TimelineEntity{{Kind: testEntityKind, Id: "msg-1", Payload: ev.Payload}}, nil
+	})))
+
+	cmdPayload, err := structpb.NewStruct(map[string]any{"prompt": "hello"})
+	require.NoError(t, err)
+	require.NoError(t, hub.Submit(context.Background(), "s-1", testCommandName, cmdPayload))
+
+	require.Len(t, observed, 1)
+	rec := observed[0]
+	require.Equal(t, PipelineModeLive, rec.Mode)
+	require.Equal(t, SessionId("s-1"), rec.SessionId)
+	require.Equal(t, uint64(1), rec.Ordinal)
+	require.Equal(t, testEventName, rec.EventName)
+	require.True(t, rec.EventAppended)
+	require.NoError(t, rec.AppendErr)
+	require.Len(t, rec.UIEvents, 1)
+	require.Len(t, rec.TimelineEntities, 1)
+	require.Len(t, rec.AppliedEntities, 1)
+	require.True(t, rec.TimelineCursorAdvanced)
+	require.Len(t, rec.FanoutEvents, 1)
+}
+
+func TestHubPipelineObserverProjectionErrorAndPanicRecovery(t *testing.T) {
+	boom := errors.New("ui projection exploded")
+	observed := make([]PipelineRecord, 0)
+	hub := newTestHub(t,
+		WithUIProjectionErrorPolicy(ProjectionErrorPolicyFail),
+		WithPipelineObserver(PipelineObserverFunc(func(_ context.Context, rec PipelineRecord) {
+			observed = append(observed, rec)
+			panic("observer panic should be recovered")
+		})),
+	)
+	registerTestHandler(t, hub)
+	require.NoError(t, hub.RegisterUIProjection(UIProjectionFunc(func(context.Context, Event, *Session, TimelineView) ([]UIEvent, error) {
+		return nil, boom
+	})))
+
+	cmdPayload, err := structpb.NewStruct(map[string]any{"prompt": "hello"})
+	require.NoError(t, err)
+	err = hub.Submit(context.Background(), "s-1", testCommandName, cmdPayload)
+	require.ErrorIs(t, err, boom)
+
+	require.Len(t, observed, 1)
+	require.ErrorIs(t, observed[0].UIProjectionErr, boom)
+}
+
+func TestHubPipelineObserverRebuild(t *testing.T) {
+	store := newTestEventStore()
+	observed := make([]PipelineRecord, 0)
+	hub := newTestHub(t,
+		WithHydrationStore(store),
+		WithPipelineObserver(PipelineObserverFunc(func(_ context.Context, rec PipelineRecord) {
+			observed = append(observed, rec)
+		})),
+	)
+	registerTestHandler(t, hub)
+	require.NoError(t, hub.RegisterTimelineProjection(TimelineProjectionFunc(func(_ context.Context, ev Event, _ *Session, _ TimelineView) ([]TimelineEntity, error) {
+		return []TimelineEntity{{Kind: testEntityKind, Id: "msg-1", Payload: ev.Payload}}, nil
+	})))
+
+	cmdPayload, err := structpb.NewStruct(map[string]any{"prompt": "hello"})
+	require.NoError(t, err)
+	require.NoError(t, hub.Submit(context.Background(), "s-1", testCommandName, cmdPayload))
+	observed = nil
+
+	require.NoError(t, hub.RebuildTimelineFromScratch(context.Background(), "s-1"))
+	require.Len(t, observed, 1)
+	require.Equal(t, PipelineModeRebuild, observed[0].Mode)
+	require.Equal(t, uint64(1), observed[0].Ordinal)
+	require.Len(t, observed[0].TimelineEntities, 1)
+	require.Len(t, observed[0].AppliedEntities, 1)
+	require.True(t, observed[0].TimelineCursorAdvanced)
+}
