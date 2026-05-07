@@ -3,19 +3,30 @@ Title: Implementation Diary
 Ticket: SS-OBSERVERS
 Status: active
 Topics:
-  - sessionstream
-  - observability
-  - websocket
-  - hydration
-  - debugging
+    - sessionstream
+    - observability
+    - websocket
+    - hydration
+    - debugging
 DocType: reference
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: pkg/sessionstream/hub.go
+      Note: Instrumented live and rebuild Hub event processing.
+    - Path: pkg/sessionstream/pipeline_observer.go
+      Note: Added Hub PipelineObserver API and safe cloned record delivery.
+    - Path: pkg/sessionstream/transport/ws/observer.go
+      Note: Added WebSocket TransportObserver API.
+    - Path: pkg/sessionstream/transport/ws/server.go
+      Note: Instrumented WebSocket lifecycle
 ExternalSources: []
 Summary: Chronological implementation diary for Sessionstream observer work.
 LastUpdated: 2026-05-07T00:00:00-04:00
+WhatFor: ""
+WhenToUse: ""
 ---
+
 
 # Implementation Diary
 

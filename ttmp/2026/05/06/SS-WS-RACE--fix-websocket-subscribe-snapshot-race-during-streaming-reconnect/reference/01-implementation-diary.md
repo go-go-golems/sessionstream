@@ -3,19 +3,26 @@ Title: Implementation Diary
 Ticket: SS-WS-RACE
 Status: active
 Topics:
-  - sessionstream
-  - websocket
-  - hydration
-  - reconnect
-  - streaming
+    - sessionstream
+    - websocket
+    - hydration
+    - reconnect
+    - streaming
 DocType: reference
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: pkg/sessionstream/transport/ws/server.go
+      Note: Implemented hydrating/live subscription state and fanout buffering.
+    - Path: pkg/sessionstream/transport/ws/server_test.go
+      Note: Added deterministic regression tests for subscribe hydration race.
 ExternalSources: []
 Summary: Chronological implementation diary for the WebSocket subscribe race fix.
 LastUpdated: 2026-05-07T00:00:00-04:00
+WhatFor: ""
+WhenToUse: ""
 ---
+
 
 # Implementation Diary
 
