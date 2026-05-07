@@ -82,6 +82,7 @@ type Server struct {
 	snapshots SnapshotProvider
 	upgrader  websocket.Upgrader
 	hooks     Hooks
+	observer  TransportObserver
 
 	nextID uint64
 
@@ -93,7 +94,7 @@ type Server struct {
 type connection struct {
 	id     sessionstream.ConnectionId
 	ws     *websocket.Conn
-	send   chan []byte
+	send   chan outboundFrame
 	close  sync.Once
 	closed atomic.Bool
 
@@ -103,6 +104,11 @@ type connection struct {
 
 type subscription struct {
 	sinceSnapshotOrdinal uint64
+}
+
+type outboundFrame struct {
+	body      []byte
+	frameType string
 }
 
 // ConnectionInfo describes the current transport-visible state of one connection.
@@ -142,6 +148,7 @@ func NewServer(snapshots SnapshotProvider, opts ...Option) (*Server, error) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		s.observe(r.Context(), TransportRecord{Stage: TransportStageUpgradeError, Err: err})
 		if s.hooks.OnUpgradeError != nil {
 			s.hooks.OnUpgradeError(r, err)
 		}
@@ -151,12 +158,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c := &connection{
 		id:   cid,
 		ws:   conn,
-		send: make(chan []byte, 128),
+		send: make(chan outboundFrame, 128),
 		subs: map[sessionstream.SessionId]subscription{},
 	}
 	s.mu.Lock()
 	s.conns[cid] = c
 	s.mu.Unlock()
+	s.observe(r.Context(), TransportRecord{Stage: TransportStageConnected, ConnectionId: cid})
 	if s.hooks.OnConnect != nil {
 		s.hooks.OnConnect(cid)
 	}
@@ -168,11 +176,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // PublishUI fans projected UI events out to subscribed websocket clients.
-func (s *Server) PublishUI(_ context.Context, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
+func (s *Server) PublishUI(ctx context.Context, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
 	if len(events) == 0 {
 		return nil
 	}
 	targets := s.connectionsForSession(sid)
+	targetIDs := fanoutTargetIDs(targets)
+	if len(targets) == 0 {
+		s.observe(ctx, TransportRecord{Stage: TransportStageFanoutNoTargets, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events)})
+		return nil
+	}
+	s.observe(ctx, TransportRecord{Stage: TransportStageFanoutStarted, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), FanoutTargetIds: targetIDs})
 	for _, c := range targets {
 		for _, event := range events {
 			frame, err := newUIEventFrame(sid, ord, event)
@@ -192,6 +206,7 @@ func (s *Server) PublishUI(_ context.Context, sid sessionstream.SessionId, ord u
 			}
 		}
 	}
+	s.observe(ctx, TransportRecord{Stage: TransportStageFanoutCompleted, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), FanoutTargetIds: targetIDs})
 	return nil
 }
 
@@ -223,13 +238,16 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 		}
 		_, raw, err := c.ws.ReadMessage()
 		if err != nil {
+			s.observe(ctx, TransportRecord{Stage: TransportStageReadError, Direction: FrameDirectionClientToServer, ConnectionId: c.id, Err: err})
 			if s.hooks.OnReadError != nil {
 				s.hooks.OnReadError(c.id, err)
 			}
 			return
 		}
+		s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameRead, Direction: FrameDirectionClientToServer, ConnectionId: c.id, RawBytes: len(raw)})
 		frame := &sessionstreamv1.ClientFrame{}
 		if err := unmarshalOpts.Unmarshal(raw, frame); err != nil {
+			s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameDecodeError, Direction: FrameDirectionClientToServer, ConnectionId: c.id, RawBytes: len(raw), Err: err})
 			if s.hooks.OnProtocolError != nil {
 				s.hooks.OnProtocolError(c.id, err)
 			}
@@ -238,10 +256,12 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			}
 			continue
 		}
+		s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameDecoded, Direction: FrameDirectionClientToServer, ConnectionId: c.id, FrameType: clientFrameType(frame), RawBytes: len(raw)})
 		if s.hooks.OnClientFrame != nil {
 			s.hooks.OnClientFrame(c.id, protoMessageAsMap(frame))
 		}
 		if err := s.handleClientFrame(ctx, c, frame); err != nil {
+			s.observe(ctx, TransportRecord{Stage: TransportStageProtocolError, ConnectionId: c.id, FrameType: clientFrameType(frame), Err: err})
 			if s.hooks.OnProtocolError != nil {
 				s.hooks.OnProtocolError(c.id, err)
 			}
@@ -265,10 +285,14 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *se
 			return fmt.Errorf("subscribe missing session id")
 		}
 		since := sub.GetSinceSnapshotOrdinal()
+		s.observe(ctx, TransportRecord{Stage: TransportStageSubscribeReceived, Direction: FrameDirectionClientToServer, ConnectionId: c.id, SessionId: sid, FrameType: "subscribe", SinceSnapshotOrdinal: since})
+		s.observe(ctx, TransportRecord{Stage: TransportStageSnapshotLoadStarted, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since})
 		snap, err := s.snapshots.Snapshot(ctx, sid)
 		if err != nil {
+			s.observe(ctx, TransportRecord{Stage: TransportStageProtocolError, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since, Err: err})
 			return fmt.Errorf("load snapshot for %q: %w", sid, err)
 		}
+		s.observe(ctx, TransportRecord{Stage: TransportStageSnapshotLoaded, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since, SnapshotOrdinal: snap.SnapshotOrdinal, SnapshotEntityCount: len(snap.Entities), SnapshotEntities: summarizeEntities(snap.Entities)})
 		if err := s.sendFrame(c, newSnapshotFrame(sid, snap)); err != nil {
 			return err
 		}
@@ -286,6 +310,7 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *se
 		}
 		set[c.id] = struct{}{}
 		s.mu.Unlock()
+		s.observe(ctx, TransportRecord{Stage: TransportStageSubscriptionRegistered, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since, SnapshotOrdinal: snap.SnapshotOrdinal})
 		if s.hooks.OnSubscribe != nil {
 			s.hooks.OnSubscribe(c.id, sid, since)
 		}
@@ -307,12 +332,14 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *se
 
 func (s *Server) writeLoop(c *connection) {
 	for msg := range c.send {
-		if err := c.ws.WriteMessage(websocket.TextMessage, msg); err != nil {
+		if err := c.ws.WriteMessage(websocket.TextMessage, msg.body); err != nil {
+			s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
 			if s.hooks.OnWriteError != nil {
 				s.hooks.OnWriteError(c.id, err)
 			}
 			return
 		}
+		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameWritten, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body)})
 	}
 }
 
@@ -342,6 +369,7 @@ func (s *Server) closeConnection(c *connection) {
 		c.closed.Store(true)
 		close(c.send)
 		_ = c.ws.Close()
+		s.observe(context.Background(), TransportRecord{Stage: TransportStageDisconnected, ConnectionId: c.id})
 		if s.hooks.OnDisconnect != nil {
 			s.hooks.OnDisconnect(c.id)
 		}
@@ -380,6 +408,7 @@ func (s *Server) removeSubscription(c *connection, sid sessionstream.SessionId) 
 }
 
 func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) (err error) {
+	frameType := serverFrameType(frame)
 	if c == nil {
 		return fmt.Errorf("connection is nil")
 	}
@@ -388,6 +417,7 @@ func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) (e
 	}
 	body, err := marshalOptions.Marshal(frame)
 	if err != nil {
+		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameMarshalError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, Err: err})
 		return err
 	}
 	defer func() {
@@ -395,14 +425,19 @@ func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) (e
 			err = fmt.Errorf("connection %s is closed", c.id)
 		}
 	}()
+	queueLen := len(c.send)
+	queueCap := cap(c.send)
 	select {
-	case c.send <- body:
+	case c.send <- outboundFrame{body: body, frameType: frameType}:
+		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameQueued, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, RawBytes: len(body), QueueLen: queueLen, QueueCap: queueCap})
 		return nil
 	default:
 		if c.closed.Load() {
 			return fmt.Errorf("connection %s is closed", c.id)
 		}
-		return fmt.Errorf("connection %s send buffer full", c.id)
+		err := fmt.Errorf("connection %s send buffer full", c.id)
+		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameQueueFull, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, RawBytes: len(body), QueueLen: queueLen, QueueCap: queueCap, Err: err})
+		return err
 	}
 }
 

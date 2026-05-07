@@ -102,3 +102,83 @@ func (h *Hub) observePipeline(ctx context.Context, rec PipelineRecord) {
     h.pipelineObserver.OnPipeline(ctx, safe)
 }
 ```
+
+## Step 2: WebSocket TransportObserver API and instrumentation
+
+The second step added structured observations to the WebSocket transport. This complements the Hub observer: the Hub can now prove that a UI event was produced and handed to fanout, while the WebSocket observer can prove whether that event found target connections, entered a send queue, and was written to a socket.
+
+I kept the existing `Hooks` API intact and added the record-style observer as an additive option. Existing callers continue to use `Hooks`; diagnostic callers can use `WithTransportObserver` for richer, stage-oriented records.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 1)
+
+**Assistant interpretation:** Continue the task-by-task implementation by adding the WebSocket half of the Sessionstream observer design.
+
+**Inferred user intent:** The user wants enough transport evidence to diagnose reconnect, hydration, queueing, and browser-frame delivery bugs.
+
+**Commit (code):** pending — second commit will include WebSocket observer API/instrumentation/tests.
+
+### What I did
+
+- Created `pkg/sessionstream/transport/ws/observer.go`.
+- Added `TransportStage`, `FrameDirection`, `TransportRecord`, `TransportObserver`, `TransportObserverFunc`, and `WithTransportObserver`.
+- Added snapshot entity summaries and frame-type helpers.
+- Added panic-safe observer delivery.
+- Changed the connection send channel from `chan []byte` to `chan outboundFrame` so the write loop can report frame type as well as byte count.
+- Instrumented upgrade/connect/disconnect, raw client reads, decode success/failure, protocol errors, subscribe/snapshot stages, fanout target selection, send queueing, queue full, and write success/failure.
+- Added tests for subscribe/fanout observation, malformed client frame observation with observer panic recovery, and fanout with no targets.
+- Ran `go test ./pkg/sessionstream/... -count=1` successfully.
+
+### Why
+
+The WebSocket transport is where several streaming bugs become visible. A frame may be produced by the Hub but never target a connection. It may target a connection but fail to queue. It may queue but fail during the write loop. The observer separates these cases.
+
+### What worked
+
+- The existing `server.go` structure had clear seams: `readLoop`, `handleClientFrame`, `PublishUI`, `sendFrame`, and `writeLoop`.
+- Changing the send channel to an `outboundFrame` wrapper made successful write observations more informative without changing the wire protocol.
+- Existing WebSocket tests still passed.
+
+### What didn't work
+
+- N/A for this step. The implementation compiled and tests passed.
+
+### What I learned
+
+The existing `OnUIEventSent` hook means “queued into the send channel,” not “written to the socket.” The new observer makes that distinction explicit with separate `server_frame_queued` and `server_frame_written` stages.
+
+### What was tricky to build
+
+The transport observer needed to preserve existing hook semantics while adding more detail. The implementation therefore calls the new observer alongside existing hooks instead of replacing them. Another tricky part was avoiding retaining mutable protobuf payloads; transport records use summaries rather than full snapshot payloads.
+
+### What warrants a second pair of eyes
+
+- Whether `context.Background()` is acceptable for observations emitted from `sendFrame` and `writeLoop`, which currently do not carry request context.
+- Whether `server_frame_written` should parse the raw frame to recover more metadata. Currently it reports frame type from the queued wrapper.
+
+### What should be done in the future
+
+- Implement the subscribe hydration race fix so the transport observer can prove the new hydrating/live sequence.
+- Consider adding options for transport observer sampling if very high-volume applications need it.
+
+### Code review instructions
+
+Start with `pkg/sessionstream/transport/ws/observer.go`, then review instrumentation points in `pkg/sessionstream/transport/ws/server.go`. Validate with:
+
+```bash
+go test ./pkg/sessionstream/... -count=1
+```
+
+### Technical details
+
+The outgoing channel now preserves frame type:
+
+```go
+type outboundFrame struct {
+    body      []byte
+    frameType string
+}
+```
+
+This lets `writeLoop` emit `server_frame_written` observations without re-parsing protobuf JSON.

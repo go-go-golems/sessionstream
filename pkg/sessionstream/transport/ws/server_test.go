@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -202,4 +203,170 @@ func readServerFrame(t *testing.T, conn *websocket.Conn) *sessionstreamv1.Server
 	require.NoError(t, protojson.Unmarshal(body, frame))
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
 	return frame
+}
+
+func TestTransportObserverSubscribeAndFanoutSequence(t *testing.T) {
+	records := newRecordingTransportObserver()
+	reg := sessionstream.NewSchemaRegistry()
+	require.NoError(t, reg.RegisterCommand(testCommandName, &structpb.Struct{}))
+	require.NoError(t, reg.RegisterEvent(testEventName, &structpb.Struct{}))
+	require.NoError(t, reg.RegisterUIEvent(testUIEventName, &structpb.Struct{}))
+	require.NoError(t, reg.RegisterTimelineEntity(testEntityKind, &structpb.Struct{}))
+	store, err := storesqlite.NewInMemory(reg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	server, err := NewServer(snapshotAdapter{store: store}, WithTransportObserver(records))
+	require.NoError(t, err)
+	hub, err := sessionstream.NewHub(
+		sessionstream.WithSchemaRegistry(reg),
+		sessionstream.WithHydrationStore(store),
+		sessionstream.WithUIFanout(server),
+	)
+	require.NoError(t, err)
+	registerTestFlow(t, hub)
+
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	conn := dialWS(t, httpServer.URL)
+	defer func() { require.NoError(t, conn.Close()) }()
+	_ = readServerFrame(t, conn) // hello
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "s-observe"}}})
+	_ = readServerFrame(t, conn) // snapshot
+	_ = readServerFrame(t, conn) // subscribed
+
+	payload, err := structpb.NewStruct(map[string]any{"text": "hello"})
+	require.NoError(t, err)
+	require.NoError(t, hub.Submit(context.Background(), "s-observe", testCommandName, payload))
+	_ = readServerFrame(t, conn) // live
+
+	require.Eventually(t, func() bool {
+		stages := records.stages()
+		return containsStage(stages, TransportStageConnected) &&
+			containsStage(stages, TransportStageClientFrameRead) &&
+			containsStage(stages, TransportStageClientFrameDecoded) &&
+			containsStage(stages, TransportStageSubscribeReceived) &&
+			containsStage(stages, TransportStageSnapshotLoadStarted) &&
+			containsStage(stages, TransportStageSnapshotLoaded) &&
+			containsStage(stages, TransportStageSubscriptionRegistered) &&
+			containsStage(stages, TransportStageFanoutStarted) &&
+			containsStage(stages, TransportStageFanoutCompleted) &&
+			containsStage(stages, TransportStageServerFrameQueued) &&
+			containsStage(stages, TransportStageServerFrameWritten)
+	}, time.Second, 10*time.Millisecond)
+
+	fanout := records.first(TransportStageFanoutStarted)
+	require.Equal(t, sessionstream.SessionId("s-observe"), fanout.SessionId)
+	require.Equal(t, uint64(1), fanout.Ordinal)
+	require.Len(t, fanout.FanoutTargetIds, 1)
+}
+
+func TestTransportObserverBadClientFrameAndPanicRecovery(t *testing.T) {
+	records := newRecordingTransportObserver()
+	panicObserver := TransportObserverFunc(func(ctx context.Context, rec TransportRecord) {
+		records.OnTransport(ctx, rec)
+		panic("observer panic should be recovered")
+	})
+	_, server := newTestHubAndServerWithOptions(t, WithTransportObserver(panicObserver))
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	conn := dialWS(t, httpServer.URL)
+	defer func() { require.NoError(t, conn.Close()) }()
+	_ = readServerFrame(t, conn) // hello
+
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"command":{"name":"nope"}}`)))
+	frame := readServerFrame(t, conn)
+	require.NotNil(t, frame.GetError())
+
+	require.Eventually(t, func() bool {
+		stages := records.stages()
+		return containsStage(stages, TransportStageClientFrameRead) && containsStage(stages, TransportStageClientFrameDecodeError)
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestTransportObserverFanoutNoTargets(t *testing.T) {
+	records := newRecordingTransportObserver()
+	server, err := NewServer(snapshotProviderFunc(func(_ context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{SessionId: sid}, nil
+	}), WithTransportObserver(records))
+	require.NoError(t, err)
+	payload, err := structpb.NewStruct(map[string]any{"text": "hello"})
+	require.NoError(t, err)
+	require.NoError(t, server.PublishUI(context.Background(), "missing", 7, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
+
+	rec := records.first(TransportStageFanoutNoTargets)
+	require.Equal(t, sessionstream.SessionId("missing"), rec.SessionId)
+	require.Equal(t, uint64(7), rec.Ordinal)
+}
+
+func newTestHubAndServerWithOptions(t *testing.T, opts ...Option) (*sessionstream.Hub, *Server) {
+	t.Helper()
+	reg := sessionstream.NewSchemaRegistry()
+	require.NoError(t, reg.RegisterCommand(testCommandName, &structpb.Struct{}))
+	require.NoError(t, reg.RegisterEvent(testEventName, &structpb.Struct{}))
+	require.NoError(t, reg.RegisterUIEvent(testUIEventName, &structpb.Struct{}))
+	require.NoError(t, reg.RegisterTimelineEntity(testEntityKind, &structpb.Struct{}))
+	store, err := storesqlite.NewInMemory(reg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	server, err := NewServer(snapshotAdapter{store: store}, opts...)
+	require.NoError(t, err)
+	hub, err := sessionstream.NewHub(
+		sessionstream.WithSchemaRegistry(reg),
+		sessionstream.WithHydrationStore(store),
+		sessionstream.WithUIFanout(server),
+	)
+	require.NoError(t, err)
+	registerTestFlow(t, hub)
+	return hub, server
+}
+
+type snapshotProviderFunc func(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error)
+
+func (f snapshotProviderFunc) Snapshot(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
+	return f(ctx, sid)
+}
+
+type recordingTransportObserver struct {
+	mu      sync.Mutex
+	records []TransportRecord
+}
+
+func newRecordingTransportObserver() *recordingTransportObserver {
+	return &recordingTransportObserver{}
+}
+
+func (r *recordingTransportObserver) OnTransport(_ context.Context, rec TransportRecord) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.records = append(r.records, rec)
+}
+
+func (r *recordingTransportObserver) stages() []TransportStage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]TransportStage, 0, len(r.records))
+	for _, rec := range r.records {
+		out = append(out, rec.Stage)
+	}
+	return out
+}
+
+func (r *recordingTransportObserver) first(stage TransportStage) TransportRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, rec := range r.records {
+		if rec.Stage == stage {
+			return rec
+		}
+	}
+	return TransportRecord{}
+}
+
+func containsStage(stages []TransportStage, stage TransportStage) bool {
+	for _, got := range stages {
+		if got == stage {
+			return true
+		}
+	}
+	return false
 }
