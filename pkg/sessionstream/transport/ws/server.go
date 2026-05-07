@@ -202,7 +202,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.hooks.OnConnect(cid)
 	}
 
-	go s.writeLoop(c)
+	go s.writeLoop(r.Context(), c)
 	_ = s.sendFrame(c, newHelloFrame(cid))
 	s.readLoop(r.Context(), c)
 	s.closeConnection(c)
@@ -221,20 +221,8 @@ func (s *Server) PublishUI(ctx context.Context, sid sessionstream.SessionId, ord
 	}
 	s.observe(ctx, TransportRecord{Stage: TransportStageFanoutStarted, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), FanoutTargetIds: targetIDs})
 	for _, c := range targets {
-		state, ok := s.subscriptionState(c, sid)
-		if !ok {
-			continue
-		}
-		switch state {
-		case subscriptionStateHydrating:
-			if err := s.bufferHydrationEvents(ctx, c, sid, ord, events); err != nil {
-				_ = s.sendFrame(c, newErrorFrame("hydration_buffer_overflow", err.Error(), ""))
-				s.closeConnection(c)
-			}
-		case subscriptionStateLive:
-			if err := s.sendUIBatch(c, sid, ord, events); err != nil {
-				s.closeConnection(c)
-			}
+		if err := s.deliverUIEvents(ctx, c, sid, ord, events); err != nil {
+			s.closeConnection(c)
 		}
 	}
 	s.observe(ctx, TransportRecord{Stage: TransportStageFanoutCompleted, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), FanoutTargetIds: targetIDs})
@@ -347,7 +335,15 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *se
 				return err
 			}
 		}
-		s.markLive(c, sid, snap.SnapshotOrdinal)
+		lateBuffered := s.markLive(c, sid, snap.SnapshotOrdinal)
+		if len(lateBuffered) > 0 {
+			s.observe(ctx, TransportRecord{Stage: TransportStageHydrationBufferFlushed, ConnectionId: c.id, SessionId: sid, SnapshotOrdinal: snap.SnapshotOrdinal, FanoutEventCount: countBufferedEvents(lateBuffered)})
+		}
+		for _, batch := range lateBuffered {
+			if err := s.sendUIBatch(c, sid, batch.ordinal, batch.events); err != nil {
+				return err
+			}
+		}
 		if s.hooks.OnSubscribe != nil {
 			s.hooks.OnSubscribe(c.id, sid, since)
 		}
@@ -371,16 +367,16 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *se
 	}
 }
 
-func (s *Server) writeLoop(c *connection) {
+func (s *Server) writeLoop(ctx context.Context, c *connection) {
 	for msg := range c.send {
 		if err := c.ws.WriteMessage(websocket.TextMessage, msg.body); err != nil {
-			s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
+			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
 			if s.hooks.OnWriteError != nil {
 				s.hooks.OnWriteError(c.id, err)
 			}
 			return
 		}
-		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameWritten, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body)})
+		s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWritten, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body)})
 	}
 }
 
@@ -449,32 +445,39 @@ func (s *Server) registerHydrating(c *connection, sid sessionstream.SessionId, s
 	s.observe(context.Background(), TransportRecord{Stage: TransportStageSubscriptionRegistered, ConnectionId: c.id, SessionId: sid, SinceSnapshotOrdinal: since})
 }
 
-func (s *Server) subscriptionState(c *connection, sid sessionstream.SessionId) (subscriptionState, bool) {
-	if c == nil {
-		return "", false
-	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	sub, ok := c.subs[sid]
-	return sub.state, ok
-}
-
-func (s *Server) bufferHydrationEvents(ctx context.Context, c *connection, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
+// deliverUIEvents routes a UI event batch to one connection. It checks the
+// subscription state under the connection lock and either buffers (hydrating)
+// or sends directly (live). This eliminates the TOCTOU race where PublishUI
+// read "hydrating" via subscriptionState but markLive changed the state before
+// bufferHydrationEvents could append, silently dropping the event.
+func (s *Server) deliverUIEvents(ctx context.Context, c *connection, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	sub, ok := c.subs[sid]
-	if !ok || sub.state != subscriptionStateHydrating {
+	if !ok {
+		c.mu.Unlock()
 		return nil
 	}
-	if len(sub.buffer) >= s.maxHydrationBufferedBatches {
-		err := fmt.Errorf("connection %s hydration buffer full for session %s", c.id, sid)
-		s.observe(ctx, TransportRecord{Stage: TransportStageHydrationBufferOverflow, ConnectionId: c.id, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), Err: err})
-		return err
+	switch sub.state {
+	case subscriptionStateLive:
+		c.mu.Unlock()
+		return s.sendUIBatch(c, sid, ord, events)
+	case subscriptionStateHydrating:
+		if len(sub.buffer) >= s.maxHydrationBufferedBatches {
+			err := fmt.Errorf("connection %s hydration buffer full for session %s", c.id, sid)
+			c.mu.Unlock()
+			s.observe(ctx, TransportRecord{Stage: TransportStageHydrationBufferOverflow, ConnectionId: c.id, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events), Err: err})
+			_ = s.sendFrame(c, newErrorFrame("hydration_buffer_overflow", err.Error(), ""))
+			return err
+		}
+		sub.buffer = append(sub.buffer, bufferedUIBatch{ordinal: ord, events: cloneUIEvents(events)})
+		c.subs[sid] = sub
+		c.mu.Unlock()
+		s.observe(ctx, TransportRecord{Stage: TransportStageUIEventBuffered, ConnectionId: c.id, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events)})
+		return nil
+	default:
+		c.mu.Unlock()
+		return nil
 	}
-	sub.buffer = append(sub.buffer, bufferedUIBatch{ordinal: ord, events: cloneUIEvents(events)})
-	c.subs[sid] = sub
-	s.observe(ctx, TransportRecord{Stage: TransportStageUIEventBuffered, ConnectionId: c.id, SessionId: sid, Ordinal: ord, FanoutEventCount: len(events)})
-	return nil
 }
 
 func (s *Server) drainHydrationBuffer(c *connection, sid sessionstream.SessionId, snapshotOrdinal uint64) []bufferedUIBatch {
@@ -497,18 +500,23 @@ func (s *Server) drainHydrationBuffer(c *connection, sid sessionstream.SessionId
 	return out
 }
 
-func (s *Server) markLive(c *connection, sid sessionstream.SessionId, snapshotOrdinal uint64) {
+// markLive transitions a subscription from hydrating to live and returns any
+// batches that arrived after drainHydrationBuffer ran. The caller must send
+// these batches so they are not silently dropped.
+func (s *Server) markLive(c *connection, sid sessionstream.SessionId, snapshotOrdinal uint64) []bufferedUIBatch {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	sub, ok := c.subs[sid]
 	if !ok {
-		return
+		return nil
 	}
+	late := sub.buffer
 	sub.state = subscriptionStateLive
 	sub.snapshotOrdinal = snapshotOrdinal
 	sub.buffer = nil
 	c.subs[sid] = sub
 	s.observe(context.Background(), TransportRecord{Stage: TransportStageSubscriptionLive, ConnectionId: c.id, SessionId: sid, SnapshotOrdinal: snapshotOrdinal})
+	return late
 }
 
 func (s *Server) sendUIBatch(c *connection, sid sessionstream.SessionId, ord uint64, events []sessionstream.UIEvent) error {
