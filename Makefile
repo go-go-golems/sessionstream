@@ -85,3 +85,11 @@ install:
 	GOWORK=off go install $(CMD_DIR)
 
 check: boundary-check test build
+
+.PHONY: logcopter-generate
+logcopter-generate:
+	GOWORK=off go tool logcopter-gen -include-main -var zlog -area-prefix go-go-golems.sessionstream -strip-prefix github.com/go-go-golems/sessionstream ./cmd/... ./pkg/...
+
+.PHONY: logcopter-check
+logcopter-check:
+	GOWORK=off go tool logcopter-gen -include-main -var zlog -area-prefix go-go-golems.sessionstream -strip-prefix github.com/go-go-golems/sessionstream -check ./cmd/... ./pkg/...
