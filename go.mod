@@ -2,6 +2,8 @@ module github.com/go-go-golems/sessionstream
 
 go 1.26.3
 
+toolchain go1.26.4
+
 require (
 	github.com/ThreeDotsLabs/watermill v1.5.1
 	github.com/go-go-golems/glazed v1.2.7
