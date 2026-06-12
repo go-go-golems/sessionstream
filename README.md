@@ -231,6 +231,19 @@ The important fields are:
 
 Browser clients should treat `uint64` ordinals as protobuf JSON strings. Do not coerce them through JavaScript `number` if precision matters.
 
+## Goja / JavaScript integration
+
+The repository now includes a first Goja integration slice:
+
+- `examples/goja-chatdemo/` proves JavaScript can build typed chatdemo protobuf commands with the shared `go-go-goja` protobuf builder runtime and submit them to the existing chatdemo Hub.
+- `pkg/js/modules/sessionstream/` exposes a phase-1 `require("sessionstream")` native module with schema registration, Hub submit/snapshot, JavaScript command handlers, UI/timeline projections, EventEmitter fanout, WebSocket server wrapping, an xgoja provider, and TypeScript declarations.
+
+Run the focused validation with:
+
+```bash
+go test ./examples/chatdemo ./examples/goja-chatdemo/... ./pkg/js/modules/sessionstream/... -count=1
+```
+
 ## Repository layout
 
 ```text

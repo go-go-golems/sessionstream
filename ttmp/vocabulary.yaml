@@ -41,6 +41,20 @@ topics:
       description: Topic for reconnect work
     - slug: streaming
       description: Topic for streaming work
+    - slug: goja
+      description: Goja JavaScript runtime integrations and bindings
+    - slug: event-emitter
+      description: Node-style EventEmitter integration and event fanout
+    - slug: xgoja-provider
+      description: xgoja provider registry modules, command sets, and generated runtime integration
+    - slug: bindings
+      description: Language/runtime binding layers around Go APIs
+    - slug: protobuf
+      description: Protocol Buffers schemas, generated message types, and protojson contracts
+    - slug: codegen
+      description: Code generation tools, generated sources, compiler plugins, and generator workflows
+    - slug: typescript
+      description: TypeScript declarations, generated DTS files, and TypeScript authoring ergonomics
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
