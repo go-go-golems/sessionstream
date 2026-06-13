@@ -1,4 +1,4 @@
-.PHONY: all fmt fmt-check lint lintmax docker-lint golangci-lint-install gosec govulncheck test build build-bin boundary-check schema-vet systemlab-build systemlab-run check ci-check goreleaser ensure-svu tag-major tag-minor tag-patch release bump-go-go-golems install logcopter-generate logcopter-check glazed-lint-build glazed-lint
+.PHONY: all fmt fmt-check lint lintmax docker-lint golangci-lint-install install-generate-tools gosec govulncheck test build build-bin boundary-check schema-vet systemlab-build systemlab-run check ci-check goreleaser ensure-svu tag-major tag-minor tag-patch release bump-go-go-golems install logcopter-generate logcopter-check glazed-lint-build glazed-lint
 
 all: check
 
@@ -6,15 +6,19 @@ BINARY ?= sessionstream-systemlab
 MODULE ?= github.com/go-go-golems/sessionstream
 CMD_DIR ?= ./cmd/$(BINARY)
 
+TOOLS_BIN ?= $(CURDIR)/.bin
+export PATH := $(TOOLS_BIN):$(PATH)
+
 GOLANGCI_LINT_VERSION ?= $(shell cat .golangci-lint-version)
-GOLANGCI_LINT_BIN ?= $(CURDIR)/.bin/golangci-lint
+GOLANGCI_LINT_BIN ?= $(TOOLS_BIN)/golangci-lint
+GO_GO_GOJA_VERSION ?= $(shell GOWORK=off go list -m -f '{{.Version}}' github.com/go-go-golems/go-go-goja 2>/dev/null)
 GORELEASER_ARGS ?= --skip=sign --snapshot --clean
 GORELEASER_TARGET ?= --single-target
 SVU ?= svu
 SESSIONSTREAM_LINT ?= /tmp/sessionstream-lint
 
 boundary-check:
-	@! rg -n 'github.com/go-go-golems/pinocchio/' . --glob '*.go' --glob '!ttmp/**' >/dev/null || (echo 'sessionstream must not import pinocchio packages' && exit 1)
+	@! grep -R -n --include='*.go' --exclude-dir=ttmp 'github.com/go-go-golems/pinocchio/' . >/dev/null || (echo 'sessionstream must not import pinocchio packages' && exit 1)
 
 fmt:
 	GOWORK=off go fmt ./...
@@ -25,6 +29,11 @@ docker-lint:
 golangci-lint-install:
 	mkdir -p $(dir $(GOLANGCI_LINT_BIN))
 	GOWORK=off GOBIN=$(dir $(GOLANGCI_LINT_BIN)) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+install-generate-tools:
+	mkdir -p $(TOOLS_BIN)
+	GOWORK=off GOBIN=$(TOOLS_BIN) go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+	GOWORK=off GOBIN=$(TOOLS_BIN) go install github.com/go-go-golems/go-go-goja/cmd/protoc-gen-goja-builder@$(GO_GO_GOJA_VERSION)
 
 lint: golangci-lint-install
 	GOWORK=off $(GOLANGCI_LINT_BIN) run -v
@@ -46,7 +55,7 @@ govulncheck:
 test:
 	GOWORK=off go test ./...
 
-build:
+build: install-generate-tools
 	GOWORK=off go generate ./...
 	GOWORK=off go build ./...
 
