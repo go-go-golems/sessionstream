@@ -55,6 +55,12 @@ topics:
       description: Code generation tools, generated sources, compiler plugins, and generator workflows
     - slug: typescript
       description: TypeScript declarations, generated DTS files, and TypeScript authoring ergonomics
+    - slug: http
+      description: HTTP server, routing, handlers, transports, and host integration
+    - slug: express
+      description: Express-style Goja HTTP module and route registration APIs
+    - slug: xgoja
+      description: xgoja runtime generation, providers, command sets, and application specs
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
