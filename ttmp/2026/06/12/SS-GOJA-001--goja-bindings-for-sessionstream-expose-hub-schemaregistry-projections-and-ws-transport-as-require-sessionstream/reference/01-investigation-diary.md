@@ -40,13 +40,17 @@ RelatedFiles:
     - Path: pkg/js/modules/sessionstream/api_schemas.go
       Note: SchemaRegistry JavaScript wrapper
     - Path: pkg/js/modules/sessionstream/api_websocket.go
-      Note: WebSocket server wrapper
+      Note: |-
+        WebSocket server wrapper
+        Attaches the shared gojahttp mountable handler ref to sessionstream WebSocket server objects (commit 8ab489f)
     - Path: pkg/js/modules/sessionstream/codec.go
       Note: Protobuf/Goja conversion helpers
     - Path: pkg/js/modules/sessionstream/module.go
       Note: CommonJS module entrypoint
     - Path: pkg/js/modules/sessionstream/module_test.go
-      Note: End-to-end module tests
+      Note: |-
+        End-to-end module tests
+        Verifies Express app.mount composition for ss.webSocket.server(hub) (commit 8ab489f)
     - Path: pkg/js/modules/sessionstream/provider/provider.go
       Note: xgoja provider
     - Path: pkg/js/modules/sessionstream/typescript.go
@@ -68,6 +72,7 @@ LastUpdated: 2026-06-12T15:35:00-04:00
 WhatFor: Continuation context for implementing or reviewing the sessionstream Goja binding design.
 WhenToUse: Read before resuming SS-GOJA-001 implementation or revising the design.
 ---
+
 
 
 
@@ -648,4 +653,123 @@ hub.command("ChatStartInference", (cmd, session, pub) => {
       .content(cmd.payload.prompt)
       .build());
 });
+```
+
+
+## Step 6: Attach WebSocket server objects to the shared Goja HTTP mount ABI
+
+After the `go-go-goja` mountable HTTP handler PR was merged, I rebased the sessionstream work on the current upstream state and connected the sessionstream WebSocket wrapper to the new shared ABI. This makes the object returned by `ss.webSocket.server(hub)` usable with Express composition through `app.mount("/ws", ...)` while keeping all WebSocket upgrade and path interpretation behavior in Go.
+
+The change is intentionally small: JavaScript still decides the stable mount prefix, but the mounted Go handler receives the original request path by default. That preserves the design decision that wildcard and parameter routing for Go-owned transports should happen inside the Go handler using `r.URL.Path`, `http.ServeMux`, or the handler's own router.
+
+### Prompt Context
+
+**User prompt (verbatim):** "i merged it, rebase, and all"
+
+**Assistant interpretation:** Sync the local workspace after the merged `go-go-goja` PR, rebase sessionstream work as needed, validate, and continue the machine-doable integration steps unlocked by the merge.
+
+**Inferred user intent:** Keep momentum after merging the reusable HTTP mount ABI by ensuring the downstream sessionstream branch consumes it cleanly and remains validated.
+
+**Commit (code):** 8ab489f5fb5ddb72744f041de6a4afec914bede1 — "Expose sessionstream WebSocket server as mountable handler"
+
+### What I did
+
+- Confirmed `go-go-goja` PR #75 was merged at `fe56c02` and that the local `go-go-goja` worktree is at `origin/main` even though `main` itself is checked out in another worktree.
+- Rebasing `sessionstream` `task/goja-sessionstream` onto `origin/main` was a no-op because it was already up to date.
+- Updated `pkg/js/modules/sessionstream/api_websocket.go` so `webSocket.server(hub)` calls `gojahttp.AttachHTTPHandler(m.vm, obj, server)` on the returned JavaScript object.
+- Added `TestWebSocketServerMountsInExpress` in `pkg/js/modules/sessionstream/module_test.go`; it registers `express` and `sessionstream`, runs JS that calls `app.mount("/ws", ss.webSocket.server(hub))`, and verifies `/ws/rooms/general` dispatches to the mounted handler rather than returning a router 404.
+- Ran focused and full validation commands.
+- Added and checked task 24 for the downstream mountable-handler integration.
+
+### Why
+
+- The `go-go-goja` side now exposes a reusable hidden `http.Handler` ABI. Sessionstream should produce that ABI from its WebSocket server wrapper so JavaScript can compose Go-backed transports through Express.
+- Keeping `app.mount()` prefix-only avoids duplicating JS route-parameter semantics for Go handlers. Sessionstream can add room/session path parsing inside its Go WebSocket server later if needed.
+
+### What worked
+
+Validation that passed:
+
+```bash
+cd /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream
+go test ./pkg/js/modules/sessionstream/... -count=1
+go test ./examples/goja-chatdemo/... ./pkg/js/modules/sessionstream/... -count=1
+make schema-vet
+go test ./pkg/sessionstream -run TestHubEventBusGoChannelRoundTrip -count=5
+go test ./... -count=1
+```
+
+The new test proves that the sessionstream WebSocket server object is accepted by Express `app.mount()` and that mounted dispatch reaches the Go handler for a subpath below `/ws`.
+
+### What didn't work
+
+The first full-suite run hit the known transient ordering failure:
+
+```text
+--- FAIL: TestHubEventBusGoChannelRoundTrip (0.01s)
+    bus_test.go:73: 
+        Error Trace:    /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/sessionstream/bus_test.go:73
+        Error:          "1700000000000000002" is not greater than "1700000000000000003"
+        Test:           TestHubEventBusGoChannelRoundTrip
+FAIL
+FAIL    github.com/go-go-golems/sessionstream/pkg/sessionstream    0.028s
+```
+
+Rerunning the single test five times passed, and the following full `go test ./... -count=1` passed. This matches the previously observed transient and does not appear related to the Goja WebSocket mount change.
+
+### What I learned
+
+- The shared `gojahttp.AttachHTTPHandler` ABI composes cleanly with a downstream provider module: the sessionstream object can keep its own hidden websocket ref and also carry the shared HTTP handler ref.
+- A minimal non-upgrade HTTP request is sufficient to prove Express dispatch reaches the Go WebSocket handler because an unmatched route would return 404, while the WebSocket upgrader returns a non-404 upgrade error path.
+
+### What was tricky to build
+
+- The main design edge is avoiding accidental route-semantics expansion in `app.mount()`. It is tempting to make `app.mount("/rooms/:roomID/ws", ...)` behave like JS routes, but a mounted Go handler does not receive a JS `req.params` object. The better invariant is that mount selects a stable prefix and Go handles deeper routing.
+- The test therefore asserts dispatch behavior rather than attempting a full WebSocket subscription round trip. A full round trip belongs in the runnable smoke app, where the server can run on a real listener and a WebSocket client can subscribe.
+
+### What warrants a second pair of eyes
+
+- Whether `TestWebSocketServerMountsInExpress` should assert the exact WebSocket-upgrade failure status/body or keep the current not-404 assertion to avoid depending on gorilla/websocket error formatting.
+- Whether sessionstream should expose Go-side path routing helpers for room/session-specific WebSocket endpoints, or leave all path interpretation to applications wrapping the server.
+
+### What should be done in the future
+
+- Add a runnable smoke application that starts an Express/gojahttp host, mounts `ss.webSocket.server(hub)` at `/ws`, and performs a real WebSocket subscribe round trip.
+- Consider fixing the transient `TestHubEventBusGoChannelRoundTrip` ordering assertion separately.
+
+### Code review instructions
+
+- Start with `pkg/js/modules/sessionstream/api_websocket.go` and confirm the returned object attaches both the sessionstream websocket ref and the shared `gojahttp` handler ref.
+- Then read `pkg/js/modules/sessionstream/module_test.go`, especially `TestWebSocketServerMountsInExpress`, to see the JavaScript composition contract.
+- Validate with:
+
+```bash
+go test ./pkg/js/modules/sessionstream/... -count=1
+go test ./examples/goja-chatdemo/... ./pkg/js/modules/sessionstream/... -count=1
+make schema-vet
+go test ./... -count=1
+```
+
+### Technical details
+
+JavaScript composition now works with the merged `go-go-goja` Express mount API:
+
+```js
+const express = require("express");
+const ss = require("sessionstream");
+
+const app = express.app();
+const hub = ss.hub({ schemas: ss.schemas() });
+
+app.mount("/ws", ss.webSocket.server(hub));
+```
+
+The Go-side wrapper implementation is deliberately just an ABI attachment:
+
+```go
+obj := m.vm.NewObject()
+m.attachRef(obj, &websocketRef{server: server})
+if err := gojahttp.AttachHTTPHandler(m.vm, obj, server); err != nil {
+    panic(m.vm.NewGoError(err))
+}
 ```

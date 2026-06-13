@@ -26,3 +26,4 @@
 - [x] Add end-to-end JS chatdemo integration test recreating a minimal chat flow: generated protobuf command, JS handler, event publish, UI projection, timeline projection, EventEmitter fanout, and snapshot
 - [x] Update README/help docs with the sessionstream Goja workflow, including how it composes with go-go-goja protobuf builders and how to run the demo/smoke tests
 - [x] Run validation for sessionstream integration: go test ./..., make schema-vet, targeted pkg/js/modules/sessionstream tests, and any required go-go-goja xgoja/protogoja compatibility tests
+- [x] Attach gojahttp mountable handler refs to sessionstream WebSocket server objects and verify Express app.mount composition

@@ -59,3 +59,13 @@ Completed tasks 11-23: implemented phase-1 require("sessionstream") module, sche
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/module.go — Native CommonJS module skeleton and refs
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/provider/provider.go — xgoja provider registration
 
+
+## 2026-06-12
+
+Step 6: attached sessionstream WebSocket server objects to the merged gojahttp mountable handler ABI and verified Express app.mount composition (commit 8ab489f).
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_websocket.go — WebSocket server objects now carry shared HTTP handler refs
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/module_test.go — Coverage for app.mount('/ws'
+
