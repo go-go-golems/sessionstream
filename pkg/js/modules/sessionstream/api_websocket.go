@@ -2,6 +2,7 @@ package sessionstream
 
 import (
 	"github.com/dop251/goja"
+	"github.com/go-go-golems/go-go-goja/pkg/gojahttp"
 	ws "github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws"
 )
 
@@ -16,6 +17,9 @@ func (m *moduleRuntime) webSocketServerBuilder(call goja.FunctionCall) goja.Valu
 	}
 	obj := m.vm.NewObject()
 	m.attachRef(obj, &websocketRef{server: server})
+	if err := gojahttp.AttachHTTPHandler(m.vm, obj, server); err != nil {
+		panic(m.vm.NewGoError(err))
+	}
 	m.mustSet(obj, "connections", func() any { return server.Connections() })
 	return obj
 }

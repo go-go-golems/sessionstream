@@ -2,11 +2,15 @@ package sessionstream
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/dop251/goja"
 	noderequire "github.com/dop251/goja_nodejs/require"
+	"github.com/go-go-golems/go-go-goja/modules/express"
 	gggengine "github.com/go-go-golems/go-go-goja/pkg/engine"
+	"github.com/go-go-golems/go-go-goja/pkg/gojahttp"
 	"github.com/go-go-golems/go-go-goja/pkg/jsevents"
 	"github.com/go-go-golems/go-go-goja/pkg/protogoja"
 	chatdemo "github.com/go-go-golems/sessionstream/examples/chatdemo"
@@ -93,6 +97,38 @@ func TestHubCommandProjectionAndSnapshotFromJavaScript(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, value.String(), "hello from js")
 	require.Contains(t, value.String(), "m1-user")
+}
+
+func TestWebSocketServerMountsInExpress(t *testing.T) {
+	host := gojahttp.NewHost(gojahttp.HostOptions{Dev: true})
+	factory, err := gggengine.NewRuntimeFactoryBuilder().
+		WithModules(
+			express.NewRegistrar(host),
+			gggengine.NativeModuleRegistrar{ModuleName: ModuleName, Loader: NewLoader(Options{})},
+		).
+		Build()
+	require.NoError(t, err)
+	rt, err := factory.NewRuntime(gggengine.WithStartupContext(context.Background()), gggengine.WithLifetimeContext(context.Background()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
+	host.SetRuntime(rt.Owner)
+
+	_, err = rt.Owner.Call(context.Background(), "sessionstream.websocket.mount", func(_ context.Context, vm *goja.Runtime) (any, error) {
+		_, err := vm.RunString(`
+			const express = require("express");
+			const ss = require("sessionstream");
+			const app = express.app();
+			const schemas = ss.schemas();
+			const hub = ss.hub({ schemas });
+			app.mount("/ws", ss.webSocket.server(hub));
+		`)
+		return nil, err
+	})
+	require.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	host.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/ws/rooms/general", nil))
+	require.NotEqual(t, http.StatusNotFound, rr.Code)
 }
 
 func TestEventEmitterFanoutReceivesUIBatch(t *testing.T) {
