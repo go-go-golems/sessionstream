@@ -69,3 +69,14 @@ Step 6: attached sessionstream WebSocket server objects to the merged gojahttp m
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_websocket.go — WebSocket server objects now carry shared HTTP handler refs
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/module_test.go — Coverage for app.mount('/ws'
 
+
+## 2026-06-12
+
+Step 7: aligned CI/CD plumbing with go-template, added ci-check and bump-go-go-golems, regenerated logcopter, and validated make ci-check plus goreleaser snapshot (commit 708f869).
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/.github/workflows/push.yml — Hosted CI entrypoint
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/Makefile — CI/lint/logcopter/glazed-lint/release targets
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/go.mod — Standalone go-go-goja dependency
+

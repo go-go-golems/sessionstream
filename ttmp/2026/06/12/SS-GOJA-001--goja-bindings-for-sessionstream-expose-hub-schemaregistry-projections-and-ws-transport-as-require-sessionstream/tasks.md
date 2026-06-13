@@ -27,3 +27,4 @@
 - [x] Update README/help docs with the sessionstream Goja workflow, including how it composes with go-go-goja protobuf builders and how to run the demo/smoke tests
 - [x] Run validation for sessionstream integration: go test ./..., make schema-vet, targeted pkg/js/modules/sessionstream tests, and any required go-go-goja xgoja/protogoja compatibility tests
 - [x] Attach gojahttp mountable handler refs to sessionstream WebSocket server objects and verify Express app.mount composition
+- [x] Align sessionstream CI/CD plumbing with go-template: ci-check, logcopter, glazed-lint, GoReleaser validation, and bump-go-go-golems

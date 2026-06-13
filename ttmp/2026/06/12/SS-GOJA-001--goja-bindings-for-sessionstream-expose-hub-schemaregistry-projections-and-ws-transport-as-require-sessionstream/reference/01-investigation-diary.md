@@ -21,6 +21,10 @@ RelatedFiles:
       Note: |-
         Existing EventEmitter bridge studied as fanout design precedent
         EventEmitter bridge studied for sessionstream UIFanout adapter
+    - Path: .github/workflows/push.yml
+      Note: Runs make ci-check in hosted CI (commit 708f869)
+    - Path: Makefile
+      Note: Standardized ci-check
     - Path: examples/goja-chatdemo/README.md
       Note: Operator documentation for the goja-chatdemo proof
     - Path: examples/goja-chatdemo/goja_chatdemo_test.go
@@ -29,6 +33,8 @@ RelatedFiles:
       Note: xgoja provider and DTS validation for task 10
     - Path: examples/goja-chatdemo/scripts/start-inference.js
       Note: JavaScript fixture building a typed chatdemo command
+    - Path: go.mod
+      Note: Adds standalone go-go-goja dependency for CI outside go.work (commit 708f869)
     - Path: pkg/js/modules/sessionstream/README.md
       Note: Module user documentation
     - Path: pkg/js/modules/sessionstream/api_callbacks.go
@@ -45,12 +51,16 @@ RelatedFiles:
         Attaches the shared gojahttp mountable handler ref to sessionstream WebSocket server objects (commit 8ab489f)
     - Path: pkg/js/modules/sessionstream/codec.go
       Note: Protobuf/Goja conversion helpers
+    - Path: pkg/js/modules/sessionstream/logcopter.go
+      Note: Generated logcopter package logger for sessionstream Goja module (commit 708f869)
     - Path: pkg/js/modules/sessionstream/module.go
       Note: CommonJS module entrypoint
     - Path: pkg/js/modules/sessionstream/module_test.go
       Note: |-
         End-to-end module tests
         Verifies Express app.mount composition for ss.webSocket.server(hub) (commit 8ab489f)
+    - Path: pkg/js/modules/sessionstream/provider/logcopter.go
+      Note: Generated logcopter package logger for sessionstream provider module (commit 708f869)
     - Path: pkg/js/modules/sessionstream/provider/provider.go
       Note: xgoja provider
     - Path: pkg/js/modules/sessionstream/typescript.go
@@ -72,6 +82,7 @@ LastUpdated: 2026-06-12T15:35:00-04:00
 WhatFor: Continuation context for implementing or reviewing the sessionstream Goja binding design.
 WhenToUse: Read before resuming SS-GOJA-001 implementation or revising the design.
 ---
+
 
 
 
@@ -772,4 +783,173 @@ m.attachRef(obj, &websocketRef{server: server})
 if err := gojahttp.AttachHTTPHandler(m.vm, obj, server); err != nil {
     panic(m.vm.NewGoError(err))
 }
+```
+
+
+## Step 7: Align sessionstream CI/CD plumbing with go-template
+
+I audited the existing sessionstream repository plumbing against `~/code/wesen/go-go-golems/go-template` and found that most files already existed: GitHub Actions, GoReleaser, golangci-lint config, lefthook, logcopter tooling, and a Makefile were already present. The missing pieces were mostly integration details: a `bump-go-go-golems` target, a stronger `ci-check` target that actually runs logcopter and glazed-lint, stale logcopter output for the new Goja packages, and a standalone `go.mod` requirement for the now-merged `go-go-goja` APIs used by the sessionstream branch.
+
+This step makes the repository more release-ready without replacing the existing project-specific setup. The Makefile keeps sessionstream-specific checks such as `schema-vet` and `boundary-check`, but now has the go-template-style dependency bump target, dynamic glazed-lint version selection, fmt checking, logcopter checking in `check`, and a `ci-check` target used by GitHub Actions.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Setup CICD / golangcilint/ releaser / glazed-lint / logcopter in sessionstream/ (if necessary, it might already have been done) and the Makefile bump-go-go-golems  like in ~/code/wesen/go-go-golems/go-template"
+
+**Assistant interpretation:** Compare sessionstream's repository plumbing against go-template, add any missing CI/CD/lint/release/logcopter/glazed-lint pieces, add the standard `bump-go-go-golems` Makefile target, validate, and push the result.
+
+**Inferred user intent:** Ensure the sessionstream PR is not only functionally correct but also has the standard go-go-golems project maintenance and release workflow before merging.
+
+**Commit (code):** 708f869b3c9e322a9a169cc5e3b104f1b25a3520 — "Align CI plumbing with go-template"
+
+### What I did
+
+- Compared sessionstream with `~/code/wesen/go-go-golems/go-template` for Makefile, GitHub workflows, `.golangci.yml`, `.golangci-lint-version`, `lefthook.yml`, `.goreleaser.yaml`, and logcopter setup.
+- Confirmed sessionstream already had core CI/release files:
+  - `.github/workflows/push.yml`
+  - `.github/workflows/lint.yml`
+  - `.github/workflows/release.yaml`
+  - `.github/workflows/codeql-analysis.yml`
+  - `.github/workflows/secret-scanning.yml`
+  - `.github/workflows/dependency-scanning.yml`
+  - `.goreleaser.yaml`
+  - `.golangci.yml`
+  - `.golangci-lint-version`
+  - `lefthook.yml`
+- Added Makefile targets and behavior matching go-template conventions:
+  - `fmt-check`
+  - `ci-check`
+  - `bump-go-go-golems`
+  - dynamic `GLAZED_VERSION` lookup from `go.mod`
+  - `GLAZED_LINT_VERSION` fallback
+  - direct `glazed-lint ./...` invocation instead of `go vet -vettool`
+- Strengthened `check` so it now runs:
+  - `boundary-check`
+  - `schema-vet`
+  - `logcopter-check`
+  - `glazed-lint`
+  - `test`
+  - `build`
+- Updated `.github/workflows/push.yml` so GitHub Actions runs `make ci-check` instead of the narrower `make check`.
+- Added `github.com/go-go-golems/go-go-goja v0.9.1` to `go.mod` with `GOWORK=off go get github.com/go-go-golems/go-go-goja@fe56c02fe2a017837d464856d1f958532b29d157`, which resolves to the published/tagged version containing the merged mountable-handler APIs.
+- Regenerated logcopter package loggers for the new Goja packages:
+  - `pkg/js/modules/sessionstream/logcopter.go`
+  - `pkg/js/modules/sessionstream/provider/logcopter.go`
+- Removed two unused helpers from `pkg/js/modules/sessionstream/module.go` that became visible once standalone golangci-lint was part of `ci-check`.
+
+### Why
+
+- The branch now imports `go-go-goja` packages directly, so standalone CI must not rely on the local `go.work` workspace.
+- Logcopter must be current for new packages, otherwise `logcopter-check` fails in CI.
+- `check` and `ci-check` should exercise all repository quality gates rather than only tests/builds.
+- `bump-go-go-golems` gives maintainers the same dependency bump workflow used in go-template.
+
+### What worked
+
+Validation that passed:
+
+```bash
+make ci-check
+make goreleaser
+```
+
+`make ci-check` ran:
+
+```text
+fmt-check
+lint
+boundary-check
+schema-vet
+logcopter-check
+glazed-lint
+test
+build
+```
+
+`make goreleaser` completed a snapshot single-target release build and archive:
+
+```text
+goreleaser release --skip=sign --snapshot --clean --single-target
+release succeeded
+```
+
+### What didn't work
+
+The first `make logcopter-check` failed because the new Goja package logcopter files had not been generated yet:
+
+```text
+logcopter-gen: generated file is not current: /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/logcopter.go
+make: *** [Makefile:95: logcopter-check] Error 1
+```
+
+After `make logcopter-generate`, the first `make ci-check` failed because generated `zlog` conflicted with an import alias in `module.go`:
+
+```text
+pkg/js/modules/sessionstream/logcopter.go:7:5: zlog already declared through import of package log ("github.com/rs/zerolog/log")
+    pkg/js/modules/sessionstream/module.go:16:2: other declaration of zlog (typecheck)
+```
+
+I fixed this by renaming the zerolog global logger import alias from `zlog` to `zerologlog`.
+
+The next `make ci-check` failed on two genuinely unused helpers:
+
+```text
+pkg/js/modules/sessionstream/module.go:163:25: func (*moduleRuntime).websocketRef is unused (unused)
+pkg/js/modules/sessionstream/module.go:193:6: func backgroundContext is unused (unused)
+```
+
+I removed both helpers and reran `make ci-check` successfully.
+
+### What I learned
+
+- The repo already had most scaffolded CI/CD files; the important missing part was making the Makefile targets compose into one reliable CI entrypoint.
+- Adding logcopter checks to CI is useful because it immediately caught missing generated package loggers for the new Goja module packages.
+- Standalone `GOWORK=off` now works for the Goja bindings because `go-go-goja v0.9.1` contains the merged APIs used here.
+
+### What was tricky to build
+
+- The main sharp edge was avoiding a broad scaffold overwrite. Sessionstream already had project-specific targets (`schema-vet`, `boundary-check`, protobuf tool installation in CI, and a systemlab smoke test). The right change was to merge go-template conventions into the existing Makefile rather than replacing it.
+- The second edge was logcopter's generated package variable name. It always generates `zlog`, so hand-written package files should not use `zlog` as an import alias.
+
+### What warrants a second pair of eyes
+
+- Whether `check` should include `lint` directly or keep `lint` only in `ci-check`; the current split avoids double-running golangci-lint when `ci-check` calls both `lint` and `check`.
+- Whether `.goreleaser.yaml` should grow the full go-template Homebrew/nfpm/publisher sections now, or stay with the existing simpler GitHub-release archive configuration until packaging secrets are confirmed.
+- Whether the `go-go-goja v0.9.1` dependency should be bumped again after the next release tag if additional unreleased sessionstream dependencies appear.
+
+### What should be done in the future
+
+- Watch GitHub Actions for PR #8 after push to confirm hosted CI matches local `make ci-check` and `make goreleaser` behavior.
+- Add Homebrew tap and nfpm publishing to `.goreleaser.yaml` only if this repo is intended to publish packaged binaries beyond GitHub release archives.
+
+### Code review instructions
+
+- Start with `Makefile` and compare `check`, `ci-check`, `glazed-lint-build`, `glazed-lint`, and `bump-go-go-golems` against go-template.
+- Then review `.github/workflows/push.yml` to confirm CI uses `make ci-check`.
+- Review `go.mod` to confirm `go-go-goja v0.9.1` is an explicit standalone dependency.
+- Review generated files:
+  - `pkg/js/modules/sessionstream/logcopter.go`
+  - `pkg/js/modules/sessionstream/provider/logcopter.go`
+- Validate with:
+
+```bash
+make ci-check
+make goreleaser
+```
+
+### Technical details
+
+The added dependency bump target is intentionally the go-template pattern adapted without project-specific dependency names:
+
+```make
+bump-go-go-golems:
+	@deps="$$(awk '/^require[[:space:]]+github\.com\/go-go-golems\// { print $$2 } /^[[:space:]]*github\.com\/go-go-golems\// { print $$1 }' go.mod | sort -u)"; \
+	if [ -z "$$deps" ]; then \
+		echo "No github.com/go-go-golems dependencies in go.mod"; \
+	else \
+		echo "Bumping go-go-golems dependencies:"; \
+		echo "$$deps"; \
+		for dep in $$deps; do GOWORK=off go get "$${dep}@latest"; done; \
+	fi
+	GOWORK=off go mod tidy
 ```
