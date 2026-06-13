@@ -1,7 +1,6 @@
 package sessionstream
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -13,7 +12,7 @@ import (
 	ss "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 	ws "github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws"
 	"github.com/rs/zerolog"
-	zlog "github.com/rs/zerolog/log"
+	zerologlog "github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -78,7 +77,7 @@ func (m *module) Loader(vm *goja.Runtime, moduleObj *goja.Object) {
 func newRuntime(vm *goja.Runtime, opts Options) *moduleRuntime {
 	lg := opts.Logger
 	if lg.GetLevel() == zerolog.NoLevel {
-		lg = zlog.Logger
+		lg = zerologlog.Logger
 	}
 	prototypes := map[string]proto.Message{}
 	for name, msg := range opts.Prototypes {
@@ -160,11 +159,6 @@ func (m *moduleRuntime) fanoutRef(v goja.Value) (*fanoutRef, bool) {
 	return ref, ok && ref != nil && ref.fanout != nil
 }
 
-func (m *moduleRuntime) websocketRef(v goja.Value) (*websocketRef, bool) {
-	ref, ok := m.getRef(v).(*websocketRef)
-	return ref, ok && ref != nil && ref.server != nil
-}
-
 func (m *moduleRuntime) resolvePrototype(fullName string) (proto.Message, error) {
 	fullName = strings.TrimSpace(fullName)
 	if fullName == "" {
@@ -188,11 +182,4 @@ func (m *moduleRuntime) prototypeFromValue(value goja.Value) (proto.Message, str
 		}
 	}
 	return nil, "", false
-}
-
-func backgroundContext(ctx context.Context) context.Context {
-	if ctx != nil {
-		return ctx
-	}
-	return context.Background()
 }

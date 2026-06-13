@@ -1,4 +1,4 @@
-.PHONY: all fmt lint lintmax docker-lint golangci-lint-install gosec govulncheck test build build-bin boundary-check schema-vet systemlab-build systemlab-run check goreleaser ensure-svu tag-major tag-minor tag-patch release install
+.PHONY: all fmt fmt-check lint lintmax docker-lint golangci-lint-install gosec govulncheck test build build-bin boundary-check schema-vet systemlab-build systemlab-run check ci-check goreleaser ensure-svu tag-major tag-minor tag-patch release bump-go-go-golems install logcopter-generate logcopter-check glazed-lint-build glazed-lint
 
 all: check
 
@@ -31,6 +31,9 @@ lint: golangci-lint-install
 
 lintmax: golangci-lint-install
 	GOWORK=off $(GOLANGCI_LINT_BIN) run -v --max-same-issues=100
+
+fmt-check: golangci-lint-install
+	GOWORK=off $(GOLANGCI_LINT_BIN) fmt --diff
 
 gosec:
 	GOWORK=off go install github.com/securego/gosec/v2/cmd/gosec@latest
@@ -84,31 +87,44 @@ release: ensure-svu
 install:
 	GOWORK=off go install $(CMD_DIR)
 
-check: boundary-check test build
+check: boundary-check schema-vet logcopter-check glazed-lint test build
 
-.PHONY: logcopter-generate
+ci-check: fmt-check lint check
+
 logcopter-generate:
 	GOWORK=off go tool logcopter-gen -include-main -var zlog -area-prefix go-go-golems.sessionstream -strip-prefix github.com/go-go-golems/sessionstream ./cmd/... ./pkg/...
 
-.PHONY: logcopter-check
 logcopter-check:
 	GOWORK=off go tool logcopter-gen -include-main -var zlog -area-prefix go-go-golems.sessionstream -strip-prefix github.com/go-go-golems/sessionstream -check ./cmd/... ./pkg/...
 
 GLAZED_LINT_BIN ?= /tmp/glazed-lint
 GLAZED_LINT_PKG ?= github.com/go-go-golems/glazed/cmd/tools/glazed-lint
-GLAZED_VERSION ?= v1.2.7
-
-.PHONY: glazed-lint-build glazed-lint
+GLAZED_VERSION ?= $(shell GOWORK=off go list -m -f '{{.Version}}' github.com/go-go-golems/glazed 2>/dev/null)
+GLAZED_LINT_VERSION ?= latest
+GLAZED_LINT_FLAGS ?=
 
 glazed-lint-build:
-	@echo "Building glazed-lint from Glazed module..."
-	@if [ -n "$(GLAZED_VERSION)" ]; then \
+	@if [ -n "$(GLAZED_VERSION)" ] && [ "$(GLAZED_VERSION)" != "(devel)" ]; then \
 		echo "Installing $(GLAZED_LINT_PKG)@$(GLAZED_VERSION)"; \
-		GOBIN=$(dir $(GLAZED_LINT_BIN)) GOWORK=off go install $(GLAZED_LINT_PKG)@$(GLAZED_VERSION); \
+		GOBIN=$(dir $(GLAZED_LINT_BIN)) GOWORK=off go install $(GLAZED_LINT_PKG)@$(GLAZED_VERSION) || { \
+			echo "Falling back to $(GLAZED_LINT_PKG)@$(GLAZED_LINT_VERSION)"; \
+			GOBIN=$(dir $(GLAZED_LINT_BIN)) GOWORK=off go install $(GLAZED_LINT_PKG)@$(GLAZED_LINT_VERSION); \
+		}; \
 	else \
-		echo "Installing $(GLAZED_LINT_PKG) from workspace/module"; \
-		GOBIN=$(dir $(GLAZED_LINT_BIN)) go install $(GLAZED_LINT_PKG); \
+		echo "Installing $(GLAZED_LINT_PKG)@$(GLAZED_LINT_VERSION)"; \
+		GOBIN=$(dir $(GLAZED_LINT_BIN)) GOWORK=off go install $(GLAZED_LINT_PKG)@$(GLAZED_LINT_VERSION); \
 	fi
 
 glazed-lint: glazed-lint-build
-	GOWORK=off go vet -vettool=$(GLAZED_LINT_BIN) ./cmd/... ./pkg/...
+	GOWORK=off $(GLAZED_LINT_BIN) $(GLAZED_LINT_FLAGS) ./...
+
+bump-go-go-golems:
+	@deps="$$(awk '/^require[[:space:]]+github\.com\/go-go-golems\// { print $$2 } /^[[:space:]]*github\.com\/go-go-golems\// { print $$1 }' go.mod | sort -u)"; \
+	if [ -z "$$deps" ]; then \
+		echo "No github.com/go-go-golems dependencies in go.mod"; \
+	else \
+		echo "Bumping go-go-golems dependencies:"; \
+		echo "$$deps"; \
+		for dep in $$deps; do GOWORK=off go get "$${dep}@latest"; done; \
+	fi
+	GOWORK=off go mod tidy
