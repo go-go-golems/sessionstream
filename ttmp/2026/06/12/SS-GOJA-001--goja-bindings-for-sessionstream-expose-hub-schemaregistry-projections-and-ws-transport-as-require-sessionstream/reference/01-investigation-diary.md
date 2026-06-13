@@ -24,7 +24,9 @@ RelatedFiles:
     - Path: .github/workflows/push.yml
       Note: Runs make ci-check in hosted CI (commit 708f869)
     - Path: Makefile
-      Note: Standardized ci-check
+      Note: |-
+        Standardized ci-check
+        Fixes hosted CI missing rg and protoc-gen-goja-builder failures
     - Path: examples/goja-chatdemo/README.md
       Note: Operator documentation for the goja-chatdemo proof
     - Path: examples/goja-chatdemo/goja_chatdemo_test.go
@@ -82,6 +84,7 @@ LastUpdated: 2026-06-12T15:35:00-04:00
 WhatFor: Continuation context for implementing or reviewing the sessionstream Goja binding design.
 WhenToUse: Read before resuming SS-GOJA-001 implementation or revising the design.
 ---
+
 
 
 
@@ -952,4 +955,99 @@ bump-go-go-golems:
 		for dep in $$deps; do GOWORK=off go get "$${dep}@latest"; done; \
 	fi
 	GOWORK=off go mod tidy
+```
+
+
+## Step 8: Fix hosted CI tool assumptions for `make ci-check`
+
+Hosted CI exposed two assumptions that did not appear on the development machine: `boundary-check` depended on `rg`, and `go generate ./...` assumed `protoc-gen-goja-builder` was already installed. I updated the Makefile so `make ci-check` can run on a clean GitHub Actions worker using standard shell tools plus generated-tool installation.
+
+The fix keeps the stronger CI shape from Step 7, but makes it self-contained: `build` now installs protobuf generation tools into the repository `.bin` directory and exports that directory on `PATH`, and `boundary-check` uses `grep` instead of ripgrep.
+
+### Prompt Context
+
+**User prompt (verbatim):** "wrong error, my bad.\n\nhere's the real error:  level=info msg=\"[runner] processing took 426.049µs with stages: nolint_filter: 361.759µs, generated_file_filter: 28.503µs, exclusion_rules: 26.149µs, path_relativity: 2.465µs, sort_results: 1.462µs, cgo: 842ns, max_same_issues: 742ns, invalid_issue: 501ns, filename_unadjuster: 441ns, diff: 401ns, fixer: 391ns, path_absoluter: 390ns, exclusion_paths: 370ns, max_from_linter: 300ns, max_per_file_from_linter: 261ns, path_prettifier: 251ns, path_shortener: 240ns, uniq_by_line: 231ns, source_code: 220ns, severity-rules: 130ns\"\nlevel=info msg=\"[runner] linters took 17.465472535s with stages: goanalysis_metalinter: 17.464847272s\"\nlevel=info msg=\"File cache stats: 0 entries of total size 0B\"\nlevel=info msg=\"Memory: 850 samples, avg is 263.9MB, max is 1909.1MB\"\nlevel=info msg=\"Execution took 1m25.159215796s\"\n0 issues.\n/bin/sh: 1: rg: not found\nGOWORK=off go build -o /tmp/sessionstream-lint ./cmd/sessionstream-lint\nGOWORK=off go vet -vettool=/tmp/sessionstream-lint ./pkg/analysis/sessionstreamschema ./cmd/sessionstream-lint\nGOWORK=off go tool logcopter-gen -include-main -var zlog -area-prefix go-go-golems.sessionstream -strip-prefix github.com/go-go-golems/sessionstream -check ./cmd/... ./pkg/...\nInstalling github.com/go-go-golems/glazed/cmd/tools/glazed-lint@v1.3.5\nGOWORK=off /tmp/glazed-lint  ./...\nGOWORK=off go test ./...\n?       github.com/go-go-golems/sessionstream/cmd/sessionstream-lint    [no test files]\nok      github.com/go-go-golems/sessionstream/cmd/sessionstream-systemlab    0.278s\nok      github.com/go-go-golems/sessionstream/examples/chatdemo    0.034s\n?       github.com/go-go-golems/sessionstream/examples/chatdemo/gen/sessionstream/examples/chatdemo/v1    [no test files]\nok      github.com/go-go-golems/sessionstream/examples/goja-chatdemo    0.023s\nok      github.com/go-go-golems/sessionstream/examples/goja-chatdemo/provider    0.017s\n?       github.com/go-go-golems/sessionstream/pkg/analysis/sessionstreamschema    [no test files]\nok      github.com/go-go-golems/sessionstream/pkg/doc    0.034s\nok      github.com/go-go-golems/sessionstream/pkg/js/modules/sessionstream    0.015s\nok      github.com/go-go-golems/sessionstream/pkg/js/modules/sessionstream/provider    0.012s\nok      github.com/go-go-golems/sessionstream/pkg/sessionstream    0.029s\nok      github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite    0.121s\n?       github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1    [no test files]\nok      github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws    0.039s\nGOWORK=off go generate ./...\nprotoc-gen-goja-builder: program not found or is not executable\nPlease specify a program using absolute path or make sure the program is available in your PATH system variable\n--goja-builder_out: protoc-gen-goja-builder: Plugin failed with status code 1.\nexamples/chatdemo/generate.go:3: running \"protoc\": exit status 1\nmake: *** [Makefile:50: build] Error 1\n\n\nfrom : https://github.com/go-go-golems/sessionstream/actions/runs/27452892862/job/81151654353?pr=8"
+
+**Assistant interpretation:** Fix the real GitHub Actions failure in PR #8: missing `rg` and missing `protoc-gen-goja-builder` during `make ci-check`.
+
+**Inferred user intent:** Make hosted CI green without weakening the new CI checks.
+
+**Commit (code):** 1fd7751f259d3bf5c64cf4e16d388533c0b50af2 — "Fix sessionstream CI tool installation"
+
+### What I did
+
+- Replaced the ripgrep-based `boundary-check` with a POSIX/GNU `grep -R` command available on Ubuntu Actions workers.
+- Added `TOOLS_BIN ?= $(CURDIR)/.bin` and exported it onto `PATH` for Makefile recipes.
+- Added `GO_GO_GOJA_VERSION` derived from `go.mod` via `go list -m`.
+- Added `install-generate-tools`, which installs:
+  - `google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11`
+  - `github.com/go-go-golems/go-go-goja/cmd/protoc-gen-goja-builder@$(GO_GO_GOJA_VERSION)`
+- Made `build` depend on `install-generate-tools` before running `go generate ./...`.
+
+### Why
+
+- GitHub Actions runners do not guarantee `rg` is installed.
+- `go generate` shells out to `protoc`, which discovers plugins on `PATH`; the repository must install `protoc-gen-goja-builder` before generation.
+- Installing into `.bin` avoids depending on ambient GOPATH state and makes the tool path explicit.
+
+### What worked
+
+I reproduced the clean-tool path locally by removing the generator binaries and then running:
+
+```bash
+rm -f .bin/protoc-gen-go .bin/protoc-gen-goja-builder
+make build
+make ci-check
+```
+
+Both commands passed. The output showed `make build` installing `protoc-gen-go` and `protoc-gen-goja-builder@v0.9.1` before `go generate ./...`.
+
+### What didn't work
+
+The hosted run failed before this fix with:
+
+```text
+/bin/sh: 1: rg: not found
+protoc-gen-goja-builder: program not found or is not executable
+--goja-builder_out: protoc-gen-goja-builder: Plugin failed with status code 1.
+examples/chatdemo/generate.go:3: running "protoc": exit status 1
+make: *** [Makefile:50: build] Error 1
+```
+
+### What I learned
+
+- The workflow's earlier explicit install of `protoc-gen-go` was not enough because the new chatdemo generation also needs the `go-go-goja` builder plugin.
+- Keeping tool installation in the Makefile is more robust than duplicating it only in GitHub Actions, because local and hosted CI now use the same path.
+
+### What was tricky to build
+
+- `protoc` plugin discovery depends on process `PATH`, not just Go module availability. Installing the plugin into `.bin` only works if the Makefile exports `.bin` into `PATH` for subsequent `go generate` invocations.
+
+### What warrants a second pair of eyes
+
+- Whether `install-generate-tools` should also check for the system `protoc` binary and print a clearer error. The GitHub workflow already installs `protobuf-compiler`, but local machines still need `protoc` separately.
+
+### What should be done in the future
+
+- If more generators are added, extend `install-generate-tools` rather than adding workflow-only setup.
+
+### Code review instructions
+
+- Review `Makefile` variables near the top, `boundary-check`, `install-generate-tools`, and the `build` dependency.
+- Validate with:
+
+```bash
+rm -f .bin/protoc-gen-go .bin/protoc-gen-goja-builder
+make build
+make ci-check
+```
+
+### Technical details
+
+`build` now has this shape:
+
+```make
+build: install-generate-tools
+	GOWORK=off go generate ./...
+	GOWORK=off go build ./...
 ```

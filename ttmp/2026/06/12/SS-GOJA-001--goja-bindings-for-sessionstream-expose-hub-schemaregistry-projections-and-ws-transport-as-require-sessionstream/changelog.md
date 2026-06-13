@@ -80,3 +80,12 @@ Step 7: aligned CI/CD plumbing with go-template, added ci-check and bump-go-go-g
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/Makefile — CI/lint/logcopter/glazed-lint/release targets
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/go.mod — Standalone go-go-goja dependency
 
+
+## 2026-06-12
+
+Step 8: fixed hosted CI tool assumptions by removing rg usage and installing protoc-gen-go/protoc-gen-goja-builder before go generate.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/Makefile — Installs generation tools and avoids rg in CI
+
