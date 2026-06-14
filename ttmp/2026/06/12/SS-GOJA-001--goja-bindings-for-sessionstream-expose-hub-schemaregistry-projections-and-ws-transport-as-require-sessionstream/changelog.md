@@ -89,3 +89,14 @@ Step 8: fixed hosted CI tool assumptions by removing rg usage and installing pro
 
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/Makefile — Installs generation tools and avoids rg in CI
 
+
+## 2026-06-14
+
+Step 9: finished the real xgoja goja-chatdemo-server smoke against RuntimePlan v2; adapted provider IDs, HTTP serve flags, WebSocket fanout attachment, and runtime-owner context preservation (commit d852d8b).
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/xgoja.yaml — RuntimePlan v2 example spec
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_callbacks.go — Publisher preserves current owner context
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/sessionstream/hub.go — Dynamic SetUIFanout for xgoja WebSocket composition
+

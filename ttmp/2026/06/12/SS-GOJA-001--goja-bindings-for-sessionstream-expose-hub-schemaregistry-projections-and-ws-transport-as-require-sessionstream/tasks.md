@@ -28,3 +28,4 @@
 - [x] Run validation for sessionstream integration: go test ./..., make schema-vet, targeted pkg/js/modules/sessionstream tests, and any required go-go-goja xgoja/protogoja compatibility tests
 - [x] Attach gojahttp mountable handler refs to sessionstream WebSocket server objects and verify Express app.mount composition
 - [x] Align sessionstream CI/CD plumbing with go-template: ci-check, logcopter, glazed-lint, GoReleaser validation, and bump-go-go-golems
+- [x] Finish real xgoja goja-chatdemo-server example using RuntimePlan v2, canonical provider IDs, Express HTTP routes, WebSocket mounting, and smoke-client validation

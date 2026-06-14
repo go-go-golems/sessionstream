@@ -27,6 +27,12 @@ RelatedFiles:
       Note: |-
         Standardized ci-check
         Fixes hosted CI missing rg and protoc-gen-goja-builder failures
+    - Path: examples/goja-chatdemo-server/cmd/smoke-client/main.go
+      Note: Step 9 WebSocket/API smoke client (commit d852d8b)
+    - Path: examples/goja-chatdemo-server/verbs/chatbot.js
+      Note: Step 9 JavaScript-owned Express/sessionstream chatbot app (commit d852d8b)
+    - Path: examples/goja-chatdemo-server/xgoja.yaml
+      Note: Step 9 RuntimePlan v2 chatbot server spec with canonical provider IDs (commit d852d8b)
     - Path: examples/goja-chatdemo/README.md
       Note: Operator documentation for the goja-chatdemo proof
     - Path: examples/goja-chatdemo/goja_chatdemo_test.go
@@ -44,7 +50,9 @@ RelatedFiles:
     - Path: pkg/js/modules/sessionstream/api_fanout.go
       Note: EventEmitter fanout bridge
     - Path: pkg/js/modules/sessionstream/api_hub.go
-      Note: Hub JavaScript wrapper
+      Note: |-
+        Hub JavaScript wrapper
+        Step 9 preserves runtime owner context for JS-facing Hub calls (commit d852d8b)
     - Path: pkg/js/modules/sessionstream/api_schemas.go
       Note: SchemaRegistry JavaScript wrapper
     - Path: pkg/js/modules/sessionstream/api_websocket.go
@@ -61,6 +69,7 @@ RelatedFiles:
       Note: |-
         End-to-end module tests
         Verifies Express app.mount composition for ss.webSocket.server(hub) (commit 8ab489f)
+        Step 9 Express-handler hub.submit deadlock regression (commit d852d8b)
     - Path: pkg/js/modules/sessionstream/provider/logcopter.go
       Note: Generated logcopter package logger for sessionstream provider module (commit 708f869)
     - Path: pkg/js/modules/sessionstream/provider/provider.go
@@ -84,6 +93,7 @@ LastUpdated: 2026-06-12T15:35:00-04:00
 WhatFor: Continuation context for implementing or reviewing the sessionstream Goja binding design.
 WhenToUse: Read before resuming SS-GOJA-001 implementation or revising the design.
 ---
+
 
 
 
@@ -1050,4 +1060,136 @@ make ci-check
 build: install-generate-tools
 	GOWORK=off go generate ./...
 	GOWORK=off go build ./...
+```
+
+## Step 9: Finish the xgoja RuntimePlan v2 chatbot server smoke
+
+I resumed the deferred sessionstream side after the go-go-goja RuntimePlan v2 cutover and turned the draft chatbot server into a working smoke-tested xgoja application. The old generated-manifest `commands` problem is no longer present: the current go-go-goja build emits `xgoja.runtime.json` with `schema: "xgoja/runtime/v2"`, unified `sources[]`, and a real `commands[]` entry for the HTTP `provider.command-set`.
+
+The sessionstream work needed three adaptations to the full v2 cutover: canonical provider IDs in `xgoja.yaml`, the current HTTP serve flag names, and owner-context preservation when JavaScript-facing sessionstream methods re-enter JavaScript callbacks from inside an Express request handler.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Ok, waht's next in the sessionstream/ side of things now that we updated xgoja to a proper v2? I think the last thing we were doing was working around the missing Commands in the xgoja generated manifest? Look in sessionstream/ttmp/2026/06/12/SS-GOJA-001--goja-bindings-for-sessionstream-expose-hub-schemaregistry-projections-and-ws-transport-as-require-sessionstream/reference/01-investigation-diary.md to refrsh your memory, and peripheral files, and tell me what's next (and what should potentially be done to adapt to the full v2 cutover)"
+
+**Follow-up prompt (verbatim):** "go ahead"
+
+**Assistant interpretation:** Resume the deferred sessionstream chatbot/xgoja work, adapt it to the new RuntimePlan v2 implementation, fix the remaining smoke failures, validate, and document the result.
+
+**Inferred user intent:** Complete the real sessionstream xgoja chatbot proof now that go-go-goja has a stable v2 runtime contract.
+
+**Commit (code):** d852d8b — "Add xgoja sessionstream chatbot server smoke"
+
+### What I did
+
+- Confirmed the workspace `go.work` uses the local `go-go-goja` checkout, so the example builds against the RuntimePlan v2 branch rather than only the released `go-go-goja v0.9.1` module.
+- Added `examples/goja-chatdemo-server/` with:
+  - `xgoja.yaml` using canonical provider IDs: `go-go-goja-http`, `sessionstream`, and `sessionstream-chatdemo`;
+  - `verbs/chatbot.js`, where JavaScript owns the Express app, routes, sessionstream Hub, command handler, projections, fake assistant response, and WebSocket mounting;
+  - `cmd/smoke-client`, which waits for `/healthz`, connects to `/ws`, posts `/api/chat`, and waits for `ChatAssistantFinished` over the WebSocket;
+  - `Makefile` with `doctor`, `build`, and `serve-smoke` targets.
+- Added `pkg/js/modules/chatdemo/provider` so the generated chatdemo protobuf builder module can be selected as an xgoja provider with package ID `sessionstream-chatdemo`.
+- Added `Hub.SetUIFanout` and changed `ss.webSocket.server(hub)` to attach the WebSocket server as the Hub fanout after JavaScript creates the server.
+- Changed JS-facing Hub methods and publisher calls to use `runtimebridge.CurrentOwnerContext(m.vm)` instead of `context.Background()`.
+- Added `TestHubSubmitFromExpressHandlerUsesCurrentOwnerContext` to prove `hub.submit(...)` from inside an Express handler does not deadlock when sessionstream re-enters JavaScript command/projection callbacks.
+- Fixed the HTML generation in `chatbot.js` so server-side template rendering does not evaluate browser-only `location.host`.
+- Regenerated logcopter output for the new `pkg/js/modules/chatdemo/provider` package.
+- Marked task 26 complete.
+
+### Why
+
+- RuntimePlan v2 no longer loses `commands[]`, but sessionstream's draft `xgoja.yaml` still used shorthand provider IDs that did not match registered provider package IDs. That made generated commands become unresolved stubs even though the RuntimePlan contained commands.
+- The HTTP provider now exposes listen configuration through `--http-listen`, not `--listen`.
+- Express handlers execute on the Goja runtime owner. Calling `hub.submit` from such a handler can synchronously invoke JS command handlers and projections. If the wrapper discards the current owner context, `runtimeOwner.Call` schedules back onto the same owner loop and waits, causing a self-deadlock.
+
+### What worked
+
+Validation passed:
+
+```bash
+go test ./pkg/js/modules/sessionstream -run 'TestHubSubmitFromExpressHandlerUsesCurrentOwnerContext|TestWebSocketServerMountsInExpress' -count=1
+go test ./pkg/js/modules/sessionstream/... ./examples/goja-chatdemo/... ./examples/goja-chatdemo-server/cmd/smoke-client ./pkg/sessionstream/... -count=1
+go test ./... -count=1
+make ci-check
+make -C examples/goja-chatdemo-server smoke
+```
+
+The smoke target now runs the complete path:
+
+1. `xgoja doctor` validates the v2 spec and resolves providers through `go.work`.
+2. `xgoja build --keep-work` emits RuntimePlan v2 metadata and builds the binary.
+3. The binary runs `serve chatbot serve --http-listen 127.0.0.1:18789`.
+4. The smoke client connects to `/ws`, posts `/api/chat`, and receives assistant completion over the WebSocket.
+5. The Makefile verifies `/healthz` and `/`.
+
+### What didn't work
+
+- Before switching to canonical provider IDs, the generated binary built but `serve` was only an error stub. The symptom was:
+
+```text
+runtime references unknown provider module http.express
+unknown flag: --listen
+```
+
+- After changing provider IDs and the listen flag, the server started and `/healthz` returned 200, but `POST /api/chat` hung. That exposed the owner-context bug: `hub.submit` used `context.Background()`, so nested JS callbacks scheduled onto the same runtime owner instead of recognizing the current owner call.
+- Once the deadlock was fixed, the final smoke still failed because the server-side `html()` template evaluated a browser-only `${location.host}` expression while rendering the page. I replaced the nested browser template literal with string concatenation inside the HTML script:
+
+```js
+const ws = new WebSocket("ws://" + location.host + "/ws");
+```
+
+- `make ci-check` initially failed because the new smoke client used the standard `flag` package and `glazed-lint` rejects raw flag APIs. I replaced the tiny flag use with manual `--addr` parsing because this command is only a smoke helper.
+- `make ci-check` also required a new generated logcopter file for `pkg/js/modules/chatdemo/provider`.
+
+### What I learned
+
+- RuntimePlan v2 fixed the manifest shape, but provider IDs still have to match registered package IDs exactly. The generated plan now makes this visible through module resolution and runtime command errors rather than silently dropping commands.
+- Any JS-facing native method that can trigger JS callbacks should preserve `runtimebridge.CurrentOwnerContext(m.vm)`. This is required for safe reentrant execution from Express handlers, EventEmitter paths, and other owner-managed callbacks.
+- A real xgoja smoke app is valuable because it exercises boundaries that isolated module tests do not: generated RuntimePlan metadata, provider IDs, Go workspace replacements, Express routing, WebSocket mounting, and browser-facing HTML generation.
+
+### What was tricky to build
+
+- The confusing part was separating three failures that appeared in sequence. First, provider ID mismatches made `serve` an unresolved command stub. Second, the stale `--listen` flag no longer matched xgoja HTTP serve's generated Glazed sections. Third, once the server could start, `POST /api/chat` deadlocked because sessionstream discarded the owner context before invoking JS callbacks. Each symptom looked like a server failure, but each belonged to a different boundary.
+- The WebSocket fanout setup also needed a dynamic hook. JavaScript creates `hub` first and later creates `ss.webSocket.server(hub)`, so the Hub needs `SetUIFanout` for xgoja-style dynamic composition while preserving `WithUIFanout` for normal Go construction.
+
+### What warrants a second pair of eyes
+
+- Review whether `Hub.SetUIFanout` should remain generally exported or whether the dynamic-fanout use case should be narrower.
+- Review whether `runtimebridge.CurrentOwnerContext(m.vm)` should also be used in EventEmitter fanout close paths, or whether the current use in submit/snapshot/run/shutdown/publish is sufficient.
+- Review whether the smoke client should eventually become a formal integration test target in CI, or remain manual/workspace-only until go-go-goja publishes the RuntimePlan v2 release.
+
+### What should be done in the future
+
+- After a go-go-goja release includes RuntimePlan v2, update sessionstream's standalone `go.mod` dependency and decide whether `examples/goja-chatdemo-server smoke` can become hosted CI.
+- Add optional Promise-aware sessionstream JS command/projection support if real chatdemo logic becomes asynchronous.
+
+### Code review instructions
+
+- Start with `examples/goja-chatdemo-server/xgoja.yaml` to verify provider IDs and command source scoping.
+- Read `examples/goja-chatdemo-server/verbs/chatbot.js` for the JavaScript-owned app setup.
+- Review `pkg/js/modules/sessionstream/api_hub.go` and `api_callbacks.go` for owner-context preservation.
+- Review `pkg/js/modules/sessionstream/module_test.go`, especially `TestHubSubmitFromExpressHandlerUsesCurrentOwnerContext`, for the deadlock regression.
+- Validate with:
+
+```bash
+make ci-check
+make -C examples/goja-chatdemo-server smoke
+```
+
+### Technical details
+
+The generated RuntimePlan now includes the expected command entries, for example:
+
+```json
+"commands": [
+  {"id": "verbs", "type": "builtin.jsverbs", "name": "verbs", "sources": ["sites"]},
+  {"id": "serve", "type": "provider.command-set", "name": "serve", "mount": "serve", "provider": "go-go-goja-http", "sources": ["sites"]}
+]
+```
+
+The critical context-preserving change is:
+
+```go
+hub.Submit(runtimebridge.CurrentOwnerContext(m.vm), ss.SessionId(sessionID), name, msg)
+pub.Publish(runtimebridge.CurrentOwnerContext(m.vm), ss.Event{Name: name, SessionId: sid, Payload: msg})
 ```
