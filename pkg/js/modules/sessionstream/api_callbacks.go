@@ -11,20 +11,14 @@ import (
 
 func (m *moduleRuntime) commandHandler(schemas *ss.SchemaRegistry, fn goja.Callable) ss.CommandHandler {
 	return func(ctx context.Context, cmd ss.Command, sess *ss.Session, pub ss.EventPublisher) error {
-		call := func(_ context.Context, vm *goja.Runtime) (any, error) {
+		_, err := m.callJSCallback(ctx, "sessionstream.command."+cmd.Name, func(vm *goja.Runtime) (goja.Value, error) {
 			cmdValue, err := m.commandToJS(cmd)
 			if err != nil {
 				return nil, err
 			}
 			publisher := m.wrapPublisher(schemas, cmd.SessionId, pub)
-			_, err = fn(goja.Undefined(), cmdValue, m.sessionToJS(sess), publisher)
-			return nil, err
-		}
-		if m.runtimeOwner != nil {
-			_, err := m.runtimeOwner.Call(ctx, "sessionstream.command."+cmd.Name, call)
-			return err
-		}
-		_, err := call(ctx, m.vm)
+			return fn(goja.Undefined(), cmdValue, m.sessionToJS(sess), publisher)
+		}, nil)
 		return err
 	}
 }
@@ -41,30 +35,43 @@ func (m *moduleRuntime) wrapPublisher(schemas *ss.SchemaRegistry, sid ss.Session
 		}
 		return goja.Undefined()
 	})
+	m.mustSet(obj, "publishAsync", func(name string, payload goja.Value) goja.Value {
+		msg, err := m.jsValueToProto(schemas, schemaKindEvent, name, payload)
+		if err != nil {
+			panic(m.vm.NewGoError(err))
+		}
+		services, ok := runtimebridge.Lookup(m.vm)
+		if !ok || services.Owner == nil {
+			panic(m.vm.NewGoError(fmt.Errorf("publishAsync requires runtime services")))
+		}
+		promise, resolve, reject := m.vm.NewPromise()
+		callCtx := runtimebridge.CurrentOwnerContext(m.vm)
+		go func() {
+			err := pub.Publish(callCtx, ss.Event{Name: name, SessionId: sid, Payload: msg})
+			_ = services.PostWithCustomContext(callCtx, "sessionstream.publishAsync.settle", func(context.Context, *goja.Runtime) {
+				if err != nil {
+					_ = reject(m.vm.ToValue(err.Error()))
+					return
+				}
+				_ = resolve(goja.Undefined())
+			})
+		}()
+		return m.vm.ToValue(promise)
+	})
 	return obj
 }
 
 func (m *moduleRuntime) uiProjection(schemas *ss.SchemaRegistry, fn goja.Callable) func(context.Context, ss.Event, *ss.Session, ss.TimelineView) ([]ss.UIEvent, error) {
 	return func(ctx context.Context, ev ss.Event, sess *ss.Session, view ss.TimelineView) ([]ss.UIEvent, error) {
-		call := func(_ context.Context, vm *goja.Runtime) (any, error) {
+		out, err := m.callJSCallback(ctx, "sessionstream.uiProjection."+ev.Name, func(vm *goja.Runtime) (goja.Value, error) {
 			eventValue, err := m.eventToJS(ev)
 			if err != nil {
 				return nil, err
 			}
-			out, err := fn(goja.Undefined(), eventValue, m.sessionToJS(sess), m.wrapTimelineView(view))
-			if err != nil {
-				return nil, err
-			}
-			return m.decodeUIEvents(schemas, out)
-		}
-		if m.runtimeOwner != nil {
-			out, err := m.runtimeOwner.Call(ctx, "sessionstream.uiProjection."+ev.Name, call)
-			if err != nil {
-				return nil, err
-			}
-			return out.([]ss.UIEvent), nil
-		}
-		out, err := call(ctx, m.vm)
+			return fn(goja.Undefined(), eventValue, m.sessionToJS(sess), m.wrapTimelineView(view))
+		}, func(_ *goja.Runtime, value goja.Value) (any, error) {
+			return m.decodeUIEvents(schemas, value)
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -74,25 +81,15 @@ func (m *moduleRuntime) uiProjection(schemas *ss.SchemaRegistry, fn goja.Callabl
 
 func (m *moduleRuntime) timelineProjection(schemas *ss.SchemaRegistry, fn goja.Callable) func(context.Context, ss.Event, *ss.Session, ss.TimelineView) ([]ss.TimelineEntity, error) {
 	return func(ctx context.Context, ev ss.Event, sess *ss.Session, view ss.TimelineView) ([]ss.TimelineEntity, error) {
-		call := func(_ context.Context, vm *goja.Runtime) (any, error) {
+		out, err := m.callJSCallback(ctx, "sessionstream.timelineProjection."+ev.Name, func(vm *goja.Runtime) (goja.Value, error) {
 			eventValue, err := m.eventToJS(ev)
 			if err != nil {
 				return nil, err
 			}
-			out, err := fn(goja.Undefined(), eventValue, m.sessionToJS(sess), m.wrapTimelineView(view))
-			if err != nil {
-				return nil, err
-			}
-			return m.decodeTimelineEntities(schemas, out)
-		}
-		if m.runtimeOwner != nil {
-			out, err := m.runtimeOwner.Call(ctx, "sessionstream.timelineProjection."+ev.Name, call)
-			if err != nil {
-				return nil, err
-			}
-			return out.([]ss.TimelineEntity), nil
-		}
-		out, err := call(ctx, m.vm)
+			return fn(goja.Undefined(), eventValue, m.sessionToJS(sess), m.wrapTimelineView(view))
+		}, func(_ *goja.Runtime, value goja.Value) (any, error) {
+			return m.decodeTimelineEntities(schemas, value)
+		})
 		if err != nil {
 			return nil, err
 		}

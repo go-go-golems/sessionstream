@@ -129,3 +129,125 @@ void | Promise<void>
 UIEvent[] | Promise<UIEvent[]>
 TimelineEntity[] | Promise<TimelineEntity[]>
 ```
+
+## Step 2: Add Promise-aware callbacks plus async submit/publish APIs
+
+I implemented the first Promise-aware callback slice. Command handlers, UI projections, and timeline projections now pass callback return values through a Promise-aware helper that waits for fulfilled Promises, converts rejected Promises into Go errors with callback labels, and decodes projection arrays only after resolution.
+
+During testing I found an important JavaScript-stack constraint: a synchronous `hub.submit(...)` call made from JavaScript cannot safely block waiting for a pending Promise returned by a JS command handler, because the JavaScript stack must unwind before Goja can run the async continuation. To support idiomatic async handlers, I added explicit async APIs: `hub.submitAsync(...)` and `publisher.publishAsync(...)`. Async command handlers should `await hub.submitAsync(...)`, and async handlers that publish into async projections should `await pub.publishAsync(...)`.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Continue"
+
+**Assistant interpretation:** Start implementing the newly-created Promise-aware callback task list, validate behavior, update docs/diary/tasks, and commit when appropriate.
+
+**Inferred user intent:** Move beyond the design ticket and make the sessionstream JS bindings actually support Promise-returning callbacks.
+
+### What I did
+
+- Added `pkg/js/modules/sessionstream/api_promises.go` with Promise-aware callback execution helpers.
+- Updated `commandHandler`, `uiProjection`, and `timelineProjection` in `api_callbacks.go` to resolve Promise return values before continuing.
+- Added `hub.submitAsync(...)`, which returns a JavaScript Promise and runs `Hub.Submit` from a Go goroutine so the JS stack can unwind.
+- Added `publisher.publishAsync(...)`, which returns a Promise and runs event publication from a Go goroutine so async projections can settle without reentrant owner deadlocks.
+- Updated module runtime initialization to discover runtime services from `runtimebridge.Lookup(vm)` when an explicit `Options.RuntimeOwner` was not supplied.
+- Updated TypeScript declarations for Promise-capable handlers plus `submitAsync` and `publishAsync`.
+- Updated `pkg/js/modules/sessionstream/README.md` with async callback examples and caveats.
+- Updated `examples/goja-chatdemo-server/verbs/chatbot.js` to use literal `require("fs:assets")`, now that the go-go-goja sourcegraph parser supports configured colon aliases.
+- Added runtime-owner tests for async command success/rejection and async UI/timeline projections.
+
+### Why
+
+- Awaiting a pending Promise from inside the same synchronous JavaScript call deadlocks: the caller is blocking the stack that must unwind before Promise continuations can run.
+- Explicit async APIs make the scheduling model clear and preserve backward-compatible synchronous APIs for existing handlers.
+- `publishAsync` is needed because command handlers often publish events that immediately run projections; if those projections are async, synchronous `publish` has the same stack-unwind problem as synchronous `submit`.
+
+### What worked
+
+Focused and full tests passed:
+
+```bash
+go test ./pkg/js/modules/sessionstream ./pkg/sessionstream -count=1
+go test ./... -count=1
+```
+
+The xgoja chatdemo smoke passed after changing the assets import to a literal alias:
+
+```bash
+make -C examples/goja-chatdemo-server smoke
+```
+
+### What didn't work
+
+The first bare-Goja async test hung because `hub.submit(...)` was called synchronously from JavaScript while the command handler returned a pending Promise. I changed the direct no-owner Promise wait path to reject pending Promises instead of polling forever.
+
+The first runtime-owner test still timed out when it used synchronous `hub.submit(...)`: even with a runtime owner, the Promise continuation could not run while the original JS `hub.submit` call was blocked. This led to the `submitAsync` design.
+
+The next test failed when an async command used synchronous `pub.publish(...)` and the UI projection returned a Promise:
+
+```text
+sessionstream.uiProjection.ChatUserMessageAccepted returned a pending Promise during a synchronous owner call; use submitAsync or call from Go
+```
+
+That uncovered the same stack-unwind problem for event publication, so I added `publisher.publishAsync(...)` and updated the test to `await pub.publishAsync(...)`.
+
+### What I learned
+
+- Promise-aware callback support is not just a matter of checking `*goja.Promise`; synchronous JS-to-Go entry points need async alternatives.
+- `submitAsync` and `publishAsync` are the safe user-facing APIs for Promise-returning callback chains initiated from JavaScript.
+- Runtime services can be discovered through `runtimebridge.Lookup(vm)` for engine-created runtimes, which avoids requiring every module registration to explicitly pass `Options.RuntimeOwner`.
+
+### What was tricky to build
+
+- The hardest invariant is avoiding reentrant owner deadlocks. A Promise that is pending during a synchronous owner call must not be waited on by blocking that same JavaScript stack.
+- The implementation distinguishes fulfilled/rejected Promises from pending Promises. Fulfilled Promises can be handled immediately; pending Promises from synchronous owner calls produce a clear error telling users to use async APIs.
+- Async projections required `publishAsync`, not just `submitAsync`, because event publication runs projections as part of the same pipeline.
+
+### What warrants a second pair of eyes
+
+- Review whether `submitAsync` and `publishAsync` should be the final API names.
+- Review whether rejected Promises should reject with strings or JS Error objects when settling `submitAsync`/`publishAsync` Promises. The current implementation rejects with `err.Error()`.
+- Add explicit tests for rejected async UI/timeline projections and an Express route that uses `await hub.submitAsync(...)`.
+
+### What should be done in the future
+
+- Add explicit rejected projection tests.
+- Add an Express handler regression for async submit.
+- Consider updating the chatdemo server to use `submitAsync` if it gains a real async model call.
+
+### Code review instructions
+
+- Start with `pkg/js/modules/sessionstream/api_promises.go`.
+- Then review:
+  - `pkg/js/modules/sessionstream/api_callbacks.go`
+  - `pkg/js/modules/sessionstream/api_hub.go`
+  - `pkg/js/modules/sessionstream/module.go`
+  - `pkg/js/modules/sessionstream/typescript.go`
+  - `pkg/js/modules/sessionstream/module_test.go`
+- Validate with:
+
+```bash
+go test ./pkg/js/modules/sessionstream ./pkg/sessionstream -count=1
+go test ./... -count=1
+make -C examples/goja-chatdemo-server smoke
+```
+
+### Technical details
+
+The safe JavaScript pattern is now:
+
+```js
+hub.command("ChatStartInference", async (cmd, session, pub) => {
+  const answer = await model.ask(cmd.payload.prompt)
+  await pub.publishAsync("ChatUserMessageAccepted", buildEvent(answer))
+})
+
+await hub.submitAsync("s-1", "ChatStartInference", buildCommand("hello"))
+```
+
+Synchronous APIs remain for synchronous callback chains:
+
+```js
+hub.submit("s-1", "ChatStartInference", command)
+pub.publish("ChatUserMessageAccepted", event)
+```

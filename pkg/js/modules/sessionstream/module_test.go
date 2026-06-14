@@ -3,6 +3,7 @@ package sessionstream
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -100,6 +101,134 @@ func TestHubCommandProjectionAndSnapshotFromJavaScript(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, value.String(), "hello from js")
 	require.Contains(t, value.String(), "m1-user")
+}
+
+func TestHubPromiseAwareCallbacksFromJavaScript(t *testing.T) {
+	registry := ss.NewSchemaRegistry()
+	require.NoError(t, chatdemo.RegisterSchemas(registry))
+	store, err := storesqlite.NewInMemory(registry)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	factory, err := gggengine.NewRuntimeFactoryBuilder().
+		WithModules(
+			gggengine.NativeModuleRegistrar{ModuleName: ModuleName, Loader: NewLoader(Options{DefaultHydrationStore: store})},
+			gggengine.NativeModuleRegistrar{ModuleName: chatdemov1.GojaBuilderFileChatProtoModuleName(), Loader: chatdemov1.NewGojaBuilderFileChatProtoLoader("")},
+		).
+		Build()
+	require.NoError(t, err)
+	rt, err := factory.NewRuntime(gggengine.WithStartupContext(context.Background()), gggengine.WithLifetimeContext(context.Background()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	value, err := rt.Owner.Call(ctx, "sessionstream.promise.success", func(_ context.Context, vm *goja.Runtime) (any, error) {
+		return vm.RunString(`(async () => {
+			const ss = require("sessionstream");
+			const pb = require("sessionstream.examples.chatdemo.v1");
+			const schemas = ss.schemas()
+			  .registerCommand("ChatStartInference", pb.StartInferenceCommand)
+			  .registerEvent("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent)
+			  .registerUIEvent("ChatMessageAccepted", pb.ChatMessageUpdate)
+			  .registerTimelineEntity("ChatMessage", pb.ChatMessageEntity);
+			const hub = ss.hub({ schemas });
+			hub.command("ChatStartInference", async (cmd, session, pub) => {
+			  const prompt = await Promise.resolve(cmd.payload.prompt + ":async-command");
+			  await pub.publishAsync("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent.builder()
+			    .messageId("m-async").role("user").content(prompt).streaming(false).build());
+			});
+			hub.uiProjection(async (event) => {
+			  const content = await Promise.resolve(event.payload.content + ":async-ui");
+			  return [{
+			    name: "ChatMessageAccepted",
+			    payload: pb.ChatMessageUpdate.builder().messageId(event.payload.messageId).role("user").content(content).streaming(false).build(),
+			  }];
+			});
+			hub.timelineProjection(async (event) => {
+			  const content = await Promise.resolve(event.payload.content + ":async-timeline");
+			  return [{
+			    kind: "ChatMessage",
+			    id: event.payload.messageId,
+			    payload: pb.ChatMessageEntity.builder().messageId(event.payload.messageId).role("user").content(content).status("accepted").streaming(false).build(),
+			  }];
+			});
+			await hub.submitAsync("s-async", "ChatStartInference", pb.StartInferenceCommand.builder().prompt("hello").build());
+			return JSON.stringify(hub.snapshot("s-async"));
+		})()`)
+	})
+	require.NoError(t, err)
+	resolved, err := waitTestPromise(ctx, rt, value.(goja.Value))
+	require.NoError(t, err)
+	require.Contains(t, resolved.String(), "hello:async-command:async-timeline")
+	require.Contains(t, resolved.String(), "m-async")
+}
+
+func TestHubPromiseRejectedCommandReturnsError(t *testing.T) {
+	registry := ss.NewSchemaRegistry()
+	require.NoError(t, chatdemo.RegisterSchemas(registry))
+	store, err := storesqlite.NewInMemory(registry)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	factory, err := gggengine.NewRuntimeFactoryBuilder().
+		WithModules(
+			gggengine.NativeModuleRegistrar{ModuleName: ModuleName, Loader: NewLoader(Options{DefaultHydrationStore: store})},
+			gggengine.NativeModuleRegistrar{ModuleName: chatdemov1.GojaBuilderFileChatProtoModuleName(), Loader: chatdemov1.NewGojaBuilderFileChatProtoLoader("")},
+		).
+		Build()
+	require.NoError(t, err)
+	rt, err := factory.NewRuntime(gggengine.WithStartupContext(context.Background()), gggengine.WithLifetimeContext(context.Background()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	value, err := rt.Owner.Call(ctx, "sessionstream.promise.reject", func(_ context.Context, vm *goja.Runtime) (any, error) {
+		return vm.RunString(`(async () => {
+			const ss = require("sessionstream");
+			const pb = require("sessionstream.examples.chatdemo.v1");
+			const schemas = ss.schemas().registerCommand("ChatStartInference", pb.StartInferenceCommand);
+			const hub = ss.hub({ schemas });
+			hub.command("ChatStartInference", async () => {
+			  throw new Error("async boom");
+			});
+			await hub.submitAsync("s-reject", "ChatStartInference", pb.StartInferenceCommand.builder().prompt("hello").build());
+		})()`)
+	})
+	require.NoError(t, err)
+	_, err = waitTestPromise(ctx, rt, value.(goja.Value))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "async boom")
+}
+
+func waitTestPromise(ctx context.Context, rt *gggengine.Runtime, value goja.Value) (goja.Value, error) {
+	promise, ok := value.Export().(*goja.Promise)
+	if !ok {
+		return value, nil
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		ret, err := rt.Owner.Call(ctx, "sessionstream.test.promise-state", func(_ context.Context, vm *goja.Runtime) (any, error) {
+			return promiseSnapshot{State: promise.State(), Result: promise.Result()}, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		snapshot := ret.(promiseSnapshot)
+		switch snapshot.State {
+		case goja.PromiseStatePending:
+			time.Sleep(5 * time.Millisecond)
+		case goja.PromiseStateRejected:
+			return nil, fmt.Errorf("promise rejected: %s", jsValueString(snapshot.Result))
+		case goja.PromiseStateFulfilled:
+			return snapshot.Result, nil
+		}
+	}
 }
 
 func TestWebSocketServerMountsInExpress(t *testing.T) {

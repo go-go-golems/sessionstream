@@ -1,6 +1,7 @@
 package sessionstream
 
 import (
+	"context"
 	"strconv"
 
 	"github.com/dop251/goja"
@@ -68,6 +69,29 @@ func (m *moduleRuntime) wrapHub(hub *ss.Hub, schemas *ss.SchemaRegistry) goja.Va
 			panic(m.vm.NewGoError(err))
 		}
 		return goja.Undefined()
+	})
+	m.mustSet(obj, "submitAsync", func(sessionID, name string, payload goja.Value) goja.Value {
+		msg, err := m.jsValueToProto(schemas, schemaKindCommand, name, payload)
+		if err != nil {
+			panic(m.vm.NewGoError(err))
+		}
+		services, ok := runtimebridge.Lookup(m.vm)
+		if !ok || services.Owner == nil {
+			panic(m.vm.NewGoError(context.Canceled))
+		}
+		promise, resolve, reject := m.vm.NewPromise()
+		callCtx := runtimebridge.CurrentOwnerContext(m.vm)
+		go func() {
+			err := hub.Submit(callCtx, ss.SessionId(sessionID), name, msg)
+			_ = services.PostWithCustomContext(callCtx, "sessionstream.submitAsync.settle", func(context.Context, *goja.Runtime) {
+				if err != nil {
+					_ = reject(m.vm.ToValue(err.Error()))
+					return
+				}
+				_ = resolve(goja.Undefined())
+			})
+		}()
+		return m.vm.ToValue(promise)
 	})
 	m.mustSet(obj, "snapshot", func(sessionID string) goja.Value {
 		snap, err := hub.Snapshot(runtimebridge.CurrentOwnerContext(m.vm), ss.SessionId(sessionID))

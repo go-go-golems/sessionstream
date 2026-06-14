@@ -3,10 +3,7 @@ __package__({ name: "chatbot", short: "Sessionstream xgoja chatbot demo" })
 const express = require("express")
 const ss = require("sessionstream")
 const pb = require("sessionstream.examples.chatdemo.v1")
-// Keep this require computed so jsverb source scanning treats the embedded
-// assets module as a runtime dependency instead of trying to resolve it as a
-// source-file import.
-const assets = require(["fs", "assets"].join(":"))
+const assets = require("fs:assets")
 
 const sessionId = "demo"
 let messageSeq = 0

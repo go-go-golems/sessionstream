@@ -1,6 +1,7 @@
 package sessionstream
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/dop251/goja_nodejs/require"
 	"github.com/go-go-golems/go-go-goja/pkg/jsevents"
 	"github.com/go-go-golems/go-go-goja/pkg/protogoja"
+	"github.com/go-go-golems/go-go-goja/pkg/runtimebridge"
 	"github.com/go-go-golems/go-go-goja/pkg/runtimeowner"
 	ss "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 	ws "github.com/go-go-golems/sessionstream/pkg/sessionstream/transport/ws"
@@ -46,9 +48,19 @@ func Register(reg *require.Registry, opts Options) {
 
 type module struct{ opts Options }
 
+type callbackRuntimeOwner interface {
+	Call(ctx context.Context, op string, fn func(context.Context, *goja.Runtime) (any, error)) (any, error)
+}
+
+type runtimeOwnerAdapter struct{ owner runtimeowner.RuntimeOwner }
+
+func (a runtimeOwnerAdapter) Call(ctx context.Context, op string, fn func(context.Context, *goja.Runtime) (any, error)) (any, error) {
+	return a.owner.Call(ctx, op, runtimeowner.CallFunc(fn))
+}
+
 type moduleRuntime struct {
 	vm                          *goja.Runtime
-	runtimeOwner                runtimeowner.RuntimeOwner
+	runtimeOwner                callbackRuntimeOwner
 	eventEmitterManager         *jsevents.Manager
 	eventEmitterManagerResolver func() (*jsevents.Manager, bool)
 	defaultSchemaRegistry       *ss.SchemaRegistry
@@ -75,6 +87,15 @@ func (m *module) Loader(vm *goja.Runtime, moduleObj *goja.Object) {
 }
 
 func newRuntime(vm *goja.Runtime, opts Options) *moduleRuntime {
+	var runtimeOwner callbackRuntimeOwner
+	if opts.RuntimeOwner != nil {
+		runtimeOwner = runtimeOwnerAdapter{owner: opts.RuntimeOwner}
+	}
+	if runtimeOwner == nil {
+		if services, ok := runtimebridge.Lookup(vm); ok {
+			runtimeOwner = services.Owner
+		}
+	}
 	lg := opts.Logger
 	if lg.GetLevel() == zerolog.NoLevel {
 		lg = zerologlog.Logger
@@ -87,7 +108,7 @@ func newRuntime(vm *goja.Runtime, opts Options) *moduleRuntime {
 	}
 	return &moduleRuntime{
 		vm:                          vm,
-		runtimeOwner:                opts.RuntimeOwner,
+		runtimeOwner:                runtimeOwner,
 		eventEmitterManager:         opts.EventEmitterManager,
 		eventEmitterManagerResolver: opts.EventEmitterManagerResolver,
 		defaultSchemaRegistry:       opts.DefaultSchemaRegistry,

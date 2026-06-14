@@ -11,14 +11,26 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: examples/goja-chatdemo-server/verbs/chatbot.js
+      Note: Updated literal fs:assets import for parser-backed sourcegraph
     - Path: pkg/js/modules/sessionstream/api_callbacks.go
-      Note: Current synchronous JS command/projection callback adapters to update
+      Note: |-
+        Current synchronous JS command/projection callback adapters to update
+        Promise-aware command/projection callbacks and publishAsync
     - Path: pkg/js/modules/sessionstream/api_hub.go
-      Note: JS hub methods and owner-context pattern relevant to async handlers
+      Note: |-
+        JS hub methods and owner-context pattern relevant to async handlers
+        submitAsync and synchronous submit behavior
+    - Path: pkg/js/modules/sessionstream/api_promises.go
+      Note: Promise-aware callback wait helper
+    - Path: pkg/js/modules/sessionstream/module.go
+      Note: Runtime owner discovery through runtimebridge services
     - Path: pkg/js/modules/sessionstream/module_test.go
       Note: Existing Goja/xgoja integration tests to extend
     - Path: pkg/js/modules/sessionstream/typescript.go
-      Note: TypeScript callback signatures that need Promise return types
+      Note: |-
+        TypeScript callback signatures that need Promise return types
+        Promise-aware TypeScript declarations
     - Path: pkg/sessionstream/handler.go
       Note: Core synchronous/context-aware Go command handler contract
     - Path: pkg/sessionstream/hub.go
@@ -29,6 +41,7 @@ LastUpdated: 2026-06-14T00:00:00Z
 WhatFor: Implementing async/Promise-aware sessionstream JavaScript handlers.
 WhenToUse: Use when updating sessionstream Goja callback adapters, tests, and TypeScript declarations.
 ---
+
 
 
 # Promise-aware sessionstream JS callback design
@@ -147,7 +160,15 @@ hub.command("Ask", async (cmd, session, pub) => {
 })
 ```
 
-`hub.submit(...)` should not return until the async function resolves or rejects.
+For Go-initiated submissions, `Hub.Submit(...)` should not return until the async function resolves or rejects.
+
+For JavaScript-initiated submissions, add an explicit async API:
+
+```js
+await hub.submitAsync("s-1", "Ask", commandPayload)
+```
+
+A synchronous `hub.submit(...)` call cannot safely wait for a pending Promise returned by a JavaScript command handler because the JavaScript stack must unwind before the Promise continuation can run. `hub.submit(...)` remains supported for synchronous handlers; `hub.submitAsync(...)` is the safe API for Promise-returning handlers.
 
 ### Projection behavior
 
@@ -172,11 +193,24 @@ hub.uiProjection(async (event, session, view) => {
 
 Projection error policy should treat rejected Promises exactly like synchronous throws: the projection returns an error, and the existing fail/advance policy decides whether the pipeline stops or advances.
 
+When an async command publishes events that run async projections, use `publisher.publishAsync(...)`:
+
+```js
+hub.command("Ask", async (cmd, session, pub) => {
+  const answer = await model.ask(cmd.payload.prompt)
+  await pub.publishAsync("AnswerDone", { text: answer })
+})
+```
+
+Synchronous `publisher.publish(...)` remains supported for synchronous projection chains.
+
 ## Design Decisions
 
-### Decision: `Submit` waits for command Promise resolution
+### Decision: Go `Submit` waits, JavaScript uses `submitAsync` for pending Promises
 
-The core Go API is synchronous from `Submit`'s perspective. Promise-aware JS command handlers should preserve that model: `hub.submit` returns after the handler's Promise settles. If a handler wants fire-and-forget background work, it should explicitly schedule that work and return quickly.
+The core Go API is synchronous from `Submit`'s perspective. Promise-aware JS command handlers preserve that model when submission is initiated from Go or from an async-safe bridge.
+
+For JavaScript callers, pending Promise handlers require `hub.submitAsync(...)`. Synchronous `hub.submit(...)` cannot block on a pending Promise without preventing that Promise's continuation from running. If `hub.submit(...)` encounters a pending Promise in a synchronous owner call, it should fail with an actionable error instead of deadlocking.
 
 ### Decision: projections may be async but still return deterministic arrays
 
@@ -211,11 +245,12 @@ Possible, but inconsistent. Projections often need async enrichment when buildin
 3. Implement `awaitCallbackValue` or equivalent in `pkg/js/modules/sessionstream`.
 4. Update `commandHandler`, `uiProjection`, and `timelineProjection` to resolve returned Promises before continuing.
 5. Add success and rejection tests for commands, UI projections, and timeline projections.
-6. Add xgoja/runtime-owner integration tests, including an Express-handler path if practical.
-7. Update TypeScript declarations to include `Promise` return types.
-8. Update README/example docs with async callback examples.
-9. Run focused and full validation.
-10. Update diary, changelog, and file relationships.
+6. Add `hub.submitAsync(...)` and `publisher.publishAsync(...)` for JavaScript-initiated async callback chains.
+7. Add xgoja/runtime-owner integration tests, including an Express-handler path if practical.
+8. Update TypeScript declarations to include `Promise` return types and async APIs.
+9. Update README/example docs with async callback examples.
+10. Run focused and full validation.
+11. Update diary, changelog, and file relationships.
 
 ## Testing Strategy
 

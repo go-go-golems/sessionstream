@@ -12,10 +12,13 @@ Phase-1 coverage:
 - `hub.submit(sessionId, commandName, payload)` accepts generated protobuf builder
   values via `protogoja.MessageFromValue`, and also accepts plain JS objects that
   can be decoded by the registered protobuf schema.
-- `hub.command(name, fn)` adapts synchronous JavaScript command handlers.
-- `publisher.publish(eventName, payload)` publishes typed backend events.
-- `hub.uiProjection(fn)` and `hub.timelineProjection(fn)` adapt synchronous JS
-  projections with read-only `TimelineView` wrappers.
+- `hub.command(name, fn)` adapts synchronous JavaScript command handlers and
+  Promise-returning handlers when submitted through an async path.
+- `publisher.publish(eventName, payload)` publishes typed backend events;
+  `publisher.publishAsync(eventName, payload)` returns a Promise and is the
+  preferred form from async handlers when projections may also be async.
+- `hub.uiProjection(fn)` and `hub.timelineProjection(fn)` adapt synchronous or
+  Promise-returning JS projections with read-only `TimelineView` wrappers.
 - `eventEmitterFanout(emitter)` bridges `UIFanout` batches to Goja's Go-native
   `events.EventEmitter` through `jsevents.Manager`.
 - `webSocket.server(hub)` wraps the existing `transport/ws.Server` and exposes
@@ -46,6 +49,28 @@ hub.command("ChatStartInference", (cmd, session, pub) => {
       .build());
 });
 ```
+
+Async JavaScript handlers should use the async APIs so the JavaScript stack can
+unwind while Promises settle on the runtime owner:
+
+```js
+hub.command("ChatStartInference", async (cmd, session, pub) => {
+  const answer = await model.ask(cmd.payload.prompt);
+  await pub.publishAsync("ChatUserMessageAccepted",
+    pb.UserMessageAcceptedEvent.builder()
+      .messageId("m1-user")
+      .role("assistant")
+      .content(answer)
+      .build());
+});
+
+await hub.submitAsync("s-1", "ChatStartInference",
+  pb.StartInferenceCommand.builder().prompt("hello").build());
+```
+
+`hub.submit(...)` and `publisher.publish(...)` remain synchronous for existing
+handlers. If an async callback returns a pending Promise from a synchronous owner
+call, use `submitAsync` / `publishAsync` instead.
 
 Validation:
 
