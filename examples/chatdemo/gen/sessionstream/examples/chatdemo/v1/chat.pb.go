@@ -345,6 +345,74 @@ func (x *TokensDeltaEvent) GetStreaming() bool {
 	return false
 }
 
+type InferenceTraceEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	Stage         string                 `protobuf:"bytes,2,opt,name=stage,proto3" json:"stage,omitempty"`
+	Detail        string                 `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`
+	ElapsedMs     int64                  `protobuf:"varint,4,opt,name=elapsed_ms,json=elapsedMs,proto3" json:"elapsed_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InferenceTraceEvent) Reset() {
+	*x = InferenceTraceEvent{}
+	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InferenceTraceEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InferenceTraceEvent) ProtoMessage() {}
+
+func (x *InferenceTraceEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InferenceTraceEvent.ProtoReflect.Descriptor instead.
+func (*InferenceTraceEvent) Descriptor() ([]byte, []int) {
+	return file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *InferenceTraceEvent) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
+func (x *InferenceTraceEvent) GetStage() string {
+	if x != nil {
+		return x.Stage
+	}
+	return ""
+}
+
+func (x *InferenceTraceEvent) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *InferenceTraceEvent) GetElapsedMs() int64 {
+	if x != nil {
+		return x.ElapsedMs
+	}
+	return 0
+}
+
 type InferenceFinishedEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
@@ -359,7 +427,7 @@ type InferenceFinishedEvent struct {
 
 func (x *InferenceFinishedEvent) Reset() {
 	*x = InferenceFinishedEvent{}
-	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[5]
+	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -371,7 +439,7 @@ func (x *InferenceFinishedEvent) String() string {
 func (*InferenceFinishedEvent) ProtoMessage() {}
 
 func (x *InferenceFinishedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[5]
+	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -384,7 +452,7 @@ func (x *InferenceFinishedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InferenceFinishedEvent.ProtoReflect.Descriptor instead.
 func (*InferenceFinishedEvent) Descriptor() ([]byte, []int) {
-	return file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescGZIP(), []int{5}
+	return file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *InferenceFinishedEvent) GetMessageId() string {
@@ -443,7 +511,7 @@ type InferenceStoppedEvent struct {
 
 func (x *InferenceStoppedEvent) Reset() {
 	*x = InferenceStoppedEvent{}
-	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[6]
+	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -455,7 +523,7 @@ func (x *InferenceStoppedEvent) String() string {
 func (*InferenceStoppedEvent) ProtoMessage() {}
 
 func (x *InferenceStoppedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[6]
+	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -468,7 +536,7 @@ func (x *InferenceStoppedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InferenceStoppedEvent.ProtoReflect.Descriptor instead.
 func (*InferenceStoppedEvent) Descriptor() ([]byte, []int) {
-	return file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescGZIP(), []int{6}
+	return file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *InferenceStoppedEvent) GetMessageId() string {
@@ -530,7 +598,7 @@ type ChatMessageUpdate struct {
 
 func (x *ChatMessageUpdate) Reset() {
 	*x = ChatMessageUpdate{}
-	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[7]
+	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -542,7 +610,7 @@ func (x *ChatMessageUpdate) String() string {
 func (*ChatMessageUpdate) ProtoMessage() {}
 
 func (x *ChatMessageUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[7]
+	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -555,7 +623,7 @@ func (x *ChatMessageUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatMessageUpdate.ProtoReflect.Descriptor instead.
 func (*ChatMessageUpdate) Descriptor() ([]byte, []int) {
-	return file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescGZIP(), []int{7}
+	return file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ChatMessageUpdate) GetMessageId() string {
@@ -636,7 +704,7 @@ type ChatMessageEntity struct {
 
 func (x *ChatMessageEntity) Reset() {
 	*x = ChatMessageEntity{}
-	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[8]
+	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -648,7 +716,7 @@ func (x *ChatMessageEntity) String() string {
 func (*ChatMessageEntity) ProtoMessage() {}
 
 func (x *ChatMessageEntity) ProtoReflect() protoreflect.Message {
-	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[8]
+	mi := &file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -661,7 +729,7 @@ func (x *ChatMessageEntity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatMessageEntity.ProtoReflect.Descriptor instead.
 func (*ChatMessageEntity) Descriptor() ([]byte, []int) {
-	return file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescGZIP(), []int{8}
+	return file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ChatMessageEntity) GetMessageId() string {
@@ -743,7 +811,14 @@ const file_sessionstream_examples_chatdemo_v1_chat_proto_rawDesc = "" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12\x18\n" +
 	"\acontent\x18\x05 \x01(\tR\acontent\x12\x16\n" +
 	"\x06status\x18\x06 \x01(\tR\x06status\x12\x1c\n" +
-	"\tstreaming\x18\a \x01(\bR\tstreaming\"\xaf\x01\n" +
+	"\tstreaming\x18\a \x01(\bR\tstreaming\"\x81\x01\n" +
+	"\x13InferenceTraceEvent\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x14\n" +
+	"\x05stage\x18\x02 \x01(\tR\x05stage\x12\x16\n" +
+	"\x06detail\x18\x03 \x01(\tR\x06detail\x12\x1d\n" +
+	"\n" +
+	"elapsed_ms\x18\x04 \x01(\x03R\telapsedMs\"\xaf\x01\n" +
 	"\x16InferenceFinishedEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x12\n" +
@@ -793,17 +868,18 @@ func file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescGZIP() []byte {
 	return file_sessionstream_examples_chatdemo_v1_chat_proto_rawDescData
 }
 
-var file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_sessionstream_examples_chatdemo_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_sessionstream_examples_chatdemo_v1_chat_proto_goTypes = []any{
 	(*StartInferenceCommand)(nil),    // 0: sessionstream.examples.chatdemo.v1.StartInferenceCommand
 	(*StopInferenceCommand)(nil),     // 1: sessionstream.examples.chatdemo.v1.StopInferenceCommand
 	(*UserMessageAcceptedEvent)(nil), // 2: sessionstream.examples.chatdemo.v1.UserMessageAcceptedEvent
 	(*InferenceStartedEvent)(nil),    // 3: sessionstream.examples.chatdemo.v1.InferenceStartedEvent
 	(*TokensDeltaEvent)(nil),         // 4: sessionstream.examples.chatdemo.v1.TokensDeltaEvent
-	(*InferenceFinishedEvent)(nil),   // 5: sessionstream.examples.chatdemo.v1.InferenceFinishedEvent
-	(*InferenceStoppedEvent)(nil),    // 6: sessionstream.examples.chatdemo.v1.InferenceStoppedEvent
-	(*ChatMessageUpdate)(nil),        // 7: sessionstream.examples.chatdemo.v1.ChatMessageUpdate
-	(*ChatMessageEntity)(nil),        // 8: sessionstream.examples.chatdemo.v1.ChatMessageEntity
+	(*InferenceTraceEvent)(nil),      // 5: sessionstream.examples.chatdemo.v1.InferenceTraceEvent
+	(*InferenceFinishedEvent)(nil),   // 6: sessionstream.examples.chatdemo.v1.InferenceFinishedEvent
+	(*InferenceStoppedEvent)(nil),    // 7: sessionstream.examples.chatdemo.v1.InferenceStoppedEvent
+	(*ChatMessageUpdate)(nil),        // 8: sessionstream.examples.chatdemo.v1.ChatMessageUpdate
+	(*ChatMessageEntity)(nil),        // 9: sessionstream.examples.chatdemo.v1.ChatMessageEntity
 }
 var file_sessionstream_examples_chatdemo_v1_chat_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -824,7 +900,7 @@ func file_sessionstream_examples_chatdemo_v1_chat_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sessionstream_examples_chatdemo_v1_chat_proto_rawDesc), len(file_sessionstream_examples_chatdemo_v1_chat_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -10,7 +10,7 @@ function render() {
     div.className = "msg " + (msg.role === "user" ? "user" : "assistant");
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.textContent = msg.role + " · " + msg.id + (msg.streaming ? " · streaming" : "");
+    meta.textContent = msg.role + " · " + msg.id + (msg.status ? " · " + msg.status : "") + (msg.streaming ? " · streaming" : "");
     div.appendChild(meta);
     div.appendChild(document.createTextNode(msg.content || msg.text || ""));
     el.appendChild(div);
@@ -31,6 +31,7 @@ function upsertFromPayload(p) {
     content: p.content || p.text || "",
     text: p.text || p.content || "",
     streaming: Boolean(p.streaming),
+    status: p.status || "",
   });
   render();
 }

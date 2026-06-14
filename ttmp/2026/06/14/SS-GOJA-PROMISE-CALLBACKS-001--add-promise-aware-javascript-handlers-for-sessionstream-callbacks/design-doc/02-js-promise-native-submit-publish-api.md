@@ -7,10 +7,18 @@ DocType: ""
 Intent: ""
 Owners: []
 RelatedFiles:
+    - Path: examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat_goja.pb.go
+      Note: Generated Goja builder for custom trace event
+    - Path: examples/chatdemo/proto/sessionstream/examples/chatdemo/v1/chat.proto
+      Note: Custom InferenceTraceEvent protobuf schema
     - Path: examples/goja-chatdemo-server/README.md
       Note: Documents intentional streaming delay
+    - Path: examples/goja-chatdemo-server/assets/public/app.js
+      Note: Displays trace status in browser UI
     - Path: examples/goja-chatdemo-server/verbs/chatbot.js
-      Note: Uses timer.sleep and Promise-native publish to slow fake streaming
+      Note: |-
+        Uses timer.sleep and Promise-native publish to slow fake streaming
+        Publishes custom trace protobuf from xgoja JavaScript
     - Path: examples/goja-chatdemo-server/xgoja.yaml
       Note: Adds go-go-goja core timer module for visible streaming delay
     - Path: pkg/js/modules/sessionstream/api_callbacks.go
@@ -29,6 +37,7 @@ LastUpdated: 0001-01-01T00:00:00Z
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 

@@ -677,3 +677,93 @@ async function publishWithDelay(pub, name, payload, delayMs = 250) {
   await timer.sleep(delayMs)
 }
 ```
+
+## Step 8: Add a custom protobuf trace event to the xgoja chatbot
+
+I added a custom protobuf message to the chatdemo schema and used it from the xgoja chatbot JavaScript. The new `InferenceTraceEvent` is generated into the existing `sessionstream.examples.chatdemo.v1` Goja builder module, registered as a sessionstream event in JavaScript, published during the fake assistant run, and projected into the browser UI as transient assistant status updates.
+
+This demonstrates the full custom-protobuf path: define a proto message, regenerate Go and Goja builder bindings, expose the builders through the xgoja provider, register the message in the sessionstream schema registry, and use the generated JS builder from an xgoja verb.
+
+### Prompt Context
+
+**User prompt (verbatim):** "nvm...\n\nNow let's add a custom protobuf to the xgoja, is that possible? and use that in the chatbot?"
+
+**Assistant interpretation:** Show that custom protobuf messages can be added to the xgoja app by adding one to the chatdemo schema and using its generated builder in the chatbot runtime.
+
+**Inferred user intent:** Verify the end-to-end extensibility story for application-specific protobuf payloads in xgoja/sessionstream JavaScript.
+
+### What I did
+
+- Added `InferenceTraceEvent` to `examples/chatdemo/proto/sessionstream/examples/chatdemo/v1/chat.proto`.
+- Regenerated:
+  - `examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat.pb.go`
+  - `examples/chatdemo/gen/sessionstream/examples/chatdemo/v1/chat_goja.pb.go`
+- Registered `ChatInferenceTrace` in `examples/chatdemo/chat.go` for the Go chatdemo schema helper.
+- Registered `ChatInferenceTrace` from JavaScript in `examples/goja-chatdemo-server/verbs/chatbot.js`.
+- Published trace events with `pb.InferenceTraceEvent.builder()` during fake assistant execution.
+- Projected trace events into `ChatMessageUpdate` UI events and timeline entity status updates.
+- Updated the browser client to show message `status` in the metadata line.
+
+### Why
+
+- This proves custom protobuf messages are not limited to built-in Go-side examples; xgoja can consume newly generated protobuf builders through the provider module.
+- Trace events give a visible use for the custom payload without changing the transport protocol.
+
+### What worked
+
+Generation and validation passed:
+
+```bash
+PATH="$PWD/.bin:$PATH" go generate ./examples/chatdemo
+make -C examples/goja-chatdemo-server smoke
+go test ./examples/chatdemo ./pkg/js/modules/sessionstream ./pkg/sessionstream -count=1
+go test ./... -count=1
+```
+
+### What didn't work
+
+- N/A. The generated Goja builder exposed the expected `elapsedMs(value: number | string)` method, and the xgoja smoke test passed.
+
+### What I learned
+
+- Adding a custom message to the existing chatdemo proto is enough for the current provider because `sessionstream-chatdemo` exposes the generated builder file module.
+- The JavaScript side only needs to register the generated message namespace with `schemas.registerEvent(...)` before publishing it.
+
+### What was tricky to build
+
+- The custom event should not be confused with UI events. It is a backend event (`ChatInferenceTrace`) that projections translate into existing UI/timeline protobufs.
+- Timeline projection for trace events needs to preserve any currently accumulated assistant text when updating status, so trace updates do not wipe the displayed message content.
+
+### What warrants a second pair of eyes
+
+- Review whether `InferenceTraceEvent` belongs in the shared `examples/chatdemo` schema or should eventually live in an app-local proto package when xgoja supports app-local protobuf providers more directly.
+
+### What should be done in the future
+
+- If we add app-local proto support to xgoja specs, move this style of custom message into `examples/goja-chatdemo-server/proto/...` and generate an app-local provider.
+
+### Code review instructions
+
+- Start with `examples/chatdemo/proto/sessionstream/examples/chatdemo/v1/chat.proto` and the generated `chat_goja.pb.go` diff.
+- Review `examples/goja-chatdemo-server/verbs/chatbot.js` for `pb.InferenceTraceEvent.builder()` usage.
+- Validate with:
+
+```bash
+make -C examples/goja-chatdemo-server smoke
+go test ./examples/chatdemo ./pkg/js/modules/sessionstream ./pkg/sessionstream -count=1
+```
+
+### Technical details
+
+The custom event registration and publication pattern is:
+
+```js
+schemas.registerEvent("ChatInferenceTrace", pb.InferenceTraceEvent)
+
+await pub.publish("ChatInferenceTrace", pb.InferenceTraceEvent.builder()
+  .messageId(assistantID)
+  .stage("planning")
+  .detail("Custom protobuf trace: planning a fake response")
+  .elapsedMs(Date.now() - startedAt)
+  .build())
+```

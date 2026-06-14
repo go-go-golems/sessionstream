@@ -26,6 +26,7 @@ func GojaBuilderFileChatProtoMessageTypes() []string {
 		"sessionstream.examples.chatdemo.v1.UserMessageAcceptedEvent",
 		"sessionstream.examples.chatdemo.v1.InferenceStartedEvent",
 		"sessionstream.examples.chatdemo.v1.TokensDeltaEvent",
+		"sessionstream.examples.chatdemo.v1.InferenceTraceEvent",
 		"sessionstream.examples.chatdemo.v1.InferenceFinishedEvent",
 		"sessionstream.examples.chatdemo.v1.InferenceStoppedEvent",
 		"sessionstream.examples.chatdemo.v1.ChatMessageUpdate",
@@ -120,6 +121,20 @@ func GojaBuilderFileChatProtoTypeScriptModule(moduleName string) *spec.Module {
 			"  clone(): TokensDeltaEventBuilder;",
 			"}",
 			"export const TokensDeltaEvent: MessageNamespace<TokensDeltaEvent, TokensDeltaEventBuilder>;",
+			"export interface InferenceTraceEvent extends ProtoMessage<\"sessionstream.examples.chatdemo.v1.InferenceTraceEvent\"> {}",
+			"export interface InferenceTraceEventBuilder {",
+			"  messageId(value: string): this;",
+			"  clearMessageId(): this;",
+			"  stage(value: string): this;",
+			"  clearStage(): this;",
+			"  detail(value: string): this;",
+			"  clearDetail(): this;",
+			"  elapsedMs(value: number | string): this;",
+			"  clearElapsedMs(): this;",
+			"  build(): InferenceTraceEvent;",
+			"  clone(): InferenceTraceEventBuilder;",
+			"}",
+			"export const InferenceTraceEvent: MessageNamespace<InferenceTraceEvent, InferenceTraceEventBuilder>;",
 			"export interface InferenceFinishedEvent extends ProtoMessage<\"sessionstream.examples.chatdemo.v1.InferenceFinishedEvent\"> {}",
 			"export interface InferenceFinishedEventBuilder {",
 			"  messageId(value: string): this;",
@@ -243,6 +258,13 @@ func NewGojaBuilderFileChatProtoLoader(moduleName string) require.ModuleLoader {
 		if err := exports.Set("TokensDeltaEvent", tokensDeltaEvent); err != nil {
 			panic(vm.NewGoError(err))
 		}
+		inferenceTraceEvent, err := NewInferenceTraceEventGojaNamespace(vm)
+		if err != nil {
+			panic(vm.NewGoError(err))
+		}
+		if err := exports.Set("InferenceTraceEvent", inferenceTraceEvent); err != nil {
+			panic(vm.NewGoError(err))
+		}
 		inferenceFinishedEvent, err := NewInferenceFinishedEventGojaNamespace(vm)
 		if err != nil {
 			panic(vm.NewGoError(err))
@@ -325,6 +347,9 @@ func RegisterGojaBuilderFileChatProtoMessageTypes(register func(string, proto.Me
 		return err
 	}
 	if err := register("sessionstream.examples.chatdemo.v1.TokensDeltaEvent", &TokensDeltaEvent{}); err != nil {
+		return err
+	}
+	if err := register("sessionstream.examples.chatdemo.v1.InferenceTraceEvent", &InferenceTraceEvent{}); err != nil {
 		return err
 	}
 	if err := register("sessionstream.examples.chatdemo.v1.InferenceFinishedEvent", &InferenceFinishedEvent{}); err != nil {
@@ -1171,6 +1196,181 @@ func attachTokensDeltaEventGojaBuilderMethods(vm *goja.Runtime, obj *goja.Object
 	}
 	if err := obj.Set("clearStreaming", func() goja.Value {
 		field := (&TokensDeltaEvent{}).ProtoReflect().Descriptor().Fields().ByName("streaming")
+		if err := builder.Clear(field); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return obj
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// NewInferenceTraceEventGojaNamespace returns the JavaScript namespace object for sessionstream.examples.chatdemo.v1.InferenceTraceEvent.
+func NewInferenceTraceEventGojaNamespace(vm *goja.Runtime) (*goja.Object, error) {
+	if vm == nil {
+		return nil, errors.New("protogoja: nil runtime")
+	}
+	obj := vm.NewObject()
+	if err := protogoja.AttachMessagePrototype(vm, obj, &InferenceTraceEvent{}); err != nil {
+		return nil, err
+	}
+	if err := obj.Set("typeName", "sessionstream.examples.chatdemo.v1.InferenceTraceEvent"); err != nil {
+		return nil, err
+	}
+	if err := obj.Set("builder", func() goja.Value {
+		builder, err := NewInferenceTraceEventGojaBuilder(vm)
+		if err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return builder
+	}); err != nil {
+		return nil, err
+	}
+	if err := obj.Set("from", func(value goja.Value) goja.Value {
+		msg, ok := protogoja.MessageFromValue(value)
+		if !ok || msg.ProtoReflect().Descriptor().FullName() != (&InferenceTraceEvent{}).ProtoReflect().Descriptor().FullName() {
+			panic(vm.NewTypeError("value is not a sessionstream.examples.chatdemo.v1.InferenceTraceEvent ProtoMessage"))
+		}
+		out, err := protogoja.ToValue(vm, msg)
+		if err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return out
+	}); err != nil {
+		return nil, err
+	}
+	if err := obj.Set("is", func(value goja.Value) bool {
+		return protogoja.IsMessageValueOf(value, (&InferenceTraceEvent{}).ProtoReflect().Descriptor().FullName())
+	}); err != nil {
+		return nil, err
+	}
+	if err := obj.Set("clone", func(value goja.Value) goja.Value {
+		msg, ok := protogoja.MessageFromValue(value)
+		if !ok || msg.ProtoReflect().Descriptor().FullName() != (&InferenceTraceEvent{}).ProtoReflect().Descriptor().FullName() {
+			panic(vm.NewTypeError("value is not a sessionstream.examples.chatdemo.v1.InferenceTraceEvent ProtoMessage"))
+		}
+		out, err := protogoja.ToValue(vm, msg)
+		if err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return out
+	}); err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
+// NewInferenceTraceEventGojaBuilder returns a JavaScript fluent builder object for sessionstream.examples.chatdemo.v1.InferenceTraceEvent.
+func NewInferenceTraceEventGojaBuilder(vm *goja.Runtime) (*goja.Object, error) {
+	if vm == nil {
+		return nil, errors.New("protogoja: nil runtime")
+	}
+	builder, err := protogoja.NewBuilder(&InferenceTraceEvent{})
+	if err != nil {
+		return nil, err
+	}
+	obj := vm.NewObject()
+	if err := protogoja.AttachBuilderRef(vm, obj, builder); err != nil {
+		return nil, err
+	}
+	if err := attachInferenceTraceEventGojaBuilderMethods(vm, obj, builder); err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
+func attachInferenceTraceEventGojaBuilderMethods(vm *goja.Runtime, obj *goja.Object, builder *protogoja.BuilderRef) error {
+	if err := obj.Set("build", func() goja.Value {
+		out, err := protogoja.ToValue(vm, builder.Build())
+		if err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return out
+	}); err != nil {
+		return err
+	}
+	if err := obj.Set("clone", func() goja.Value {
+		cloned, err := builder.Clone()
+		if err != nil {
+			panic(vm.NewGoError(err))
+		}
+		cloneObj := vm.NewObject()
+		if err := protogoja.AttachBuilderRef(vm, cloneObj, cloned); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		if err := attachInferenceTraceEventGojaBuilderMethods(vm, cloneObj, cloned); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return cloneObj
+	}); err != nil {
+		return err
+	}
+	if err := obj.Set("messageId", func(call goja.FunctionCall) goja.Value {
+		field := (&InferenceTraceEvent{}).ProtoReflect().Descriptor().Fields().ByName("message_id")
+		if err := builder.Set(vm, field, call.Argument(0)); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return obj
+	}); err != nil {
+		return err
+	}
+	if err := obj.Set("clearMessageId", func() goja.Value {
+		field := (&InferenceTraceEvent{}).ProtoReflect().Descriptor().Fields().ByName("message_id")
+		if err := builder.Clear(field); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return obj
+	}); err != nil {
+		return err
+	}
+	if err := obj.Set("stage", func(call goja.FunctionCall) goja.Value {
+		field := (&InferenceTraceEvent{}).ProtoReflect().Descriptor().Fields().ByName("stage")
+		if err := builder.Set(vm, field, call.Argument(0)); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return obj
+	}); err != nil {
+		return err
+	}
+	if err := obj.Set("clearStage", func() goja.Value {
+		field := (&InferenceTraceEvent{}).ProtoReflect().Descriptor().Fields().ByName("stage")
+		if err := builder.Clear(field); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return obj
+	}); err != nil {
+		return err
+	}
+	if err := obj.Set("detail", func(call goja.FunctionCall) goja.Value {
+		field := (&InferenceTraceEvent{}).ProtoReflect().Descriptor().Fields().ByName("detail")
+		if err := builder.Set(vm, field, call.Argument(0)); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return obj
+	}); err != nil {
+		return err
+	}
+	if err := obj.Set("clearDetail", func() goja.Value {
+		field := (&InferenceTraceEvent{}).ProtoReflect().Descriptor().Fields().ByName("detail")
+		if err := builder.Clear(field); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return obj
+	}); err != nil {
+		return err
+	}
+	if err := obj.Set("elapsedMs", func(call goja.FunctionCall) goja.Value {
+		field := (&InferenceTraceEvent{}).ProtoReflect().Descriptor().Fields().ByName("elapsed_ms")
+		if err := builder.Set(vm, field, call.Argument(0)); err != nil {
+			panic(vm.NewGoError(err))
+		}
+		return obj
+	}); err != nil {
+		return err
+	}
+	if err := obj.Set("clearElapsedMs", func() goja.Value {
+		field := (&InferenceTraceEvent{}).ProtoReflect().Descriptor().Fields().ByName("elapsed_ms")
 		if err := builder.Clear(field); err != nil {
 			panic(vm.NewGoError(err))
 		}

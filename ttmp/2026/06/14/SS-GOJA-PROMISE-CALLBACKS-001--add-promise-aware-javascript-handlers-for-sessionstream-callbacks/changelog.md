@@ -63,3 +63,13 @@ Added timer-backed delays to the xgoja chatdemo so websocket streaming is visibl
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/verbs/chatbot.js — Delayed fake streaming publication
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/xgoja.yaml — Timer module selection
 
+
+## 2026-06-14
+
+Added custom InferenceTraceEvent protobuf, regenerated Go/Goja builders, and used it from the xgoja chatbot.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/chatdemo/proto/sessionstream/examples/chatdemo/v1/chat.proto — Custom trace message
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/verbs/chatbot.js — Trace event publication
+

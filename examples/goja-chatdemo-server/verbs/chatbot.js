@@ -22,6 +22,7 @@ function registerSchemas() {
     .registerEvent("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent)
     .registerEvent("ChatInferenceStarted", pb.InferenceStartedEvent)
     .registerEvent("ChatTokensDelta", pb.TokensDeltaEvent)
+    .registerEvent("ChatInferenceTrace", pb.InferenceTraceEvent)
     .registerEvent("ChatInferenceFinished", pb.InferenceFinishedEvent)
     .registerUIEvent("ChatMessageAccepted", pb.ChatMessageUpdate)
     .registerUIEvent("ChatAssistantStarted", pb.ChatMessageUpdate)
@@ -39,6 +40,15 @@ async function publishWithDelay(pub, name, payload, delayMs = 250) {
   await timer.sleep(delayMs)
 }
 
+async function publishTrace(pub, messageID, stage, detail, startedAt) {
+  await publishWithDelay(pub, "ChatInferenceTrace", pb.InferenceTraceEvent.builder()
+    .messageId(messageID)
+    .stage(stage)
+    .detail(detail)
+    .elapsedMs(Date.now() - startedAt)
+    .build(), 300)
+}
+
 function configureHub() {
   const schemas = registerSchemas()
   const h = ss.hub({ schemas })
@@ -48,6 +58,7 @@ function configureHub() {
     const userID = nextMessageId("user")
     const assistantID = nextMessageId("assistant")
     const answer = fakeAnswer(prompt)
+    const startedAt = Date.now()
     const midpoint = Math.max(1, Math.floor(answer.length / 2))
     const chunks = [answer.slice(0, midpoint), answer.slice(midpoint)]
 
@@ -57,9 +68,12 @@ function configureHub() {
     await publishWithDelay(pub, "ChatInferenceStarted", pb.InferenceStartedEvent.builder()
       .messageId(assistantID).prompt(prompt).role("assistant").content("").status("streaming").streaming(true).build(), 350)
 
+    await publishTrace(pub, assistantID, "planning", "Custom protobuf trace: planning a fake response", startedAt)
+
     let accumulated = ""
     for (const chunk of chunks) {
       accumulated += chunk
+      await publishTrace(pub, assistantID, "chunk", `Custom protobuf trace: publishing ${chunk.length} characters`, startedAt)
       await publishWithDelay(pub, "ChatTokensDelta", pb.TokensDeltaEvent.builder()
         .messageId(assistantID).role("assistant").chunk(chunk).text(accumulated).content(accumulated).status("streaming").streaming(true).build(), 650)
     }
@@ -82,6 +96,10 @@ function configureHub() {
       return [{ name: "ChatAssistantDelta", payload: pb.ChatMessageUpdate.builder()
         .messageId(p.messageId).role(p.role).chunk(p.chunk).text(p.text).content(p.content).status(p.status).streaming(true).build() }]
     }
+    if (event.name === "ChatInferenceTrace") {
+      return [{ name: "ChatAssistantDelta", payload: pb.ChatMessageUpdate.builder()
+        .messageId(p.messageId).role("assistant").content(p.detail).status(`${p.stage} · ${p.elapsedMs}ms`).streaming(true).build() }]
+    }
     if (event.name === "ChatInferenceFinished") {
       return [{ name: "ChatAssistantFinished", payload: pb.ChatMessageUpdate.builder()
         .messageId(p.messageId).role(p.role).text(p.text).content(p.content).status(p.status).streaming(false).build() }]
@@ -98,6 +116,12 @@ function configureHub() {
     if (event.name === "ChatInferenceStarted") {
       return [{ kind: "ChatMessage", id: p.messageId, payload: pb.ChatMessageEntity.builder()
         .messageId(p.messageId).role(p.role).content("").status(p.status).streaming(true).build() }]
+    }
+    if (event.name === "ChatInferenceTrace") {
+      const current = view.get("ChatMessage", p.messageId)
+      const currentPayload = (current && current.payload) || {}
+      return [{ kind: "ChatMessage", id: p.messageId, payload: pb.ChatMessageEntity.builder()
+        .messageId(p.messageId).role("assistant").text(currentPayload.text || currentPayload.content || p.detail).content(currentPayload.content || p.detail).status(`${p.stage} · ${p.elapsedMs}ms`).streaming(true).build() }]
     }
     if (event.name === "ChatTokensDelta" || event.name === "ChatInferenceFinished") {
       return [{ kind: "ChatMessage", id: p.messageId, payload: pb.ChatMessageEntity.builder()
