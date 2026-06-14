@@ -100,3 +100,13 @@ Step 9: finished the real xgoja goja-chatdemo-server smoke against RuntimePlan v
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_callbacks.go — Publisher preserves current owner context
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/sessionstream/hub.go — Dynamic SetUIFanout for xgoja WebSocket composition
 
+
+## 2026-06-14
+
+Step 10: split chatdemo browser UI into xgoja embedded assets, served CSS/JS through fs:assets/staticFromAssetsModule, and added /api/config plus ?sessionId= override (commit 5eba490).
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/assets/public/app.js — Browser session id selection and WebSocket client
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/xgoja.yaml — Embedded assets source and artifact
+

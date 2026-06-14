@@ -27,12 +27,22 @@ RelatedFiles:
       Note: |-
         Standardized ci-check
         Fixes hosted CI missing rg and protoc-gen-goja-builder failures
+    - Path: examples/goja-chatdemo-server/assets/public/app.css
+      Note: Step 10 embedded chatbot CSS (commit 5eba490)
+    - Path: examples/goja-chatdemo-server/assets/public/app.js
+      Note: Step 10 embedded chatbot browser client and session id selection (commit 5eba490)
+    - Path: examples/goja-chatdemo-server/assets/public/index.html
+      Note: Step 10 embedded chatbot HTML (commit 5eba490)
     - Path: examples/goja-chatdemo-server/cmd/smoke-client/main.go
       Note: Step 9 WebSocket/API smoke client (commit d852d8b)
     - Path: examples/goja-chatdemo-server/verbs/chatbot.js
-      Note: Step 9 JavaScript-owned Express/sessionstream chatbot app (commit d852d8b)
+      Note: |-
+        Step 9 JavaScript-owned Express/sessionstream chatbot app (commit d852d8b)
+        Step 10 serves embedded assets and config endpoint (commit 5eba490)
     - Path: examples/goja-chatdemo-server/xgoja.yaml
-      Note: Step 9 RuntimePlan v2 chatbot server spec with canonical provider IDs (commit d852d8b)
+      Note: |-
+        Step 9 RuntimePlan v2 chatbot server spec with canonical provider IDs (commit d852d8b)
+        Step 10 embedded-assets source and fs:assets runtime module (commit 5eba490)
     - Path: examples/goja-chatdemo/README.md
       Note: Operator documentation for the goja-chatdemo proof
     - Path: examples/goja-chatdemo/goja_chatdemo_test.go
@@ -93,6 +103,7 @@ LastUpdated: 2026-06-12T15:35:00-04:00
 WhatFor: Continuation context for implementing or reviewing the sessionstream Goja binding design.
 WhenToUse: Read before resuming SS-GOJA-001 implementation or revising the design.
 ---
+
 
 
 
@@ -1192,4 +1203,130 @@ The critical context-preserving change is:
 ```go
 hub.Submit(runtimebridge.CurrentOwnerContext(m.vm), ss.SessionId(sessionID), name, msg)
 pub.Publish(runtimebridge.CurrentOwnerContext(m.vm), ss.Event{Name: name, SessionId: sid, Payload: msg})
+```
+
+## Step 10: Move chatbot UI into embedded xgoja assets
+
+I split the browser UI out of the `chatbot.js` server verb and into embedded xgoja assets. The xgoja spec now declares an `assets` source and an `embedded-assets` artifact, then exposes those files to the JavaScript runtime as `require("fs:assets")` through the host filesystem provider.
+
+The result is still a self-contained generated binary, but the browser-facing code is now structured like a normal small web app: `index.html`, `app.css`, and `app.js`. The frontend obtains the default session id from `/api/config`, and users can override it with `?sessionId=...` in the browser URL.
+
+### Prompt Context
+
+**User prompt (verbatim):** "use the xgoja embedded asset feature for the html and separate css and js out (if there's a way to provide the sessionId?)"
+
+**Assistant interpretation:** Refactor the chatdemo server so HTML/CSS/client JS are embedded assets instead of an inline server string, and provide a browser-facing way to choose a session id.
+
+**Inferred user intent:** Make the example closer to a real browser app while keeping it self-contained in the generated xgoja binary.
+
+**Commit (code):** 5eba490 — "Serve chatdemo UI from embedded xgoja assets"
+
+### What I did
+
+- Added embedded browser assets:
+  - `examples/goja-chatdemo-server/assets/public/index.html`
+  - `examples/goja-chatdemo-server/assets/public/app.css`
+  - `examples/goja-chatdemo-server/assets/public/app.js`
+- Updated `examples/goja-chatdemo-server/xgoja.yaml` to:
+  - add provider `go-go-goja-host`;
+  - select `go-go-goja-host.fs` as `fs:assets`;
+  - mount asset source `app-assets` at `/app`;
+  - add `sources[]` entry `app-assets` with `kind: assets`;
+  - add an `embedded-assets` artifact for `app-assets`.
+- Updated `verbs/chatbot.js` to:
+  - load `fs:assets`;
+  - serve `/` from `/app/public/index.html`;
+  - serve static browser assets under `/assets` using `app.staticFromAssetsModule`;
+  - expose `/api/config` with `{ defaultSessionId: "demo" }`.
+- Updated the frontend JavaScript so session id resolution is:
+  - `?sessionId=...` query parameter first;
+  - `/api/config.defaultSessionId` fallback;
+  - hardcoded `demo` final fallback.
+- Strengthened the smoke target to verify `/api/config`, `/assets/app.css`, and `/assets/app.js` in addition to the WebSocket chat flow.
+
+### Why
+
+- Keeping HTML/CSS/client JS as separate embedded files makes the example easier to edit and closer to production structure.
+- Embedding assets preserves the single-binary property while avoiding a large server-side HTML template string.
+- A config endpoint is the clean way to provide server defaults to static JavaScript without server-side templating.
+
+### What worked
+
+Validation passed:
+
+```bash
+make -C examples/goja-chatdemo-server smoke
+make ci-check
+```
+
+`xgoja doctor` now reports both source plans:
+
+```text
+source-plan ok sites      jsverbs 1
+source-plan ok app-assets assets  3
+```
+
+The smoke target verifies the complete path: embedded asset source planning, binary generation, HTTP serve, `/api/config`, `/`, `/assets/app.css`, `/assets/app.js`, `/api/chat`, and WebSocket assistant completion.
+
+### What didn't work
+
+- A direct `require("fs:assets")` in the jsverb file caused source graph import resolution to fail with `chatbot.js imports unknown bare specifier "fs:assets"`. A computed require still initially matched `"fs"` when written as `require("fs" + ":assets")`.
+- I changed it to `require(["fs", "assets"].join(":"))`, which keeps the runtime dependency explicit in code while avoiding source-file import resolution for the embedded asset module.
+
+### What I learned
+
+- `app.staticFromAssetsModule` is the right serving path for embedded assets because it serves directly from the read-only embedded asset filesystem.
+- Static browser JavaScript cannot receive per-request values through Goja server-side string interpolation anymore, so `/api/config` plus URL query parameters is a better boundary.
+- The jsverb source graph currently treats literal bare `require(...)` strings as source imports. Runtime-only aliases with names such as `fs:assets` may need either a computed require in app code or improved alias handling in go-go-goja.
+
+### What was tricky to build
+
+- The main sharp edge was source graph import scanning. The runtime can load `fs:assets`, but the jsverb source scanner rejected the literal bare specifier before runtime execution. The workaround keeps the example working without weakening the embedded-assets design.
+- The session id cannot be embedded dynamically into static `app.js` unless the server templates that file. The cleaner approach is a stable `/api/config` endpoint and a query parameter override.
+
+### What warrants a second pair of eyes
+
+- Decide whether go-go-goja's jsverb source graph should accept selected runtime aliases containing `:` so examples can use literal `require("fs:assets")`.
+- Decide whether the example should expose a UI field for switching sessions after page load, or keep URL query parameters as the only session override.
+
+### What should be done in the future
+
+- Consider adding a go-go-goja regression for jsverb source graph import resolution with aliases such as `fs:assets`.
+
+### Code review instructions
+
+- Start with `examples/goja-chatdemo-server/xgoja.yaml` to review the embedded asset source and `fs:assets` mount.
+- Read `examples/goja-chatdemo-server/verbs/chatbot.js` for server routes and asset serving.
+- Read `examples/goja-chatdemo-server/assets/public/app.js` for session id resolution and WebSocket behavior.
+- Validate with:
+
+```bash
+make -C examples/goja-chatdemo-server smoke
+```
+
+### Technical details
+
+The xgoja asset setup is:
+
+```yaml
+runtime:
+  modules:
+    - provider: go-go-goja-host
+      name: fs
+      as: fs:assets
+      config:
+        embedded:
+          allow: true
+          mounts:
+            - asset: app-assets
+              mount: /app
+sources:
+  - id: app-assets
+    kind: assets
+    from:
+      dir: ./assets
+artifacts:
+  - id: embedded-assets
+    type: embedded-assets
+    sources: [app-assets]
 ```
