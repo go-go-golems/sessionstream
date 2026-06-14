@@ -61,6 +61,10 @@ topics:
       description: Express-style Goja HTTP module and route registration APIs
     - slug: xgoja
       description: xgoja runtime generation, providers, command sets, and application specs
+    - slug: async
+      description: Asynchronous callbacks, promises, and non-blocking workflows
+    - slug: js-bindings
+      description: JavaScript binding APIs exposed through Goja/xgoja
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
