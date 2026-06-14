@@ -25,6 +25,24 @@
 - [x] Add `publisher.publishAsync(...)` for async handlers that publish events into async projections.
 - [x] Add tests for async command success, async command rejection, and sync command compatibility.
 
+### 2a. Promise-native JavaScript API redesign
+
+- [x] Add a second design document for Promise-native `submit`/`publish` plus queue semantics.
+- [ ] Replace JS `hub.submitAsync(...)` with Promise-returning `hub.submit(...)`.
+- [ ] Replace JS `publisher.publishAsync(...)` with Promise-returning `publisher.publish(...)`.
+- [ ] Remove JS `submitAsync(...)` and `publishAsync(...)` from the public API.
+- [ ] Ensure there are no JS `submitSync(...)` or `publishSync(...)` APIs.
+- [ ] Update tests, README, TypeScript declarations, and examples to use `await hub.submit(...)` and `await pub.publish(...)`.
+
+### 2b. Queue/accepted-for-processing API
+
+- [ ] Add per-hub FIFO queue state for JavaScript hub wrappers.
+- [ ] Add `hub.enqueue(sessionId, name, payload): Promise<EnqueueReceipt>`.
+- [ ] Make `enqueue` resolve after acceptance, not after command completion.
+- [ ] Include receipt fields: `accepted`, `id`, `sessionId`, `command`, and `depth`.
+- [ ] Add queue success tests proving background processing happens after enqueue resolution.
+- [ ] Add queue rejection tests for invalid payloads or queue acceptance failures.
+
 ### 3. Projection support
 
 - [x] Update `moduleRuntime.uiProjection` so callbacks may return `UIEvent[] | Promise<UIEvent[]>`.

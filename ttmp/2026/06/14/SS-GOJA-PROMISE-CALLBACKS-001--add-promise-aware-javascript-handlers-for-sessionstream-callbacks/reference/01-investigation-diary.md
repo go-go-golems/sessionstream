@@ -251,3 +251,67 @@ Synchronous APIs remain for synchronous callback chains:
 hub.submit("s-1", "ChatStartInference", command)
 pub.publish("ChatUserMessageAccepted", event)
 ```
+
+## Step 3: Redesign the JavaScript API around Promise-native submit/publish and enqueue
+
+I paused implementation to revisit the API shape. The earlier `submitAsync` and `publishAsync` names solved the runtime-owner deadlock, but they exposed an implementation detail instead of the JavaScript semantic model. The revised direction is to make JavaScript `hub.submit(...)` and `publisher.publish(...)` Promise-returning by default, remove sync variants from the JS surface, and reserve `hub.enqueue(...)` for accepted-for-processing semantics.
+
+This creates a cleaner contract: `await hub.submit(...)` means processing completed, while `await hub.enqueue(...)` means the job was accepted and will be processed by a per-hub background worker. That distinction matters for LLM/chatbot flows where some callers want completion and others want fire-and-forget queue behavior.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Ok, update, and remove the submidSync and publishSync entirely. Add a new design document. Also add enqueue. Then add new tasks and implement them one by one, keeping a diary as you work. Commit at appropriate intervals"
+
+**Assistant interpretation:** Redesign the API before continuing: no JS sync variants, natural Promise-returning `submit`/`publish`, a separate `enqueue` API, a new design document, updated tasks, incremental implementation, diary updates, and focused commits.
+
+**Inferred user intent:** Ensure the sessionstream JS API is ergonomic and semantically correct before the Promise-aware implementation becomes baked into the PR.
+
+### What I did
+
+- Added `design-doc/02-js-async-submit-publish-and-enqueue-api.md`.
+- Updated `tasks.md` with explicit Promise-native API redesign tasks and queue tasks.
+- Captured the distinction between completion semantics (`submit`/`publish`) and accepted-for-processing semantics (`enqueue`).
+
+### Why
+
+- `submitAsync`/`publishAsync` are workable bridge names, but idiomatic JavaScript should use Promise-returning `submit`/`publish`.
+- Queue semantics are useful but materially different from direct submission, so they need a separate method instead of changing what `submit` means.
+
+### What worked
+
+- The new design gives implementation steps that can be committed incrementally: first API rename, then enqueue worker, then docs/tests/validation.
+
+### What didn't work
+
+- N/A for this design-only step.
+
+### What I learned
+
+- The API should communicate semantics first and implementation strategy second. The runtime-owner workaround should be invisible to JavaScript users.
+
+### What was tricky to build
+
+- The subtle distinction is that a Promise-returning `submit` still means completion, while `enqueue` only means acceptance. Both are asynchronous in JavaScript, but they should not be interchangeable.
+
+### What warrants a second pair of eyes
+
+- Review whether the first `enqueue` implementation should be in-memory only, or whether it should immediately integrate with Watermill once commands have a bus representation.
+
+### What should be done in the future
+
+- Implement the Promise-native API rename.
+- Implement the in-memory per-hub enqueue worker and receipt.
+
+### Code review instructions
+
+- Start with `design-doc/02-js-async-submit-publish-and-enqueue-api.md` and the new sections in `tasks.md`.
+
+### Technical details
+
+Target API:
+
+```js
+await hub.submit(sessionId, commandName, payload)
+await publisher.publish(eventName, payload)
+const receipt = await hub.enqueue(sessionId, commandName, payload)
+```
