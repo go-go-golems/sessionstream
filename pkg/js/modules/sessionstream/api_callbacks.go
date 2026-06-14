@@ -30,33 +30,10 @@ func (m *moduleRuntime) wrapPublisher(schemas *ss.SchemaRegistry, sid ss.Session
 		if err != nil {
 			panic(m.vm.NewGoError(err))
 		}
-		if err := pub.Publish(runtimebridge.CurrentOwnerContext(m.vm), ss.Event{Name: name, SessionId: sid, Payload: msg}); err != nil {
-			panic(m.vm.NewGoError(err))
-		}
-		return goja.Undefined()
-	})
-	m.mustSet(obj, "publishAsync", func(name string, payload goja.Value) goja.Value {
-		msg, err := m.jsValueToProto(schemas, schemaKindEvent, name, payload)
-		if err != nil {
-			panic(m.vm.NewGoError(err))
-		}
-		services, ok := runtimebridge.Lookup(m.vm)
-		if !ok || services.Owner == nil {
-			panic(m.vm.NewGoError(fmt.Errorf("publishAsync requires runtime services")))
-		}
-		promise, resolve, reject := m.vm.NewPromise()
 		callCtx := runtimebridge.CurrentOwnerContext(m.vm)
-		go func() {
-			err := pub.Publish(callCtx, ss.Event{Name: name, SessionId: sid, Payload: msg})
-			_ = services.PostWithCustomContext(callCtx, "sessionstream.publishAsync.settle", func(context.Context, *goja.Runtime) {
-				if err != nil {
-					_ = reject(m.vm.ToValue(err.Error()))
-					return
-				}
-				_ = resolve(goja.Undefined())
-			})
-		}()
-		return m.vm.ToValue(promise)
+		return m.promiseFromGo(callCtx, "sessionstream.publish", func(ctx context.Context) error {
+			return pub.Publish(ctx, ss.Event{Name: name, SessionId: sid, Payload: msg})
+		})
 	})
 	return obj
 }

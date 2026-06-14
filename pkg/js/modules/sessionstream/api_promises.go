@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/go-go-golems/go-go-goja/pkg/runtimebridge"
 )
 
 type promiseSnapshot struct {
@@ -16,6 +17,29 @@ type promiseSnapshot struct {
 type callbackPromise struct {
 	Promise   *goja.Promise
 	Reentrant bool
+}
+
+func (m *moduleRuntime) promiseFromGo(ctx context.Context, label string, run func(context.Context) error) goja.Value {
+	promise, resolve, reject := m.vm.NewPromise()
+	settle := func(err error) {
+		if err != nil {
+			_ = reject(m.vm.ToValue(err.Error()))
+			return
+		}
+		_ = resolve(goja.Undefined())
+	}
+	services, ok := runtimebridge.Lookup(m.vm)
+	if !ok || services.Owner == nil {
+		settle(run(ctx))
+		return m.vm.ToValue(promise)
+	}
+	go func() {
+		err := run(ctx)
+		_ = services.PostWithCustomContext(ctx, label+".settle", func(context.Context, *goja.Runtime) {
+			settle(err)
+		})
+	}()
+	return m.vm.ToValue(promise)
 }
 
 func (m *moduleRuntime) callJSCallback(ctx context.Context, label string, call func(*goja.Runtime) (goja.Value, error), finish func(*goja.Runtime, goja.Value) (any, error)) (any, error) {
@@ -38,7 +62,7 @@ func (m *moduleRuntime) callJSCallback(ctx context.Context, label string, call f
 		}
 		if pending, ok := ret.(callbackPromise); ok {
 			if pending.Reentrant && pending.Promise.State() == goja.PromiseStatePending {
-				return nil, fmt.Errorf("%s returned a pending Promise during a synchronous owner call; use submitAsync or call from Go", label)
+				return nil, fmt.Errorf("%s returned a pending Promise during a synchronous owner call; use Promise-returning submit/publish from JavaScript or call from Go", label)
 			}
 			return m.awaitPromise(ctx, label, pending.Promise, finish)
 		}

@@ -9,14 +9,17 @@ Phase-1 coverage:
 - Schema entries can be registered from generated protobuf builder namespace
   tokens, for example `pb.StartInferenceCommand`.
 - `hub({ schemas, fanout })` wraps `sessionstream.Hub`.
-- `hub.submit(sessionId, commandName, payload)` accepts generated protobuf builder
-  values via `protogoja.MessageFromValue`, and also accepts plain JS objects that
-  can be decoded by the registered protobuf schema.
+- `hub.submit(sessionId, commandName, payload)` returns a Promise that resolves
+  after command handling and local projection work completes. It accepts
+  generated protobuf builder values via `protogoja.MessageFromValue`, and also
+  accepts plain JS objects that can be decoded by the registered protobuf schema.
+- `hub.enqueue(sessionId, commandName, payload)` returns a Promise that resolves
+  after the command is accepted by the per-hub in-memory queue; processing
+  continues in the background.
 - `hub.command(name, fn)` adapts synchronous JavaScript command handlers and
-  Promise-returning handlers when submitted through an async path.
-- `publisher.publish(eventName, payload)` publishes typed backend events;
-  `publisher.publishAsync(eventName, payload)` returns a Promise and is the
-  preferred form from async handlers when projections may also be async.
+  Promise-returning handlers.
+- `publisher.publish(eventName, payload)` publishes typed backend events and
+  returns a Promise that resolves after publication/projection completes.
 - `hub.uiProjection(fn)` and `hub.timelineProjection(fn)` adapt synchronous or
   Promise-returning JS projections with read-only `TimelineView` wrappers.
 - `eventEmitterFanout(emitter)` bridges `UIFanout` batches to Goja's Go-native
@@ -41,7 +44,7 @@ const schemas = ss.schemas()
 const hub = ss.hub({ schemas });
 
 hub.command("ChatStartInference", (cmd, session, pub) => {
-  pub.publish("ChatUserMessageAccepted",
+  return pub.publish("ChatUserMessageAccepted",
     pb.UserMessageAcceptedEvent.builder()
       .messageId("m1-user")
       .role("user")
@@ -50,13 +53,13 @@ hub.command("ChatStartInference", (cmd, session, pub) => {
 });
 ```
 
-Async JavaScript handlers should use the async APIs so the JavaScript stack can
+JavaScript submit/publish APIs are Promise-native so the JavaScript stack can
 unwind while Promises settle on the runtime owner:
 
 ```js
 hub.command("ChatStartInference", async (cmd, session, pub) => {
   const answer = await model.ask(cmd.payload.prompt);
-  await pub.publishAsync("ChatUserMessageAccepted",
+  await pub.publish("ChatUserMessageAccepted",
     pb.UserMessageAcceptedEvent.builder()
       .messageId("m1-user")
       .role("assistant")
@@ -64,13 +67,12 @@ hub.command("ChatStartInference", async (cmd, session, pub) => {
       .build());
 });
 
-await hub.submitAsync("s-1", "ChatStartInference",
+await hub.submit("s-1", "ChatStartInference",
   pb.StartInferenceCommand.builder().prompt("hello").build());
 ```
 
-`hub.submit(...)` and `publisher.publish(...)` remain synchronous for existing
-handlers. If an async callback returns a pending Promise from a synchronous owner
-call, use `submitAsync` / `publishAsync` instead.
+Use `hub.enqueue(...)` when the caller only needs accepted-for-processing
+semantics and does not need to wait for command/projection completion.
 
 Validation:
 

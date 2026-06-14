@@ -37,7 +37,7 @@ function configureHub() {
   const schemas = registerSchemas()
   const h = ss.hub({ schemas })
 
-  h.command("ChatStartInference", (cmd, _session, pub) => {
+  h.command("ChatStartInference", async (cmd, _session, pub) => {
     const prompt = String(cmd.payload.prompt || "")
     const userID = nextMessageId("user")
     const assistantID = nextMessageId("assistant")
@@ -45,20 +45,20 @@ function configureHub() {
     const midpoint = Math.max(1, Math.floor(answer.length / 2))
     const chunks = [answer.slice(0, midpoint), answer.slice(midpoint)]
 
-    pub.publish("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent.builder()
+    await pub.publish("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent.builder()
       .messageId(userID).role("user").content(prompt).streaming(false).build())
 
-    pub.publish("ChatInferenceStarted", pb.InferenceStartedEvent.builder()
+    await pub.publish("ChatInferenceStarted", pb.InferenceStartedEvent.builder()
       .messageId(assistantID).prompt(prompt).role("assistant").content("").status("streaming").streaming(true).build())
 
     let accumulated = ""
     for (const chunk of chunks) {
       accumulated += chunk
-      pub.publish("ChatTokensDelta", pb.TokensDeltaEvent.builder()
+      await pub.publish("ChatTokensDelta", pb.TokensDeltaEvent.builder()
         .messageId(assistantID).role("assistant").chunk(chunk).text(accumulated).content(accumulated).status("streaming").streaming(true).build())
     }
 
-    pub.publish("ChatInferenceFinished", pb.InferenceFinishedEvent.builder()
+    await pub.publish("ChatInferenceFinished", pb.InferenceFinishedEvent.builder()
       .messageId(assistantID).role("assistant").text(answer).content(answer).status("done").streaming(false).build())
   })
 
@@ -118,7 +118,7 @@ function serve() {
   app.staticFromAssetsModule("/assets", assets, "/app/public")
   app.get("/api/config", (_req, res) => res.json({ ok: true, defaultSessionId: sessionId }))
   app.get("/healthz", (_req, res) => res.json({ ok: true, app: "goja-chatdemo-server", connections: wsServer.connections().length }))
-  app.post("/api/chat", (req, res) => {
+  app.post("/api/chat", async (req, res) => {
     const body = req.body || {}
     const sid = String(body.sessionId || sessionId)
     const prompt = String(body.prompt || "")
@@ -126,7 +126,7 @@ function serve() {
       res.status(400).json({ ok: false, error: "prompt is required" })
       return
     }
-    hub.submit(sid, "ChatStartInference", pb.StartInferenceCommand.builder().prompt(prompt).build())
+    await hub.submit(sid, "ChatStartInference", pb.StartInferenceCommand.builder().prompt(prompt).build())
     res.json({ ok: true, sessionId: sid, snapshot: hub.snapshot(sid) })
   })
   app.mount("/ws", wsServer)

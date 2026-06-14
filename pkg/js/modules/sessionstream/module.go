@@ -73,6 +73,7 @@ type schemaRegistryRef struct{ registry *ss.SchemaRegistry }
 type hubRef struct {
 	hub     *ss.Hub
 	schemas *ss.SchemaRegistry
+	queue   *hubQueue
 }
 type fanoutRef struct {
 	fanout ss.UIFanout

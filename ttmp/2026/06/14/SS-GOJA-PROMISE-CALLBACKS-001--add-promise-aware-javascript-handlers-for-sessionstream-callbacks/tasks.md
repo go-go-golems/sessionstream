@@ -28,19 +28,19 @@
 ### 2a. Promise-native JavaScript API redesign
 
 - [x] Add a second design document for Promise-native `submit`/`publish` plus queue semantics.
-- [ ] Replace JS `hub.submitAsync(...)` with Promise-returning `hub.submit(...)`.
-- [ ] Replace JS `publisher.publishAsync(...)` with Promise-returning `publisher.publish(...)`.
-- [ ] Remove JS `submitAsync(...)` and `publishAsync(...)` from the public API.
-- [ ] Ensure there are no JS `submitSync(...)` or `publishSync(...)` APIs.
-- [ ] Update tests, README, TypeScript declarations, and examples to use `await hub.submit(...)` and `await pub.publish(...)`.
+- [x] Replace JS `hub.submitAsync(...)` with Promise-returning `hub.submit(...)`.
+- [x] Replace JS `publisher.publishAsync(...)` with Promise-returning `publisher.publish(...)`.
+- [x] Remove JS `submitAsync(...)` and `publishAsync(...)` from the public API.
+- [x] Ensure there are no JS `submitSync(...)` or `publishSync(...)` APIs.
+- [x] Update tests, README, TypeScript declarations, and examples to use `await hub.submit(...)` and `await pub.publish(...)`.
 
 ### 2b. Queue/accepted-for-processing API
 
-- [ ] Add per-hub FIFO queue state for JavaScript hub wrappers.
-- [ ] Add `hub.enqueue(sessionId, name, payload): Promise<EnqueueReceipt>`.
-- [ ] Make `enqueue` resolve after acceptance, not after command completion.
-- [ ] Include receipt fields: `accepted`, `id`, `sessionId`, `command`, and `depth`.
-- [ ] Add queue success tests proving background processing happens after enqueue resolution.
+- [x] Add per-hub FIFO queue state for JavaScript hub wrappers.
+- [x] Add `hub.enqueue(sessionId, name, payload): Promise<EnqueueReceipt>`.
+- [x] Make `enqueue` resolve after acceptance, not after command completion.
+- [x] Include receipt fields: `accepted`, `id`, `sessionId`, `command`, and `depth`.
+- [x] Add queue success tests proving background processing happens after enqueue resolution.
 - [ ] Add queue rejection tests for invalid payloads or queue acceptance failures.
 
 ### 3. Projection support
@@ -56,7 +56,7 @@
 
 - [x] Add tests using xgoja/go-go-goja runtime owner rather than only bare `goja.Runtime`.
 - [x] Verify async callback support avoids reentrant runtime-owner deadlocks by using `submitAsync` / `publishAsync`.
-- [ ] Add an Express-handler regression using `await hub.submitAsync(...)`.
+- [x] Add an Express-handler regression using `await hub.submit(...)`.
 - [ ] Verify callbacks invoked by bus consumers preserve the owner context and do not call Goja from arbitrary goroutines.
 - [x] Decide whether Promise support requires a go-go-goja runtime/event-loop dependency in the sessionstream module options.
 
@@ -76,6 +76,6 @@
 - [x] Run `go test ./... -count=1` in sessionstream.
 - [x] Run `make -C examples/goja-chatdemo-server smoke` if the example remains present and buildable.
 - [x] Update this diary after each implementation step.
-- [ ] Relate modified files to the design document with absolute paths.
-- [ ] Update changelog with each committed step.
-- [ ] Run `docmgr --root ttmp doctor --ticket SS-GOJA-PROMISE-CALLBACKS-001 --stale-after 30`.
+- [x] Relate modified files to the design document with absolute paths.
+- [x] Update changelog with each committed step.
+- [x] Run `docmgr --root ttmp doctor --ticket SS-GOJA-PROMISE-CALLBACKS-001 --stale-after 30`.

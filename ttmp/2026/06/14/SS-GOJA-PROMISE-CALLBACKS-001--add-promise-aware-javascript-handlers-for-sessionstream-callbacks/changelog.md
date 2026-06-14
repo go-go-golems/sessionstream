@@ -24,3 +24,13 @@ Implemented Promise-aware JS command/projection callbacks plus submitAsync/publi
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_hub.go — submitAsync API
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_promises.go — Promise wait helper
 
+
+## 2026-06-14
+
+Replaced JS submitAsync/publishAsync with Promise-native submit/publish and added in-memory hub.enqueue receipts; focused/full tests and chatdemo smoke pass.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_callbacks.go — publish implementation
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_hub.go — submit/enqueue implementation
+

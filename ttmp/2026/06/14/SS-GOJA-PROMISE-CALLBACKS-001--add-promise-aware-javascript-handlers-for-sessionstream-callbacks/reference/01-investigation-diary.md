@@ -315,3 +315,101 @@ await hub.submit(sessionId, commandName, payload)
 await publisher.publish(eventName, payload)
 const receipt = await hub.enqueue(sessionId, commandName, payload)
 ```
+
+## Step 4: Implement Promise-native submit/publish and in-memory enqueue
+
+I replaced the bridge-shaped `submitAsync` / `publishAsync` JavaScript API with Promise-native `hub.submit(...)` and `publisher.publish(...)`. There are no JS sync variants. Synchronous Go semantics remain in the core `Hub.Submit` API, while JavaScript callers now always see a Promise so async command/projection callbacks can settle without blocking the runtime owner.
+
+I also added `hub.enqueue(...)` as a distinct accepted-for-processing API. It uses a per-hub in-memory FIFO worker in the JavaScript wrapper. `enqueue` resolves with a receipt after the command is accepted into the queue; background processing errors are logged instead of being reported through the already-resolved receipt.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 3)
+
+**Assistant interpretation:** Implement the redesigned Promise-native JS API, add queue semantics, update tests/examples/docs, validate, and record the work.
+
+**Inferred user intent:** Land an ergonomic JS API now, before consumers start relying on the temporary `submitAsync` / `publishAsync` names.
+
+### What I did
+
+- Changed JS `hub.submit(...)` to return a Promise and execute `Hub.Submit` off the current JS stack when runtime services are available.
+- Removed the JS `hub.submitAsync(...)` public API.
+- Changed JS `publisher.publish(...)` to return a Promise and execute `EventPublisher.Publish` off the current JS stack when runtime services are available.
+- Removed the JS `publisher.publishAsync(...)` public API.
+- Added `hub.enqueue(...)` with an in-memory per-hub FIFO queue and receipt fields: `accepted`, `id`, `sessionId`, `command`, `depth`.
+- Updated TypeScript declarations, README, module tests, Express regression, fanout regression, and the xgoja chatdemo server to use `await hub.submit(...)` and `await pub.publish(...)`.
+- Added `TestHubEnqueueAcceptsAndProcessesInBackground`.
+
+### Why
+
+- Promise-native `submit`/`publish` is the idiomatic JavaScript API and avoids exposing implementation-specific `Async` suffixes.
+- A separate `enqueue` method preserves a clear semantic split between “processing completed” and “accepted for background processing”.
+
+### What worked
+
+Focused and full validation passed:
+
+```bash
+go test ./pkg/js/modules/sessionstream ./pkg/sessionstream -count=1
+go test ./... -count=1
+make -C examples/goja-chatdemo-server smoke
+```
+
+The Express regression now uses an async route handler with `await hub.submit(...)`, and the fanout regression awaits submission before checking emitted UI batches.
+
+### What didn't work
+
+After changing `hub.submit(...)` to return a Promise, existing tests that called `hub.submit(...)` without awaiting it observed empty snapshots or missing fanout events. The fix was to update the tests and examples to either `await hub.submit(...)` or return/await `pub.publish(...)` from command handlers.
+
+The first enqueue receipt assertion expected the command-generated message id in the receipt, but the receipt intentionally describes queue acceptance, not processing output. I changed the assertion to check receipt metadata and then poll the snapshot for background processing results.
+
+### What I learned
+
+- Making `submit` Promise-native forces call sites to be honest about whether they wait for completion.
+- `return pub.publish(...)` is a compact sync-looking command handler style that still gives the command pipeline completion semantics because the handler returns the Promise.
+- Queue receipts should not contain command output; they should only describe acceptance.
+
+### What was tricky to build
+
+- The runtime-owner boundary remains the critical invariant. `promiseFromGo` runs Go work outside the current JS stack, then posts Promise settlement back to the runtime services.
+- The queue worker cannot directly mutate Goja state from its goroutine; it only calls the Go hub. Any JS callback re-entry goes through the existing runtime-owner callback helper.
+- Existing sync-looking examples needed careful updates because ignoring a Promise now deliberately means fire-and-forget behavior.
+
+### What warrants a second pair of eyes
+
+- Review whether the in-memory queue should be explicitly configurable for depth instead of using a fixed default of 64.
+- Review whether failed enqueue jobs should call a JS-visible error hook in addition to structured logging.
+- Review whether `enqueue` should be disabled without runtime services, as currently implemented, or should support a synchronous no-owner fallback.
+
+### What should be done in the future
+
+- Add queue rejection tests for full queues or invalid payloads.
+- Add explicit rejected async UI/timeline projection tests.
+- Consider durable command queue support if command enqueue semantics need to survive process restarts.
+
+### Code review instructions
+
+- Start with `pkg/js/modules/sessionstream/api_hub.go` for `submit` and `enqueue`.
+- Then review `pkg/js/modules/sessionstream/api_callbacks.go` for Promise-returning `publish`.
+- Check `pkg/js/modules/sessionstream/api_promises.go` for runtime-owner-safe Promise settlement.
+- Validate with:
+
+```bash
+go test ./pkg/js/modules/sessionstream ./pkg/sessionstream -count=1
+go test ./... -count=1
+make -C examples/goja-chatdemo-server smoke
+```
+
+### Technical details
+
+Current JS API shape:
+
+```js
+hub.command("Ask", async (cmd, session, pub) => {
+  const answer = await model.ask(cmd.payload.prompt)
+  await pub.publish("AnswerDone", buildAnswer(answer))
+})
+
+await hub.submit("s-1", "Ask", buildAsk("hello"))
+const receipt = await hub.enqueue("s-1", "Ask", buildAsk("background"))
+```

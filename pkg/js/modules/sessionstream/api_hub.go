@@ -2,12 +2,67 @@ package sessionstream
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/dop251/goja"
 	"github.com/go-go-golems/go-go-goja/pkg/runtimebridge"
 	ss "github.com/go-go-golems/sessionstream/pkg/sessionstream"
+	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 )
+
+const defaultHubQueueDepth = 64
+
+type hubQueue struct {
+	m    *moduleRuntime
+	hub  *ss.Hub
+	jobs chan hubQueueJob
+}
+
+type hubQueueJob struct {
+	ctx       context.Context
+	id        string
+	sessionID ss.SessionId
+	name      string
+	payload   proto.Message
+}
+
+func newHubQueue(m *moduleRuntime, hub *ss.Hub) *hubQueue {
+	q := &hubQueue{m: m, hub: hub, jobs: make(chan hubQueueJob, defaultHubQueueDepth)}
+	go q.run()
+	return q
+}
+
+func (q *hubQueue) enqueue(ctx context.Context, sessionID ss.SessionId, name string, payload proto.Message) goja.Value {
+	promise, resolve, reject := q.m.vm.NewPromise()
+	if _, ok := runtimebridge.Lookup(q.m.vm); !ok {
+		_ = reject(q.m.vm.ToValue("sessionstream enqueue requires runtime services"))
+		return q.m.vm.ToValue(promise)
+	}
+	job := hubQueueJob{ctx: ctx, id: uuid.NewString(), sessionID: sessionID, name: name, payload: payload}
+	select {
+	case q.jobs <- job:
+		_ = resolve(q.m.vm.ToValue(map[string]any{
+			"accepted":  true,
+			"id":        job.id,
+			"sessionId": string(sessionID),
+			"command":   name,
+			"depth":     len(q.jobs),
+		}))
+	default:
+		_ = reject(q.m.vm.ToValue(fmt.Sprintf("sessionstream enqueue queue full for command %q", name)))
+	}
+	return q.m.vm.ToValue(promise)
+}
+
+func (q *hubQueue) run() {
+	for job := range q.jobs {
+		if err := q.hub.Submit(job.ctx, job.sessionID, job.name, job.payload); err != nil {
+			q.m.logger.Error().Err(err).Str("enqueue_id", job.id).Str("session_id", string(job.sessionID)).Str("command", job.name).Msg("sessionstream enqueue job failed")
+		}
+	}
+}
 
 func (m *moduleRuntime) hubBuilder(call goja.FunctionCall) goja.Value {
 	var schemasValue goja.Value
@@ -58,40 +113,24 @@ func (m *moduleRuntime) projectionPolicy(policy string) ss.ProjectionErrorPolicy
 
 func (m *moduleRuntime) wrapHub(hub *ss.Hub, schemas *ss.SchemaRegistry) goja.Value {
 	obj := m.vm.NewObject()
-	ref := &hubRef{hub: hub, schemas: schemas}
+	ref := &hubRef{hub: hub, schemas: schemas, queue: newHubQueue(m, hub)}
 	m.attachRef(obj, ref)
 	m.mustSet(obj, "submit", func(sessionID, name string, payload goja.Value) goja.Value {
 		msg, err := m.jsValueToProto(schemas, schemaKindCommand, name, payload)
 		if err != nil {
 			panic(m.vm.NewGoError(err))
 		}
-		if err := hub.Submit(runtimebridge.CurrentOwnerContext(m.vm), ss.SessionId(sessionID), name, msg); err != nil {
-			panic(m.vm.NewGoError(err))
-		}
-		return goja.Undefined()
+		callCtx := runtimebridge.CurrentOwnerContext(m.vm)
+		return m.promiseFromGo(callCtx, "sessionstream.submit", func(ctx context.Context) error {
+			return hub.Submit(ctx, ss.SessionId(sessionID), name, msg)
+		})
 	})
-	m.mustSet(obj, "submitAsync", func(sessionID, name string, payload goja.Value) goja.Value {
+	m.mustSet(obj, "enqueue", func(sessionID, name string, payload goja.Value) goja.Value {
 		msg, err := m.jsValueToProto(schemas, schemaKindCommand, name, payload)
 		if err != nil {
 			panic(m.vm.NewGoError(err))
 		}
-		services, ok := runtimebridge.Lookup(m.vm)
-		if !ok || services.Owner == nil {
-			panic(m.vm.NewGoError(context.Canceled))
-		}
-		promise, resolve, reject := m.vm.NewPromise()
-		callCtx := runtimebridge.CurrentOwnerContext(m.vm)
-		go func() {
-			err := hub.Submit(callCtx, ss.SessionId(sessionID), name, msg)
-			_ = services.PostWithCustomContext(callCtx, "sessionstream.submitAsync.settle", func(context.Context, *goja.Runtime) {
-				if err != nil {
-					_ = reject(m.vm.ToValue(err.Error()))
-					return
-				}
-				_ = resolve(goja.Undefined())
-			})
-		}()
-		return m.vm.ToValue(promise)
+		return ref.queue.enqueue(runtimebridge.CurrentOwnerContext(m.vm), ss.SessionId(sessionID), name, msg)
 	})
 	m.mustSet(obj, "snapshot", func(sessionID string) goja.Value {
 		snap, err := hub.Snapshot(runtimebridge.CurrentOwnerContext(m.vm), ss.SessionId(sessionID))

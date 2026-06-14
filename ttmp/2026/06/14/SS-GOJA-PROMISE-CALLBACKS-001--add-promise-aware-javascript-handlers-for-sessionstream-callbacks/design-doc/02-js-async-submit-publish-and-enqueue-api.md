@@ -1,13 +1,31 @@
 ---
-title: JS async submit/publish and enqueue API
-doc_type: design-doc
-topics:
-  - sessionstream
-  - goja
-  - js-bindings
-  - async
-created: 2026-06-14
+Title: ""
+Ticket: ""
+Status: ""
+Topics: []
+DocType: ""
+Intent: ""
+Owners: []
+RelatedFiles:
+    - Path: examples/goja-chatdemo-server/verbs/chatbot.js
+      Note: xgoja chatdemo uses await submit/publish
+    - Path: pkg/js/modules/sessionstream/api_callbacks.go
+      Note: Promise-native publisher.publish implementation
+    - Path: pkg/js/modules/sessionstream/api_hub.go
+      Note: Promise-native submit and in-memory enqueue implementation
+    - Path: pkg/js/modules/sessionstream/api_promises.go
+      Note: Shared Promise settlement helper
+    - Path: pkg/js/modules/sessionstream/module_test.go
+      Note: Promise-native submit/publish and enqueue regressions
+    - Path: pkg/js/modules/sessionstream/typescript.go
+      Note: Promise-native TypeScript declarations
+ExternalSources: []
+Summary: ""
+LastUpdated: 0001-01-01T00:00:00Z
+WhatFor: ""
+WhenToUse: ""
 ---
+
 
 # JS async submit/publish and enqueue API
 
