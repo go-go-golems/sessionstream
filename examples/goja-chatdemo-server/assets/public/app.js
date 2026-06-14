@@ -1,5 +1,7 @@
 const messages = new Map();
+const traces = [];
 const el = document.getElementById("messages");
+const traceEl = document.getElementById("traces");
 const statusEl = document.getElementById("status");
 const promptEl = document.getElementById("prompt");
 
@@ -18,6 +20,24 @@ function render() {
   el.scrollTop = el.scrollHeight;
 }
 
+function renderTraces() {
+  traceEl.innerHTML = "";
+  for (const trace of traces.slice(-40)) {
+    const div = document.createElement("div");
+    div.className = "trace";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = trace.messageId + " · " + trace.stage + " · " + trace.elapsedMs + "ms";
+    const detail = document.createElement("div");
+    detail.className = "detail";
+    detail.textContent = trace.detail || "";
+    div.appendChild(meta);
+    div.appendChild(detail);
+    traceEl.appendChild(div);
+  }
+  traceEl.scrollTop = traceEl.scrollHeight;
+}
+
 function payloadOf(frame) {
   const p = frame.payload || {};
   return p.value || p;
@@ -34,6 +54,17 @@ function upsertFromPayload(p) {
     status: p.status || "",
   });
   render();
+}
+
+function appendTraceFromPayload(p) {
+  if (!p || !p.messageId) return;
+  traces.push({
+    messageId: p.messageId,
+    stage: p.stage || "trace",
+    detail: p.detail || "",
+    elapsedMs: p.elapsedMs || "0",
+  });
+  renderTraces();
 }
 
 async function loadConfig() {
@@ -60,7 +91,10 @@ function connectWebSocket(sessionId) {
     if (frame.snapshot) {
       for (const ent of frame.snapshot.entities || []) upsertFromPayload(payloadOf(ent));
     }
-    if (frame.uiEvent) upsertFromPayload(payloadOf(frame.uiEvent));
+    if (frame.uiEvent) {
+      if (frame.uiEvent.name === "ChatInferenceTrace") appendTraceFromPayload(payloadOf(frame.uiEvent));
+      else upsertFromPayload(payloadOf(frame.uiEvent));
+    }
     if (frame.error) console.error(frame.error);
   };
   ws.onclose = () => { statusEl.textContent = "websocket closed"; };

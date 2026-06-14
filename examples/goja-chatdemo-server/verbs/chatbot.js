@@ -28,6 +28,7 @@ function registerSchemas() {
     .registerUIEvent("ChatAssistantStarted", pb.ChatMessageUpdate)
     .registerUIEvent("ChatAssistantDelta", pb.ChatMessageUpdate)
     .registerUIEvent("ChatAssistantFinished", pb.ChatMessageUpdate)
+    .registerUIEvent("ChatInferenceTrace", pb.InferenceTraceEvent)
     .registerTimelineEntity("ChatMessage", pb.ChatMessageEntity)
 }
 
@@ -97,8 +98,7 @@ function configureHub() {
         .messageId(p.messageId).role(p.role).chunk(p.chunk).text(p.text).content(p.content).status(p.status).streaming(true).build() }]
     }
     if (event.name === "ChatInferenceTrace") {
-      return [{ name: "ChatAssistantDelta", payload: pb.ChatMessageUpdate.builder()
-        .messageId(p.messageId).role("assistant").content(p.detail).status(`${p.stage} · ${p.elapsedMs}ms`).streaming(true).build() }]
+      return [{ name: "ChatInferenceTrace", payload: p }]
     }
     if (event.name === "ChatInferenceFinished") {
       return [{ name: "ChatAssistantFinished", payload: pb.ChatMessageUpdate.builder()
@@ -118,10 +118,7 @@ function configureHub() {
         .messageId(p.messageId).role(p.role).content("").status(p.status).streaming(true).build() }]
     }
     if (event.name === "ChatInferenceTrace") {
-      const current = view.get("ChatMessage", p.messageId)
-      const currentPayload = (current && current.payload) || {}
-      return [{ kind: "ChatMessage", id: p.messageId, payload: pb.ChatMessageEntity.builder()
-        .messageId(p.messageId).role("assistant").text(currentPayload.text || currentPayload.content || p.detail).content(currentPayload.content || p.detail).status(`${p.stage} · ${p.elapsedMs}ms`).streaming(true).build() }]
+      return []
     }
     if (event.name === "ChatTokensDelta" || event.name === "ChatInferenceFinished") {
       return [{ kind: "ChatMessage", id: p.messageId, payload: pb.ChatMessageEntity.builder()

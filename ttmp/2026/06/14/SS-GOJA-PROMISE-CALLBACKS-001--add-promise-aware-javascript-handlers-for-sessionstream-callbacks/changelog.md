@@ -73,3 +73,14 @@ Added custom InferenceTraceEvent protobuf, regenerated Go/Goja builders, and use
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/chatdemo/proto/sessionstream/examples/chatdemo/v1/chat.proto — Custom trace message
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/verbs/chatbot.js — Trace event publication
 
+
+## 2026-06-14
+
+Split custom trace events into a dedicated browser trace pane instead of overwriting the assistant streaming message.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/assets/public/app.js — Routes trace UI events to separate pane
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/assets/public/index.html — Adds trace pane
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/verbs/chatbot.js — Trace UI event projection no longer mutates chat timeline
+

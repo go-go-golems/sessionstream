@@ -767,3 +767,80 @@ await pub.publish("ChatInferenceTrace", pb.InferenceTraceEvent.builder()
   .elapsedMs(Date.now() - startedAt)
   .build())
 ```
+
+## Step 9: Split trace events into a dedicated browser pane
+
+I changed the chatbot demo so custom protobuf trace events no longer overwrite the assistant streaming message. The server still publishes `ChatInferenceTrace` as a custom sessionstream event, but the UI projection now emits a distinct `ChatInferenceTrace` UI event instead of translating it into a `ChatAssistantDelta` message update. The browser handles that UI event in a separate trace pane.
+
+This keeps the chat pane focused on conversation content while still making custom protobuf trace payloads visible during manual testing.
+
+### Prompt Context
+
+**User prompt (verbatim):** "he trace event replaces the streaming message until the end. that's not great. Can we have a second view for the trace events, int he html?"
+
+**Assistant interpretation:** The trace payload should not update the assistant message body; add a dedicated trace view in the HTML/frontend and route trace UI events there.
+
+**Inferred user intent:** Preserve clean chat streaming while separately demonstrating custom protobuf trace events.
+
+### What I did
+
+- Added a two-pane layout in `examples/goja-chatdemo-server/assets/public/index.html`:
+  - chat pane
+  - trace events pane
+- Added CSS for the pane layout and trace event cards in `app.css`.
+- Added frontend trace state/rendering in `app.js`.
+- Updated websocket handling so `ChatInferenceTrace` UI events append to the trace pane; other UI events still update chat messages.
+- Changed `verbs/chatbot.js` UI projection for `ChatInferenceTrace` to emit a `ChatInferenceTrace` UI event carrying the custom protobuf payload.
+- Changed timeline projection for `ChatInferenceTrace` to return `[]`, so trace events no longer mutate the assistant timeline entity.
+
+### Why
+
+- Trace events are diagnostic metadata, not chat content.
+- Updating the assistant message with trace details made the streaming answer temporarily disappear until the final event restored it.
+
+### What worked
+
+Validation passed:
+
+```bash
+make -C examples/goja-chatdemo-server smoke
+go test ./examples/chatdemo ./pkg/js/modules/sessionstream ./pkg/sessionstream -count=1
+go test ./... -count=1
+```
+
+### What didn't work
+
+- N/A. The smoke test still observed assistant completion after trace events were routed separately.
+
+### What I learned
+
+- Custom protobuf payloads can be used directly as UI event payloads too, not only backend events.
+- Keeping trace events out of the timeline projection is the simplest way to avoid corrupting conversation state.
+
+### What was tricky to build
+
+- The UI projection had to preserve the event name `ChatInferenceTrace` so the browser could distinguish trace updates from normal assistant deltas.
+- The browser had to branch on `frame.uiEvent.name` before calling the generic chat message upsert path.
+
+### What warrants a second pair of eyes
+
+- Review whether trace UI events should be persisted in a timeline entity later, or remain ephemeral UI-only diagnostics.
+
+### What should be done in the future
+
+- Consider adding a clear button or per-message trace grouping if the trace pane gets noisy.
+
+### Code review instructions
+
+- Start with `examples/goja-chatdemo-server/verbs/chatbot.js` and inspect the `ChatInferenceTrace` projection branches.
+- Then review `assets/public/index.html`, `app.css`, and `app.js` for the separate trace pane.
+- Validate with the chatdemo smoke or by running the browser manually.
+
+### Technical details
+
+The browser now routes trace UI events separately:
+
+```js
+if (frame.uiEvent.name === "ChatInferenceTrace") appendTraceFromPayload(payloadOf(frame.uiEvent));
+else upsertFromPayload(payloadOf(frame.uiEvent));
+```
