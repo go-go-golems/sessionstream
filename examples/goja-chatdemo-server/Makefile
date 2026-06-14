@@ -25,7 +25,10 @@ serve-smoke: build
 	trap 'kill $$pid >/dev/null 2>&1 || true; wait $$pid >/dev/null 2>&1 || true; rm -f $$log' EXIT; \
 	cd $(SESSIONSTREAM) && go run ./examples/goja-chatdemo-server/cmd/smoke-client --addr $(HTTP_ADDR) || { cat $$log; exit 1; }; \
 	curl -fsS http://$(HTTP_ADDR)/healthz | grep -q '"ok":true'; \
+	curl -fsS http://$(HTTP_ADDR)/api/config | grep -q '"defaultSessionId":"demo"'; \
 	curl -fsS http://$(HTTP_ADDR)/ | grep -q 'xgoja sessionstream chatbot'; \
+	curl -fsS http://$(HTTP_ADDR)/assets/app.css | grep -q '#messages'; \
+	curl -fsS http://$(HTTP_ADDR)/assets/app.js | grep -q 'sessionId'; \
 	kill $$pid >/dev/null 2>&1 || true; \
 	wait $$pid >/dev/null 2>&1 || true
 

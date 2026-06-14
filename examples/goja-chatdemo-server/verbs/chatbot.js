@@ -3,6 +3,10 @@ __package__({ name: "chatbot", short: "Sessionstream xgoja chatbot demo" })
 const express = require("express")
 const ss = require("sessionstream")
 const pb = require("sessionstream.examples.chatdemo.v1")
+// Keep this require computed so jsverb source scanning treats the embedded
+// assets module as a runtime dependency instead of trying to resolve it as a
+// source-file import.
+const assets = require(["fs", "assets"].join(":"))
 
 const sessionId = "demo"
 let messageSeq = 0
@@ -102,94 +106,6 @@ function configureHub() {
   return h
 }
 
-function html() {
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>xgoja sessionstream chatbot</title>
-  <style>
-    body { font-family: sans-serif; max-width: 880px; margin: 2rem auto; background: #101318; color: #f4f7fb; }
-    h1 { margin-bottom: .25rem; }
-    .sub { color: #aab4c3; margin-bottom: 1rem; }
-    #messages { border: 1px solid #303846; border-radius: 12px; min-height: 360px; padding: 1rem; background: #161b22; }
-    .msg { margin: .65rem 0; padding: .65rem .8rem; border-radius: 10px; white-space: pre-wrap; }
-    .user { background: #22395f; margin-left: 15%; }
-    .assistant { background: #243727; margin-right: 15%; }
-    .meta { color: #9aa6b2; font-size: .8rem; margin-bottom: .25rem; }
-    form { display: flex; gap: .5rem; margin-top: 1rem; }
-    input { flex: 1; padding: .75rem; border-radius: 8px; border: 1px solid #303846; background: #0d1117; color: #fff; }
-    button { padding: .75rem 1rem; border-radius: 8px; border: 0; background: #4f8cff; color: white; font-weight: 700; }
-    #status { color: #aab4c3; font-size: .9rem; margin-top: .75rem; }
-  </style>
-</head>
-<body>
-  <h1>xgoja sessionstream chatbot</h1>
-  <div class="sub">All app logic is JavaScript. Go provides xgoja, protobuf builders, sessionstream, Express, and the WebSocket handler.</div>
-  <div id="messages"></div>
-  <form id="form">
-    <input id="prompt" value="explain what is handling this request" autocomplete="off" />
-    <button>Send</button>
-  </form>
-  <div id="status">connecting…</div>
-<script>
-const sessionId = "${sessionId}";
-const messages = new Map();
-const el = document.getElementById("messages");
-const statusEl = document.getElementById("status");
-function render() {
-  el.innerHTML = "";
-  for (const msg of messages.values()) {
-    const div = document.createElement("div");
-    div.className = "msg " + (msg.role === "user" ? "user" : "assistant");
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    meta.textContent = msg.role + " · " + msg.id + (msg.streaming ? " · streaming" : "");
-    div.appendChild(meta);
-    div.appendChild(document.createTextNode(msg.content || msg.text || ""));
-    el.appendChild(div);
-  }
-  el.scrollTop = el.scrollHeight;
-}
-function payloadOf(frame) {
-  const p = frame.payload || {};
-  return p.value || p;
-}
-function upsertFromPayload(p) {
-  if (!p || !p.messageId) return;
-  messages.set(p.messageId, {
-    id: p.messageId,
-    role: p.role || "assistant",
-    content: p.content || p.text || "",
-    text: p.text || p.content || "",
-    streaming: Boolean(p.streaming),
-  });
-  render();
-}
-const ws = new WebSocket("ws://" + location.host + "/ws");
-ws.onopen = () => {
-  statusEl.textContent = "websocket connected";
-  ws.send(JSON.stringify({ subscribe: { sessionId, sinceSnapshotOrdinal: "0" } }));
-};
-ws.onmessage = (ev) => {
-  const frame = JSON.parse(ev.data);
-  if (frame.hello) statusEl.textContent = "connected as " + frame.hello.connectionId;
-  if (frame.snapshot) {
-    for (const ent of frame.snapshot.entities || []) upsertFromPayload(payloadOf(ent));
-  }
-  if (frame.uiEvent) upsertFromPayload(payloadOf(frame.uiEvent));
-  if (frame.error) console.error(frame.error);
-};
-ws.onclose = () => { statusEl.textContent = "websocket closed"; };
-document.getElementById("form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const prompt = document.getElementById("prompt").value;
-  await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId, prompt }) });
-});
-</script>
-</body>
-</html>`
-}
 
 __verb__("serve", {
   name: "serve",
@@ -201,7 +117,9 @@ function serve() {
   hub = configureHub()
   wsServer = ss.webSocket.server(hub)
 
-  app.get("/", (_req, res) => res.type("text/html").send(html()))
+  app.get("/", (_req, res) => res.type("text/html").send(assets.readFileSync("/app/public/index.html", "utf8")))
+  app.staticFromAssetsModule("/assets", assets, "/app/public")
+  app.get("/api/config", (_req, res) => res.json({ ok: true, defaultSessionId: sessionId }))
   app.get("/healthz", (_req, res) => res.json({ ok: true, app: "goja-chatdemo-server", connections: wsServer.connections().length }))
   app.post("/api/chat", (req, res) => {
     const body = req.body || {}
