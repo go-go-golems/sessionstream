@@ -15,6 +15,9 @@ func (m *moduleRuntime) webSocketServerBuilder(call goja.FunctionCall) goja.Valu
 	if err != nil {
 		panic(m.vm.NewGoError(err))
 	}
+	if err := hub.hub.SetUIFanout(server); err != nil {
+		panic(m.vm.NewGoError(err))
+	}
 	obj := m.vm.NewObject()
 	m.attachRef(obj, &websocketRef{server: server})
 	if err := gojahttp.AttachHTTPHandler(m.vm, obj, server); err != nil {

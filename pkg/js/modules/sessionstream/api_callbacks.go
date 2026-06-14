@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/dop251/goja"
+	"github.com/go-go-golems/go-go-goja/pkg/runtimebridge"
 	ss "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 )
 
@@ -35,7 +36,7 @@ func (m *moduleRuntime) wrapPublisher(schemas *ss.SchemaRegistry, sid ss.Session
 		if err != nil {
 			panic(m.vm.NewGoError(err))
 		}
-		if err := pub.Publish(context.Background(), ss.Event{Name: name, SessionId: sid, Payload: msg}); err != nil {
+		if err := pub.Publish(runtimebridge.CurrentOwnerContext(m.vm), ss.Event{Name: name, SessionId: sid, Payload: msg}); err != nil {
 			panic(m.vm.NewGoError(err))
 		}
 		return goja.Undefined()

@@ -1,10 +1,10 @@
 package sessionstream
 
 import (
-	"context"
 	"strconv"
 
 	"github.com/dop251/goja"
+	"github.com/go-go-golems/go-go-goja/pkg/runtimebridge"
 	ss "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 )
 
@@ -64,13 +64,13 @@ func (m *moduleRuntime) wrapHub(hub *ss.Hub, schemas *ss.SchemaRegistry) goja.Va
 		if err != nil {
 			panic(m.vm.NewGoError(err))
 		}
-		if err := hub.Submit(context.Background(), ss.SessionId(sessionID), name, msg); err != nil {
+		if err := hub.Submit(runtimebridge.CurrentOwnerContext(m.vm), ss.SessionId(sessionID), name, msg); err != nil {
 			panic(m.vm.NewGoError(err))
 		}
 		return goja.Undefined()
 	})
 	m.mustSet(obj, "snapshot", func(sessionID string) goja.Value {
-		snap, err := hub.Snapshot(context.Background(), ss.SessionId(sessionID))
+		snap, err := hub.Snapshot(runtimebridge.CurrentOwnerContext(m.vm), ss.SessionId(sessionID))
 		if err != nil {
 			panic(m.vm.NewGoError(err))
 		}
@@ -111,13 +111,13 @@ func (m *moduleRuntime) wrapHub(hub *ss.Hub, schemas *ss.SchemaRegistry) goja.Va
 		return obj
 	})
 	m.mustSet(obj, "run", func() goja.Value {
-		if err := hub.Run(context.Background()); err != nil {
+		if err := hub.Run(runtimebridge.CurrentOwnerContext(m.vm)); err != nil {
 			panic(m.vm.NewGoError(err))
 		}
 		return goja.Undefined()
 	})
 	m.mustSet(obj, "shutdown", func() goja.Value {
-		if err := hub.Shutdown(context.Background()); err != nil {
+		if err := hub.Shutdown(runtimebridge.CurrentOwnerContext(m.vm)); err != nil {
 			panic(m.vm.NewGoError(err))
 		}
 		return goja.Undefined()

@@ -148,12 +148,22 @@ func WithErrorObserver(observer ErrorObserver) HubOption {
 
 func WithUIFanout(f UIFanout) HubOption {
 	return func(h *Hub) error {
-		if f == nil {
-			return fmt.Errorf("ui fanout is nil")
-		}
-		h.fanout = f
-		return nil
+		return h.SetUIFanout(f)
 	}
+}
+
+// SetUIFanout attaches or replaces the live UI fanout for this hub.
+//
+// Most Go callers should prefer WithUIFanout at construction time. This setter
+// exists for dynamic hosts such as Goja/xgoja where JavaScript first creates a
+// Hub, then asks another native module to create a Go-backed WebSocket server
+// that should receive future projected UI events.
+func (h *Hub) SetUIFanout(f UIFanout) error {
+	if f == nil {
+		return fmt.Errorf("ui fanout is nil")
+	}
+	h.fanout = f
+	return nil
 }
 
 func NewHub(opts ...HubOption) (*Hub, error) {

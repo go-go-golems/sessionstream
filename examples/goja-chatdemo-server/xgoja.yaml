@@ -1,0 +1,52 @@
+schema: xgoja/v2
+name: goja-chatdemo-server
+app:
+  name: goja-chatdemo-server
+go:
+  module: xgoja.generated/sessionstream-goja-chatdemo-server
+  version: "1.26"
+workspace:
+  mode: auto
+providers:
+  - id: go-go-goja-http
+    import: github.com/go-go-golems/go-go-goja/pkg/xgoja/providers/http
+    register: Register
+  - id: sessionstream
+    import: github.com/go-go-golems/sessionstream/pkg/js/modules/sessionstream/provider
+    register: Register
+  - id: sessionstream-chatdemo
+    import: github.com/go-go-golems/sessionstream/pkg/js/modules/chatdemo/provider
+    register: Register
+runtime:
+  modules:
+    - provider: go-go-goja-http
+      name: express
+      as: express
+    - provider: sessionstream
+      name: sessionstream
+      as: sessionstream
+    - provider: sessionstream-chatdemo
+      name: sessionstream.examples.chatdemo.v1
+      as: sessionstream.examples.chatdemo.v1
+sources:
+  - id: sites
+    kind: jsverbs
+    from:
+      dir: ./verbs
+    language: javascript
+commands:
+  - id: verbs
+    type: builtin.jsverbs
+    name: verbs
+    sources: [sites]
+  - id: serve
+    type: provider.command-set
+    provider: go-go-goja-http
+    name: serve
+    mount: serve
+    sources: [sites]
+artifacts:
+  - id: binary
+    type: binary
+    output: dist/goja-chatdemo-server
+    sources: [sites]

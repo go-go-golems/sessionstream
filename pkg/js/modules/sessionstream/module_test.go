@@ -1,10 +1,13 @@
 package sessionstream
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/dop251/goja"
 	noderequire "github.com/dop251/goja_nodejs/require"
@@ -129,6 +132,84 @@ func TestWebSocketServerMountsInExpress(t *testing.T) {
 	rr := httptest.NewRecorder()
 	host.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/ws/rooms/general", nil))
 	require.NotEqual(t, http.StatusNotFound, rr.Code)
+}
+
+func TestHubSubmitFromExpressHandlerUsesCurrentOwnerContext(t *testing.T) {
+	registry := ss.NewSchemaRegistry()
+	require.NoError(t, chatdemo.RegisterSchemas(registry))
+	store, err := storesqlite.NewInMemory(registry)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	host := gojahttp.NewHost(gojahttp.HostOptions{Dev: true})
+	factory, err := gggengine.NewRuntimeFactoryBuilder().
+		WithModules(
+			express.NewRegistrar(host),
+			gggengine.NativeModuleRegistrar{ModuleName: ModuleName, Loader: NewLoader(Options{DefaultHydrationStore: store})},
+			gggengine.NativeModuleRegistrar{ModuleName: chatdemov1.GojaBuilderFileChatProtoModuleName(), Loader: chatdemov1.NewGojaBuilderFileChatProtoLoader("")},
+		).
+		Build()
+	require.NoError(t, err)
+	rt, err := factory.NewRuntime(gggengine.WithStartupContext(context.Background()), gggengine.WithLifetimeContext(context.Background()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
+	host.SetRuntime(rt.Owner)
+
+	_, err = rt.Owner.Call(context.Background(), "sessionstream.express.submit.setup", func(_ context.Context, vm *goja.Runtime) (any, error) {
+		_, err := vm.RunString(`
+			const express = require("express");
+			const ss = require("sessionstream");
+			const pb = require("sessionstream.examples.chatdemo.v1");
+			const app = express.app();
+			const schemas = ss.schemas()
+			  .registerCommand("ChatStartInference", pb.StartInferenceCommand)
+			  .registerEvent("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent)
+			  .registerUIEvent("ChatMessageAccepted", pb.ChatMessageUpdate)
+			  .registerTimelineEntity("ChatMessage", pb.ChatMessageEntity);
+			const hub = ss.hub({ schemas });
+			hub.command("ChatStartInference", (cmd, _session, pub) => {
+			  pub.publish("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent.builder()
+			    .messageId("m-http").role("user").content(cmd.payload.prompt).streaming(false).build());
+			});
+			hub.uiProjection((event) => [{
+			  name: "ChatMessageAccepted",
+			  payload: pb.ChatMessageUpdate.builder().messageId(event.payload.messageId).role("user").content(event.payload.content).streaming(false).build(),
+			}]);
+			hub.timelineProjection((event) => [{
+			  kind: "ChatMessage",
+			  id: event.payload.messageId,
+			  payload: pb.ChatMessageEntity.builder().messageId(event.payload.messageId).role("user").content(event.payload.content).status("accepted").streaming(false).build(),
+			}]);
+			app.post("/api/chat", (_req, res) => {
+			  hub.submit("s-http", "ChatStartInference", pb.StartInferenceCommand.builder().prompt("from http").build());
+			  res.json({ ok: true, snapshot: hub.snapshot("s-http") });
+			});
+		`)
+		return nil, err
+	})
+	require.NoError(t, err)
+
+	type result struct {
+		code int
+		body string
+	}
+	done := make(chan result, 1)
+	go func() {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(`{}`))
+		req.Header.Set("content-type", "application/json")
+		host.ServeHTTP(rr, req)
+		done <- result{code: rr.Code, body: rr.Body.String()}
+	}()
+
+	select {
+	case got := <-done:
+		require.Equal(t, http.StatusOK, got.code, got.body)
+		require.Contains(t, got.body, `"ok":true`)
+		require.True(t, strings.Contains(got.body, "from http"), got.body)
+	case <-time.After(2 * time.Second):
+		t.Fatal("POST /api/chat deadlocked while hub.submit re-entered the Goja runtime owner")
+	}
 }
 
 func TestEventEmitterFanoutReceivesUIBatch(t *testing.T) {
