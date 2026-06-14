@@ -34,3 +34,13 @@ Replaced JS submitAsync/publishAsync with Promise-native submit/publish and adde
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_callbacks.go — publish implementation
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_hub.go — submit/enqueue implementation
 
+
+## 2026-06-14
+
+Removed experimental local hub.enqueue API and kept Promise-native JS submit/publish only; focused/full tests and chatdemo smoke pass.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_hub.go — enqueue removal
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/typescript.go — enqueue removed from declarations
+

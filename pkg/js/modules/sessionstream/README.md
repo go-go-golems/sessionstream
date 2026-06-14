@@ -13,9 +13,6 @@ Phase-1 coverage:
   after command handling and local projection work completes. It accepts
   generated protobuf builder values via `protogoja.MessageFromValue`, and also
   accepts plain JS objects that can be decoded by the registered protobuf schema.
-- `hub.enqueue(sessionId, commandName, payload)` returns a Promise that resolves
-  after the command is accepted by the per-hub in-memory queue; processing
-  continues in the background.
 - `hub.command(name, fn)` adapts synchronous JavaScript command handlers and
   Promise-returning handlers.
 - `publisher.publish(eventName, payload)` publishes typed backend events and
@@ -70,9 +67,6 @@ hub.command("ChatStartInference", async (cmd, session, pub) => {
 await hub.submit("s-1", "ChatStartInference",
   pb.StartInferenceCommand.builder().prompt("hello").build());
 ```
-
-Use `hub.enqueue(...)` when the caller only needs accepted-for-processing
-semantics and does not need to wait for command/projection completion.
 
 Validation:
 

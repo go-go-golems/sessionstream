@@ -21,7 +21,6 @@ import (
 	chatdemov1 "github.com/go-go-golems/sessionstream/examples/chatdemo/gen/sessionstream/examples/chatdemo/v1"
 	ss "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 	storesqlite "github.com/go-go-golems/sessionstream/pkg/sessionstream/hydration/sqlite"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -163,63 +162,6 @@ func TestHubPromiseAwareCallbacksFromJavaScript(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, resolved.String(), "hello:async-command:async-timeline")
 	require.Contains(t, resolved.String(), "m-async")
-}
-
-func TestHubEnqueueAcceptsAndProcessesInBackground(t *testing.T) {
-	registry := ss.NewSchemaRegistry()
-	require.NoError(t, chatdemo.RegisterSchemas(registry))
-	store, err := storesqlite.NewInMemory(registry)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-
-	factory, err := gggengine.NewRuntimeFactoryBuilder().
-		WithModules(
-			gggengine.NativeModuleRegistrar{ModuleName: ModuleName, Loader: NewLoader(Options{DefaultHydrationStore: store})},
-			gggengine.NativeModuleRegistrar{ModuleName: chatdemov1.GojaBuilderFileChatProtoModuleName(), Loader: chatdemov1.NewGojaBuilderFileChatProtoLoader("")},
-		).
-		Build()
-	require.NoError(t, err)
-	rt, err := factory.NewRuntime(gggengine.WithStartupContext(context.Background()), gggengine.WithLifetimeContext(context.Background()))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	value, err := rt.Owner.Call(ctx, "sessionstream.enqueue.accept", func(_ context.Context, vm *goja.Runtime) (any, error) {
-		return vm.RunString(`(async () => {
-			const ss = require("sessionstream");
-			const pb = require("sessionstream.examples.chatdemo.v1");
-			const schemas = ss.schemas()
-			  .registerCommand("ChatStartInference", pb.StartInferenceCommand)
-			  .registerEvent("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent)
-			  .registerTimelineEntity("ChatMessage", pb.ChatMessageEntity);
-			const hub = ss.hub({ schemas });
-			globalThis.__enqueueHub = hub;
-			hub.command("ChatStartInference", (cmd, session, pub) => {
-			  return pub.publish("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent.builder()
-			    .messageId("m-queued").role("user").content(cmd.payload.prompt).streaming(false).build());
-			});
-			hub.timelineProjection((event) => [{
-			  kind: "ChatMessage",
-			  id: event.payload.messageId,
-			  payload: pb.ChatMessageEntity.builder().messageId(event.payload.messageId).role("user").content(event.payload.content).status("accepted").streaming(false).build(),
-			}]);
-			return JSON.stringify(await hub.enqueue("s-queued", "ChatStartInference", pb.StartInferenceCommand.builder().prompt("queued hello").build()));
-		})()`)
-	})
-	require.NoError(t, err)
-	resolved, err := waitTestPromise(ctx, rt, value.(goja.Value))
-	require.NoError(t, err)
-	require.Contains(t, resolved.String(), "ChatStartInference")
-	require.Contains(t, resolved.String(), "s-queued")
-
-	require.EventuallyWithT(t, func(c *assert.CollectT) {
-		value, err := rt.Owner.Call(ctx, "sessionstream.enqueue.snapshot", func(_ context.Context, vm *goja.Runtime) (any, error) {
-			return vm.RunString(`JSON.stringify(globalThis.__enqueueHub.snapshot("s-queued"))`)
-		})
-		require.NoError(c, err)
-		require.Contains(c, value.(goja.Value).String(), "queued hello")
-	}, time.Second, 10*time.Millisecond)
 }
 
 func TestHubPromiseRejectedCommandReturnsError(t *testing.T) {

@@ -413,3 +413,95 @@ hub.command("Ask", async (cmd, session, pub) => {
 await hub.submit("s-1", "Ask", buildAsk("hello"))
 const receipt = await hub.enqueue("s-1", "Ask", buildAsk("background"))
 ```
+
+## Step 5: Remove local enqueue and keep only async submit/publish
+
+I removed the experimental JavaScript `hub.enqueue(...)` API. After revisiting the semantics, the local in-memory command queue did not fit sessionstream's current model: sessionstream already has event-oriented Watermill infrastructure, while command queueing would require its own command envelope, topic, consumer, ordering model, and failure policy. Keeping a local per-hub queue would risk hardening the wrong abstraction.
+
+The JavaScript API is now intentionally smaller: `hub.submit(...)` and `publisher.publish(...)` are Promise-returning completion APIs, and there are no sync variants, async-suffixed variants, or enqueue method on the JS hub.
+
+### Prompt Context
+
+**User prompt (verbatim):** "ok, remvoe enqueue entirely. stick with async submit / publish"
+
+**Assistant interpretation:** Remove the enqueue API and implementation from the current PR, keep Promise-native submit/publish, update docs/tasks/diary, validate, commit, and push.
+
+**Inferred user intent:** Avoid adding an unclear local command-queue abstraction; keep this ticket focused on async JavaScript submission/publication semantics.
+
+### What I did
+
+- Removed the per-hub in-memory queue implementation from `api_hub.go`.
+- Removed the hidden `queue` field from `hubRef`.
+- Removed the JS `hub.enqueue(...)` method.
+- Removed the enqueue regression test.
+- Removed `EnqueueReceipt` and `Hub.enqueue(...)` from TypeScript declarations.
+- Removed enqueue references from the Goja module README.
+- Rewrote the second design document as `02-js-promise-native-submit-publish-api.md`, documenting why enqueue is intentionally absent.
+- Updated `tasks.md` to mark enqueue removal as the accepted path.
+
+### Why
+
+- A local in-memory command queue is not equivalent to event-bus publication and could mislead users about durability, ordering, and failure semantics.
+- Existing Watermill support is event-oriented. If command enqueueing is needed later, it should be a separate command-bus design.
+- This ticket should remain focused on JS async callback support through Promise-native `submit` and `publish`.
+
+### What worked
+
+Validation passed:
+
+```bash
+go test ./pkg/js/modules/sessionstream ./pkg/sessionstream -count=1
+go test ./... -count=1
+make -C examples/goja-chatdemo-server smoke
+```
+
+### What didn't work
+
+The first focused validation run hit an existing flaky ordering assertion in `pkg/sessionstream`:
+
+```text
+--- FAIL: TestHubEventBusGoChannelRoundTrip (0.01s)
+    bus_test.go:73:
+        Error: "1700000000000000002" is not greater than "1700000000000000003"
+```
+
+Rerunning the full suite passed. I did not change `pkg/sessionstream` bus behavior as part of this enqueue removal.
+
+### What I learned
+
+- “Async submit” and “enqueue” are different abstractions: async submit waits for completion via a Promise, while enqueue should mean broker/queue acceptance.
+- Because the current Watermill path is event-oriented, command enqueueing should not be improvised in the JS wrapper.
+
+### What was tricky to build
+
+- The main trap was documentation drift: the previous design doc and task list described enqueue as accepted work. I rewrote the design to explicitly record the reversal so future readers understand why enqueue disappeared.
+
+### What warrants a second pair of eyes
+
+- Review whether future command queueing should be represented as `hub.enqueueCommand(...)`, a separate `commands` namespace, or left entirely to application code.
+- Review the unrelated bus test ordering flake separately.
+
+### What should be done in the future
+
+- Add explicit rejected async UI/timeline projection tests.
+- If queueing is needed, open a separate command-bus/event-bus design ticket.
+
+### Code review instructions
+
+- Start with `pkg/js/modules/sessionstream/api_hub.go` and confirm the public JS hub only exposes Promise-native `submit`.
+- Review `pkg/js/modules/sessionstream/api_callbacks.go` for Promise-native `publisher.publish`.
+- Confirm `pkg/js/modules/sessionstream/typescript.go` and README have no enqueue API.
+- Read `design-doc/02-js-promise-native-submit-publish-api.md` for the rationale.
+
+### Technical details
+
+Final intended JS shape for this ticket:
+
+```js
+hub.command("Ask", async (cmd, session, pub) => {
+  await pub.publish("AnswerStarted", started)
+  await pub.publish("AnswerDone", done)
+})
+
+await hub.submit("s-1", "Ask", command)
+```

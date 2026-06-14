@@ -27,7 +27,7 @@
 
 ### 2a. Promise-native JavaScript API redesign
 
-- [x] Add a second design document for Promise-native `submit`/`publish` plus queue semantics.
+- [x] Add a second design document for Promise-native `submit`/`publish` and the decision not to expose enqueue.
 - [x] Replace JS `hub.submitAsync(...)` with Promise-returning `hub.submit(...)`.
 - [x] Replace JS `publisher.publishAsync(...)` with Promise-returning `publisher.publish(...)`.
 - [x] Remove JS `submitAsync(...)` and `publishAsync(...)` from the public API.
@@ -36,12 +36,10 @@
 
 ### 2b. Queue/accepted-for-processing API
 
-- [x] Add per-hub FIFO queue state for JavaScript hub wrappers.
-- [x] Add `hub.enqueue(sessionId, name, payload): Promise<EnqueueReceipt>`.
-- [x] Make `enqueue` resolve after acceptance, not after command completion.
-- [x] Include receipt fields: `accepted`, `id`, `sessionId`, `command`, and `depth`.
-- [x] Add queue success tests proving background processing happens after enqueue resolution.
-- [ ] Add queue rejection tests for invalid payloads or queue acceptance failures.
+- [x] Remove the experimental local `hub.enqueue(...)` API.
+- [x] Remove per-hub FIFO queue state from JavaScript hub wrappers.
+- [x] Remove enqueue TypeScript declarations, tests, and README references.
+- [x] Document that future queueing should be a separate event-bus or command-bus design, not a local in-memory command queue.
 
 ### 3. Projection support
 
