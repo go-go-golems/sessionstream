@@ -32,6 +32,9 @@ func (m *moduleRuntime) hubBuilder(call goja.FunctionCall) goja.Value {
 	if m.defaultHydrationStore != nil {
 		hubOpts = append(hubOpts, ss.WithHydrationStore(m.defaultHydrationStore))
 	}
+	if len(m.defaultHubOptions) > 0 {
+		hubOpts = append(hubOpts, m.defaultHubOptions...)
+	}
 	if ref, ok := m.fanoutRef(fanoutValue); ok {
 		hubOpts = append(hubOpts, ss.WithUIFanout(ref.fanout))
 	}
@@ -68,6 +71,16 @@ func (m *moduleRuntime) wrapHub(hub *ss.Hub, schemas *ss.SchemaRegistry) goja.Va
 		callCtx := runtimebridge.CurrentOwnerContext(m.vm)
 		return m.promiseFromGo(callCtx, "sessionstream.submit", func(ctx context.Context) error {
 			return hub.Submit(ctx, ss.SessionId(sessionID), name, msg)
+		})
+	})
+	m.mustSet(obj, "publish", func(sessionID, name string, payload goja.Value) goja.Value {
+		msg, err := m.jsValueToProto(schemas, schemaKindEvent, name, payload)
+		if err != nil {
+			panic(m.vm.NewGoError(err))
+		}
+		callCtx := runtimebridge.CurrentOwnerContext(m.vm)
+		return m.promiseFromGo(callCtx, "sessionstream.hub.publish", func(ctx context.Context) error {
+			return hub.Publish(ctx, ss.Event{Name: name, SessionId: ss.SessionId(sessionID), Payload: msg})
 		})
 	})
 	m.mustSet(obj, "snapshot", func(sessionID string) goja.Value {

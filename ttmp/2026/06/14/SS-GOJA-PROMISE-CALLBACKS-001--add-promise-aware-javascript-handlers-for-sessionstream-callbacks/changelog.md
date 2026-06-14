@@ -84,3 +84,25 @@ Split custom trace events into a dedicated browser trace pane instead of overwri
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/assets/public/index.html — Adds trace pane
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/verbs/chatbot.js — Trace UI event projection no longer mutates chat timeline
 
+
+## 2026-06-14
+
+Moved Redis-only CLI injection verbs into a separate redis-tools jsverb source and kept HTTP serve scoped to the shared sites source.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/verbs/chatbot.js — Removed Redis-only CLI verbs from shared server source
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-redis-chatdemo-server/verbs/redis_tools.js — Redis-only CLI injection verbs
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-redis-chatdemo-server/xgoja.yaml — Multiple jsverb source configuration
+
+
+## 2026-06-14
+
+Added Redis/Watermill runtime-package xgoja host example with Go-side hub option injection, docker-compose Redis, cross-process smoke, and JS CLI event injection hooks.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-redis-chatdemo-server/cmd/redis-host/main.go — Custom Go host wiring Redis and xgoja host services
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/provider/provider.go — Host-service hook for sessionstream hub options
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/sessionstream/hub.go — Public Publish event path used by CLI injection
+

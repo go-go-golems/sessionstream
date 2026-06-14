@@ -103,6 +103,39 @@ func TestHubCommandProjectionAndSnapshotFromJavaScript(t *testing.T) {
 	require.Contains(t, value.String(), "m1-user")
 }
 
+func TestHubPublishEventFromJavaScript(t *testing.T) {
+	vm := goja.New()
+	reg := noderequire.NewRegistry()
+	registry := ss.NewSchemaRegistry()
+	require.NoError(t, chatdemo.RegisterSchemas(registry))
+	store, err := storesqlite.NewInMemory(registry)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	Register(reg, Options{DefaultHydrationStore: store})
+	require.NoError(t, chatdemov1.RegisterGojaBuilderFileChatProtoModule(reg, ""))
+	reg.Enable(vm)
+
+	value, err := vm.RunString(`
+		const ss = require("sessionstream");
+		const pb = require("sessionstream.examples.chatdemo.v1");
+		const schemas = ss.schemas()
+		  .registerEvent("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent)
+		  .registerTimelineEntity("ChatMessage", pb.ChatMessageEntity);
+		const hub = ss.hub({ schemas });
+		hub.timelineProjection((event) => [{
+		  kind: "ChatMessage",
+		  id: event.payload.messageId,
+		  payload: pb.ChatMessageEntity.builder().messageId(event.payload.messageId).role("user").content(event.payload.content).status("accepted").streaming(false).build(),
+		}]);
+		hub.publish("s-publish", "ChatUserMessageAccepted", pb.UserMessageAcceptedEvent.builder()
+		  .messageId("m-publish").role("user").content("published from js").streaming(false).build());
+		JSON.stringify(hub.snapshot("s-publish"));
+	`)
+	require.NoError(t, err)
+	require.Contains(t, value.String(), "published from js")
+	require.Contains(t, value.String(), "m-publish")
+}
+
 func TestHubPromiseAwareCallbacksFromJavaScript(t *testing.T) {
 	registry := ss.NewSchemaRegistry()
 	require.NoError(t, chatdemo.RegisterSchemas(registry))

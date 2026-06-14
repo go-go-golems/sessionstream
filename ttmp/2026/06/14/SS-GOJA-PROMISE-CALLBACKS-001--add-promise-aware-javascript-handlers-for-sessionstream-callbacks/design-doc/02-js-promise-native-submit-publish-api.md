@@ -21,29 +21,52 @@ RelatedFiles:
         Trace UI event rendering
     - Path: examples/goja-chatdemo-server/assets/public/index.html
       Note: Separate trace pane markup
+    - Path: examples/goja-chatdemo-server/cmd/smoke-client/main.go
+      Note: Cross-process smoke client post/listen split
     - Path: examples/goja-chatdemo-server/verbs/chatbot.js
       Note: |-
         Uses timer.sleep and Promise-native publish to slow fake streaming
         Publishes custom trace protobuf from xgoja JavaScript
         Trace UI event projection no longer overwrites chat message
+        Shared server source without Redis-only CLI verbs
     - Path: examples/goja-chatdemo-server/xgoja.yaml
       Note: Adds go-go-goja core timer module for visible streaming delay
+    - Path: examples/goja-redis-chatdemo-server/README.md
+      Note: Documents multi-source jsverb pattern and Redis CLI semantics
+    - Path: examples/goja-redis-chatdemo-server/cmd/redis-host/main.go
+      Note: Custom Redis/Watermill xgoja host
+    - Path: examples/goja-redis-chatdemo-server/docker-compose.yml
+      Note: Redis service for Watermill example
+    - Path: examples/goja-redis-chatdemo-server/verbs/redis_tools.js
+      Note: Redis-only CLI jsverbs
+    - Path: examples/goja-redis-chatdemo-server/xgoja.yaml
+      Note: |-
+        Multiple jsverb source split for Redis-only tools
+        Runtime-package generation and multi-source jsverbs
     - Path: pkg/js/modules/sessionstream/api_callbacks.go
       Note: Promise-native publisher.publish
     - Path: pkg/js/modules/sessionstream/api_hub.go
-      Note: Promise-native submit without local enqueue
+      Note: |-
+        Promise-native submit without local enqueue
+        JS hub.publish for typed event injection
     - Path: pkg/js/modules/sessionstream/api_promises.go
       Note: Shared Promise settlement helper
     - Path: pkg/js/modules/sessionstream/module_test.go
       Note: Async submit/publish regressions with enqueue removed
+    - Path: pkg/js/modules/sessionstream/provider/provider.go
+      Note: Host-service based hub option injection
     - Path: pkg/js/modules/sessionstream/typescript.go
       Note: Final Promise-native JS declarations
+    - Path: pkg/sessionstream/hub.go
+      Note: Go Hub.Publish event path
 ExternalSources: []
 Summary: ""
 LastUpdated: 0001-01-01T00:00:00Z
 WhatFor: ""
 WhenToUse: ""
 ---
+
+
 
 
 

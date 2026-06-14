@@ -2,13 +2,22 @@ package provider
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/dop251/goja_nodejs/require"
 	"github.com/go-go-golems/go-go-goja/pkg/xgoja/providerapi"
 	ssmodule "github.com/go-go-golems/sessionstream/pkg/js/modules/sessionstream"
+	ss "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 )
 
-const PackageID = "sessionstream"
+const (
+	PackageID      = "sessionstream"
+	HostServiceKey = "sessionstream.host-options.v1"
+)
+
+type HostOptions struct {
+	HubOptions []ss.HubOption
+}
 
 var configSchema = json.RawMessage(`{
   "type": "object",
@@ -35,7 +44,27 @@ func Register(registry *providerapi.ProviderRegistry) error {
 		ConfigSchema: configSchema,
 		TypeScript:   ssmodule.TypeScriptModule(),
 		NewModuleFactory: func(ctx providerapi.ModuleSetupContext) (require.ModuleLoader, error) {
-			return ssmodule.NewLoader(ssmodule.Options{RuntimeOwner: ctx.RuntimeOwner}), nil
+			hostOpts, err := hostOptionsFromServices(ctx.Host)
+			if err != nil {
+				return nil, err
+			}
+			return ssmodule.NewLoader(ssmodule.Options{RuntimeOwner: ctx.RuntimeOwner, DefaultHubOptions: hostOpts.HubOptions}), nil
 		},
 	})
+}
+
+func hostOptionsFromServices(host providerapi.HostServices) (HostOptions, error) {
+	lookup, ok := host.(providerapi.HostServiceLookup)
+	if !ok || lookup == nil {
+		return HostOptions{}, nil
+	}
+	raw, ok := lookup.HostService(HostServiceKey)
+	if !ok || raw == nil {
+		return HostOptions{}, nil
+	}
+	opts, ok := raw.(HostOptions)
+	if !ok {
+		return HostOptions{}, fmt.Errorf("sessionstream host service %q must be provider.HostOptions, got %T", HostServiceKey, raw)
+	}
+	return opts, nil
 }

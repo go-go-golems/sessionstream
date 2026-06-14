@@ -239,6 +239,16 @@ func (h *Hub) Submit(ctx context.Context, sid SessionId, name string, payload pr
 	return h.dispatch(ctx, cmd)
 }
 
+// Publish publishes an already-decided backend event through the configured
+// event path. With a local hub this applies projections immediately; with an
+// event bus this publishes the encoded event for consumers to apply/fan out.
+func (h *Hub) Publish(ctx context.Context, ev Event) error {
+	if h == nil {
+		return fmt.Errorf("hub is nil")
+	}
+	return h.publisher().Publish(ctx, ev)
+}
+
 func (h *Hub) Snapshot(ctx context.Context, sid SessionId) (Snapshot, error) {
 	if h == nil {
 		return Snapshot{}, fmt.Errorf("hub is nil")

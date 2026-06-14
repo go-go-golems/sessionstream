@@ -844,3 +844,216 @@ The browser now routes trace UI events separately:
 if (frame.uiEvent.name === "ChatInferenceTrace") appendTraceFromPayload(payloadOf(frame.uiEvent));
 else upsertFromPayload(payloadOf(frame.uiEvent));
 ```
+
+## Step 10: Move Redis-only CLI verbs into a separate jsverb source
+
+I moved the CLI-only injection verbs out of the shared chatdemo server source and into the Redis example. The regular `goja-chatdemo-server` now only carries the browser/server `chatbot` package. The Redis example adds a second jsverb source, `redis-tools`, which contributes a separate `redis` package containing `submit-prompt`, `publish-user-message`, and `publish-trace`.
+
+This confirms that xgoja can scan multiple jsverb sources for a command surface. The Redis example's builtin `verbs` command sees both `sites` and `redis-tools`, while the HTTP `serve` command intentionally scans only `sites` so Redis-only CLI tooling does not become part of the server setup path.
+
+### Prompt Context
+
+**User prompt (verbatim):** "the CLI verbs would only work with redis, right? otherwise it would be a different pubsub if they are done with the in memory sessionstream?"
+
+**Assistant interpretation:** Clarify the semantics and then move the CLI injection verbs so they are only present in the Redis-backed example where they can reach running server processes.
+
+**Inferred user intent:** Avoid misleading users by exposing cross-process CLI injection verbs in an in-memory-only demo.
+
+### What I did
+
+- Removed `submit-prompt`, `publish-user-message`, and `publish-trace` from `examples/goja-chatdemo-server/verbs/chatbot.js`.
+- Added `examples/goja-redis-chatdemo-server/verbs/redis_tools.js` with `__package__({ name: "redis" })`.
+- Updated `examples/goja-redis-chatdemo-server/xgoja.yaml` with a second jsverb source:
+  - `sites` from the shared chatdemo server verbs
+  - `redis-tools` from the Redis example's local verbs
+- Configured builtin `verbs` with `sources: [sites, redis-tools]`.
+- Kept provider HTTP `serve` scoped to `sources: [sites]`.
+- Regenerated `examples/goja-redis-chatdemo-server/internal/xgojaruntime`.
+- Updated the Redis example README with the multi-source jsverb pattern and Redis-only CLI semantics.
+
+### Why
+
+- The CLI injection verbs create a short-lived hub in a separate process. They only affect a running browser/server if that hub publishes into the same Redis/Watermill event bus.
+- In the plain in-memory chatdemo, those verbs publish only into their own short-lived process and are therefore misleading.
+
+### What worked
+
+The Redis example now exposes a separate package:
+
+```bash
+go run ./examples/goja-redis-chatdemo-server/cmd/redis-host verbs redis --help
+```
+
+The Redis CLI publish path works:
+
+```bash
+REDIS_ADDR=127.0.0.1:6379 \
+  go run ./examples/goja-redis-chatdemo-server/cmd/redis-host \
+  verbs redis publish-trace --stage cli-test --detail 'hello from redis cli' --elapsed-ms 123
+```
+
+Validation passed:
+
+```bash
+make -C examples/goja-redis-chatdemo-server smoke
+go test ./pkg/js/modules/sessionstream ./pkg/js/modules/sessionstream/provider ./pkg/sessionstream ./examples/goja-redis-chatdemo-server/cmd/redis-host ./examples/goja-chatdemo-server/cmd/smoke-client -count=1
+```
+
+### What didn't work
+
+- The first help inspection timed out because old Redis host processes from a previous interrupted smoke run were still alive. I killed those stale `redis-host` processes and regenerated cleanly.
+
+### What I learned
+
+- xgoja handles multiple jsverb sources cleanly as long as command definitions scope `sources` deliberately.
+- The right split is to keep reusable browser/server verbs in `sites` and Redis-only operational tooling in `redis-tools`.
+
+### What was tricky to build
+
+- The important nuance is command scoping: `verbs` should include both sources for CLI access, but `serve` should include only the server source. Otherwise operational CLI packages could be scanned by the HTTP serve command unnecessarily.
+- The CLI `submit-prompt` still runs the command handler in the CLI process; what crosses Redis is the resulting events, because sessionstream's Watermill path is currently event-oriented.
+
+### What warrants a second pair of eyes
+
+- Review whether `submit-prompt` should remain in Redis CLI tools given that it submits to a local CLI hub and publishes resulting events, not a distributed command bus.
+
+### What should be done in the future
+
+- If true distributed command submission is needed, design a command-bus envelope separately from the existing event-bus path.
+
+### Code review instructions
+
+- Start with `examples/goja-redis-chatdemo-server/xgoja.yaml` and verify the `sources` split.
+- Review `examples/goja-redis-chatdemo-server/verbs/redis_tools.js` for Redis-only CLI verbs.
+- Confirm `examples/goja-chatdemo-server/verbs/chatbot.js` no longer exposes those CLI verbs.
+
+### Technical details
+
+The key xgoja pattern is:
+
+```yaml
+commands:
+  - id: verbs
+    type: builtin.jsverbs
+    sources: [sites, redis-tools]
+  - id: serve
+    type: provider.command-set
+    provider: go-go-goja-http
+    name: serve
+    sources: [sites]
+```
+
+## Step 11: Add a Redis-backed runtime-package host example
+
+I added a second xgoja chatdemo example that uses a generated runtime package plus a custom Go host. JavaScript still owns the application logic, routes, command handler, projections, and protobuf builders, but the Go host owns Redis/Watermill infrastructure and injects it into the sessionstream provider through xgoja host services.
+
+The example demonstrates the exact split we wanted: xgoja generates reusable Go runtime code from the JavaScript/assets/provider plan, while the embedding Go host configures the hub with a Redis Streams Watermill publisher/subscriber. Multiple server processes can subscribe in Redis fan-out mode and each fan out consumed events to its own WebSocket clients.
+
+### Prompt Context
+
+**User prompt (verbatim):** "make an example where:\n\n- xgoja generates go template, + js verbs for sending / receiving commands from the hub\n- however the hub is configured in the go side to be based on redis so that multiple processes can communicate over the same event bus\n- docker-compose for redis\n\nwhat would that look like? we updated go-go-goja to have host services in the commandcontext, but we might potentially need more work to happen on the xgoja side?"
+
+**Assistant interpretation:** Build a concrete Redis/Watermill xgoja example using generated runtime package/template-style host integration and Go-side host-service wiring, including docker-compose and smoke validation.
+
+**Inferred user intent:** Prove that xgoja host services are sufficient for infrastructure owned by Go while JavaScript remains app-level glue, and identify any missing xgoja/sessionstream seams.
+
+### What I did
+
+- Added `examples/goja-redis-chatdemo-server/xgoja.yaml` with a `runtime-package` artifact.
+- Generated `examples/goja-redis-chatdemo-server/internal/xgojaruntime` from that spec.
+- Added `examples/goja-redis-chatdemo-server/cmd/redis-host/main.go`.
+- Added `examples/goja-redis-chatdemo-server/docker-compose.yml` for Redis 7.
+- Added a Redis example `Makefile` with `doctor`, `generate`, `build`, `compose-up`, `serve`, and `smoke` targets.
+- Added `github.com/ThreeDotsLabs/watermill-redisstream` and `github.com/redis/go-redis/v9` dependencies.
+- Extended `pkg/js/modules/sessionstream.Options` with `DefaultHubOptions`.
+- Extended the sessionstream xgoja provider with a host-service key and `HostOptions` so a custom Go host can inject hub options during module setup.
+- Added `(*Hub).Publish(...)` and JS `hub.publish(...)` so CLI jsverbs can inject typed backend events through the configured event bus.
+- Updated the smoke client with separate `--post-addr` and `--ws-addr` flags so the Redis smoke posts to one process and receives websocket events from another process.
+- Updated the shared chatdemo server verb to call `hub.run()` so event-bus consumers start when a bus is configured.
+
+### Why
+
+- Redis/Watermill wiring belongs in Go because it owns clients, lifecycle, reconnect policy, and event-bus semantics.
+- JavaScript should not need Redis details; it should continue using `ss.hub`, `hub.submit`, `hub.publish`, `pub.publish`, and projections.
+- Host services are the right xgoja seam because they are visible to both generated modules and provider command construction.
+
+### What worked
+
+The Redis example validates and runs:
+
+```bash
+make -C examples/goja-redis-chatdemo-server doctor build
+make -C examples/goja-redis-chatdemo-server smoke
+```
+
+The smoke starts two Redis-backed host processes and verifies cross-process delivery by posting to `127.0.0.1:18889` while the smoke websocket listens on `127.0.0.1:18890`.
+
+Focused validation passed:
+
+```bash
+go test ./pkg/js/modules/sessionstream ./pkg/js/modules/sessionstream/provider ./pkg/sessionstream ./examples/goja-redis-chatdemo-server/cmd/redis-host ./examples/goja-chatdemo-server/cmd/smoke-client -count=1
+```
+
+Full validation passed after the current changes:
+
+```bash
+go test ./... -count=1
+```
+
+### What didn't work
+
+- The first Redis smoke only proved a single process because the smoke client posted and listened on the same address. I added `--post-addr` and `--ws-addr`, then updated the Redis smoke to post to process A and listen on process B.
+- Help commands currently initialize Redis because the custom host builds its bundle before attaching commands. This is acceptable for the example but worth improving if we want help to work without Redis running.
+
+### What I learned
+
+- xgoja already has the needed host-service seam for this architecture. The missing piece was a small sessionstream provider hook to accept host-injected hub options.
+- Redis Streams subscriber fan-out mode requires an empty consumer group. A shared consumer group would turn cross-process fanout into work-queue semantics where only one server receives an event.
+- sessionstream's current bus is event-oriented. CLI command submission still executes the command handler in the CLI process and publishes resulting events to Redis; it is not a distributed command bus.
+
+### What was tricky to build
+
+- The distinction between command and event distribution matters. `hub.submit(...)` is still local command execution; the distributed part is `pub.publish(...)` / `hub.publish(...)` writing typed events to Redis.
+- The generated runtime package needed embedded assets and jsverbs from the original chatdemo plus Redis-local CLI tools, so the source IDs had to be scoped deliberately.
+- The sessionstream provider had to read host services during module setup, not from JavaScript config, because Redis clients and Watermill publishers are Go-owned resources.
+
+### What warrants a second pair of eyes
+
+- Review whether `DefaultHubOptions []ss.HubOption` is the right provider extension, or whether the provider should accept a narrower `DefaultEventBus` service shape.
+- Review the help-time Redis initialization behavior in `cmd/redis-host/main.go`.
+- Review whether `hub.publish(...)` should be considered public JS API or kept mostly for operational CLI tooling.
+
+### What should be done in the future
+
+- If true distributed commands are needed, design a command bus with an explicit command envelope, topic, consumer, ordering model, and failure policy.
+- Consider moving Redis host wiring into a reusable provider capability if multiple examples need it.
+
+### Code review instructions
+
+- Start with `examples/goja-redis-chatdemo-server/README.md` for the architecture.
+- Review `examples/goja-redis-chatdemo-server/cmd/redis-host/main.go` for Redis/Watermill setup and host-service injection.
+- Review `pkg/js/modules/sessionstream/provider/provider.go` and `pkg/js/modules/sessionstream/module.go` for the sessionstream provider seam.
+- Review `pkg/sessionstream/hub.go` and `pkg/js/modules/sessionstream/api_hub.go` for `Publish` / `hub.publish`.
+- Validate with the Redis smoke command.
+
+### Technical details
+
+The host-service injection is:
+
+```go
+services.SetHostService(ssprovider.HostServiceKey, ssprovider.HostOptions{
+  HubOptions: []sessionstream.HubOption{
+    sessionstream.WithEventBus(pub, sub, sessionstream.WithBusTopic(topic)),
+  },
+})
+```
+
+The Redis subscriber uses fan-out mode:
+
+```go
+redisstream.SubscriberConfig{
+  Consumer:      consumerID,
+  ConsumerGroup: "",
+  FanOutOldestId: "$",
+}
+```

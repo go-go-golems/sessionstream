@@ -31,6 +31,7 @@ type Options struct {
 	EventEmitterManagerResolver func() (*jsevents.Manager, bool)
 	DefaultSchemaRegistry       *ss.SchemaRegistry
 	DefaultHydrationStore       ss.HydrationStore
+	DefaultHubOptions           []ss.HubOption
 	Prototypes                  map[string]proto.Message
 	Logger                      zerolog.Logger
 }
@@ -65,6 +66,7 @@ type moduleRuntime struct {
 	eventEmitterManagerResolver func() (*jsevents.Manager, bool)
 	defaultSchemaRegistry       *ss.SchemaRegistry
 	defaultHydrationStore       ss.HydrationStore
+	defaultHubOptions           []ss.HubOption
 	prototypes                  map[string]proto.Message
 	logger                      zerolog.Logger
 }
@@ -113,6 +115,7 @@ func newRuntime(vm *goja.Runtime, opts Options) *moduleRuntime {
 		eventEmitterManagerResolver: opts.EventEmitterManagerResolver,
 		defaultSchemaRegistry:       opts.DefaultSchemaRegistry,
 		defaultHydrationStore:       opts.DefaultHydrationStore,
+		defaultHubOptions:           append([]ss.HubOption(nil), opts.DefaultHubOptions...),
 		prototypes:                  prototypes,
 		logger:                      lg,
 	}

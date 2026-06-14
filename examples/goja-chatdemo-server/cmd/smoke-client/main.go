@@ -15,38 +15,57 @@ import (
 )
 
 func main() {
-	addr, err := parseAddr(os.Args[1:])
+	settings, err := parseArgs(os.Args[1:])
 	if err != nil {
 		panic(err)
 	}
-	if err := run(addr); err != nil {
+	if err := run(settings); err != nil {
 		panic(err)
 	}
 }
 
-func parseAddr(args []string) (string, error) {
-	addr := "127.0.0.1:18789"
+type settings struct {
+	PostAddr string
+	WSAddr   string
+}
+
+func parseArgs(args []string) (settings, error) {
+	settings := settings{PostAddr: "127.0.0.1:18789", WSAddr: "127.0.0.1:18789"}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--addr":
 			if i+1 >= len(args) {
-				return "", fmt.Errorf("--addr requires a value")
+				return settings, fmt.Errorf("--addr requires a value")
 			}
-			addr = args[i+1]
+			settings.PostAddr = args[i+1]
+			settings.WSAddr = args[i+1]
+			i++
+		case "--post-addr":
+			if i+1 >= len(args) {
+				return settings, fmt.Errorf("--post-addr requires a value")
+			}
+			settings.PostAddr = args[i+1]
+			i++
+		case "--ws-addr":
+			if i+1 >= len(args) {
+				return settings, fmt.Errorf("--ws-addr requires a value")
+			}
+			settings.WSAddr = args[i+1]
 			i++
 		default:
-			return "", fmt.Errorf("unknown argument %q", args[i])
+			return settings, fmt.Errorf("unknown argument %q", args[i])
 		}
 	}
-	return addr, nil
+	return settings, nil
 }
 
-func run(addr string) error {
+func run(settings settings) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	baseURL := "http://" + addr
+	postBaseURL := "http://" + settings.PostAddr
+	wsBaseURL := "http://" + settings.WSAddr
 	for {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/healthz", nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, postBaseURL+"/healthz", nil)
 		resp, err := http.DefaultClient.Do(req)
 		if err == nil && resp.Body != nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
@@ -61,7 +80,23 @@ func run(addr string) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	wsURL := "ws://" + addr + "/ws"
+	for {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, wsBaseURL+"/healthz", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil && resp.Body != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+		if err == nil && resp.StatusCode == http.StatusOK {
+			break
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("websocket server did not become healthy: %w", ctx.Err())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	wsURL := "ws://" + settings.WSAddr + "/ws"
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
 		return fmt.Errorf("dial websocket: %w", err)
@@ -72,7 +107,7 @@ func run(addr string) error {
 	}
 
 	body, _ := json.Marshal(map[string]string{"sessionId": "demo", "prompt": "smoke test prompt"})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/chat", bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, postBaseURL+"/api/chat", bytes.NewReader(body))
 	req.Header.Set("content-type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
