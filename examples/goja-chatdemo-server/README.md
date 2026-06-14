@@ -26,7 +26,7 @@ Open:
 http://127.0.0.1:18789/
 ```
 
-The browser connects to `/ws`, subscribes to the `demo` session, sends prompts to `/api/chat`, and receives live UI events over the WebSocket.
+The browser connects to `/ws`, subscribes to the `demo` session, sends prompts to `/api/chat`, and receives live UI events over the WebSocket. The fake backend intentionally waits between published events with the xgoja `timer` module so the browser shows the assistant message progressing through streaming states instead of completing immediately.
 
 Pass a custom session id in the URL if you want separate conversations:
 

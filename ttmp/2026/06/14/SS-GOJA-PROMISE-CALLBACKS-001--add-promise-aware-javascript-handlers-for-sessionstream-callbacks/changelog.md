@@ -53,3 +53,13 @@ Added rejected async UI/timeline projection regressions for Promise-native submi
 
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/module_test.go — Rejected async projection regressions
 
+
+## 2026-06-14
+
+Added timer-backed delays to the xgoja chatdemo so websocket streaming is visible during manual testing.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/verbs/chatbot.js — Delayed fake streaming publication
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/examples/goja-chatdemo-server/xgoja.yaml — Timer module selection
+

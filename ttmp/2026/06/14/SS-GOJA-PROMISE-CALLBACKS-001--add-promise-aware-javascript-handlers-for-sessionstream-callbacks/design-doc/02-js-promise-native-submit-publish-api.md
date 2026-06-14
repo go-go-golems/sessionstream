@@ -7,6 +7,12 @@ DocType: ""
 Intent: ""
 Owners: []
 RelatedFiles:
+    - Path: examples/goja-chatdemo-server/README.md
+      Note: Documents intentional streaming delay
+    - Path: examples/goja-chatdemo-server/verbs/chatbot.js
+      Note: Uses timer.sleep and Promise-native publish to slow fake streaming
+    - Path: examples/goja-chatdemo-server/xgoja.yaml
+      Note: Adds go-go-goja core timer module for visible streaming delay
     - Path: pkg/js/modules/sessionstream/api_callbacks.go
       Note: Promise-native publisher.publish
     - Path: pkg/js/modules/sessionstream/api_hub.go
@@ -23,6 +29,7 @@ LastUpdated: 0001-01-01T00:00:00Z
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 
 # JS Promise-native submit and publish API

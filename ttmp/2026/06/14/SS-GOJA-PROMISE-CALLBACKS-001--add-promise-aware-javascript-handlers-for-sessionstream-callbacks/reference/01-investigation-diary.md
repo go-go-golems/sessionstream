@@ -583,3 +583,97 @@ hub.uiProjection(async () => {
 })
 await hub.submit("s-reject", "ChatStartInference", command)
 ```
+
+## Step 7: Add visible streaming delay to the xgoja chatdemo
+
+I updated the xgoja chatdemo server so the fake assistant response is visibly streamed instead of appearing almost immediately. The example now includes the go-go-goja core provider, imports the `timer` module from JavaScript, and awaits short sleeps between published sessionstream events.
+
+This keeps the app fully self-contained while exercising the Promise-native `pub.publish(...)` and `hub.submit(...)` APIs in a more realistic async command handler. The browser can now show the user event, assistant-started state, token deltas, and final completion over time.
+
+### Prompt Context
+
+**User prompt (verbatim):** "can we add some delayed to see the streaming take place? this is almost immediate."
+
+**Assistant interpretation:** Slow down the fake chatbot response path so manual browser testing visibly shows websocket streaming/projection updates.
+
+**Inferred user intent:** Make the demo useful for visually verifying that the sessionstream WebSocket UI updates stream incrementally, not just that the final state is correct.
+
+### What I did
+
+- Added the `go-go-goja-core` xgoja provider to `examples/goja-chatdemo-server/xgoja.yaml`.
+- Selected the `timer` runtime module as `timer`.
+- Imported `const timer = require("timer")` in `verbs/chatbot.js`.
+- Added `publishWithDelay(...)` helper using `await timer.sleep(...)`.
+- Inserted delays after the user-accepted event, assistant-started event, and each token delta.
+- Updated the example README to mention the intentional streaming delay.
+
+### Why
+
+- The app already produced multiple sessionstream events, but they were published so quickly that a human tester could barely observe streaming behavior.
+- Delays make WebSocket fanout behavior and projection state transitions visible during manual testing.
+
+### What worked
+
+The xgoja smoke test still passed:
+
+```bash
+make -C examples/goja-chatdemo-server smoke
+```
+
+Focused package validation passed after rerunning the known flaky bus package separately:
+
+```bash
+go test ./pkg/sessionstream -count=1
+go test ./pkg/js/modules/sessionstream -count=1
+```
+
+### What didn't work
+
+The combined focused command hit the existing event-bus ordering flake again:
+
+```text
+--- FAIL: TestHubEventBusGoChannelRoundTrip (0.01s)
+    bus_test.go:73:
+        Error: "1700000000000000002" is not greater than "1700000000000000003"
+```
+
+Rerunning `go test ./pkg/sessionstream -count=1` passed. This appears unrelated to the chatdemo timer changes.
+
+### What I learned
+
+- The xgoja core provider is the right way to expose `timer.sleep(ms)` to generated xgoja apps.
+- Delayed publishing is a good real-world exercise for the Promise-native callback work because the command handler awaits native Promise-returning helpers and Promise-returning sessionstream publication.
+
+### What was tricky to build
+
+- The delay needed to live inside the JS command handler rather than the frontend, so the server-side sessionstream pipeline itself demonstrates incremental publication over WebSocket.
+- Adding `timer` required selecting the core provider/runtime module in `xgoja.yaml`; just requiring it from JS would not be enough for generated xgoja runtime plans.
+
+### What warrants a second pair of eyes
+
+- Review whether the delay durations feel right for manual demos: currently 200ms after the user event, 350ms after assistant start, and 650ms after each token delta.
+
+### What should be done in the future
+
+- Replace `fakeAnswer(...)` with a real async model call when ready; the timer-based delay can then be removed or kept as a dev/demo option.
+
+### Code review instructions
+
+- Review `examples/goja-chatdemo-server/xgoja.yaml` for the added core/timer module.
+- Review `examples/goja-chatdemo-server/verbs/chatbot.js` for `publishWithDelay(...)` and delayed event publication.
+- Validate with:
+
+```bash
+make -C examples/goja-chatdemo-server smoke
+```
+
+### Technical details
+
+The important JS helper is:
+
+```js
+async function publishWithDelay(pub, name, payload, delayMs = 250) {
+  await pub.publish(name, payload)
+  await timer.sleep(delayMs)
+}
+```
