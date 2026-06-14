@@ -505,3 +505,81 @@ hub.command("Ask", async (cmd, session, pub) => {
 
 await hub.submit("s-1", "Ask", command)
 ```
+
+## Step 6: Add rejected async projection regressions
+
+I added explicit tests for rejected Promise-returning UI and timeline projections. The earlier success test proved that async projections can resolve and be decoded, but it did not prove that rejected projection Promises propagate back through `publisher.publish(...)`, command handler completion, and finally `hub.submit(...)`.
+
+The new table-driven regression covers both projection paths and asserts that the final rejected submit Promise includes the projection callback label and original rejection reason.
+
+### Prompt Context
+
+**User prompt (verbatim):** "continue"
+
+**Assistant interpretation:** Continue the remaining implementation checklist after removing enqueue; the obvious open item was explicit rejected async projection tests.
+
+**Inferred user intent:** Finish cleanup and validation tasks for the Promise-native submit/publish work.
+
+### What I did
+
+- Added `TestHubPromiseRejectedProjectionReturnsError` in `pkg/js/modules/sessionstream/module_test.go`.
+- Covered an async UI projection that throws after `await Promise.resolve()`.
+- Covered an async timeline projection that throws after `await Promise.resolve()`.
+- Verified errors contain callback labels:
+  - `sessionstream.uiProjection.ChatUserMessageAccepted`
+  - `sessionstream.timelineProjection.ChatUserMessageAccepted`
+- Marked the rejected projection test task complete in `tasks.md`.
+
+### Why
+
+- Projection rejections need to behave like synchronous projection errors.
+- The failure should be visible to the submit caller because `hub.submit(...)` is the JS completion API.
+- Callback labels are important for diagnosing which registered handler failed.
+
+### What worked
+
+Focused validation passed:
+
+```bash
+go test ./pkg/js/modules/sessionstream -run 'TestHubPromiseRejectedProjectionReturnsError|TestHubPromiseRejectedCommandReturnsError' -count=1 -v
+```
+
+### What didn't work
+
+- N/A. The projection rejection propagation behaved as expected.
+
+### What I learned
+
+- The current error chain preserves enough context to identify both the top-level command and the exact failing projection callback.
+
+### What was tricky to build
+
+- The projection rejection is nested: `hub.submit(...)` waits for a command handler, the command handler returns `pub.publish(...)`, and publication runs projections. The test therefore needs to assert on the final submit rejection rather than only on the projection helper.
+
+### What warrants a second pair of eyes
+
+- Review whether rejected JS Promises should reject with strings or JS `Error` objects at the outer `submit`/`publish` API boundary.
+
+### What should be done in the future
+
+- N/A for rejected projection coverage.
+
+### Code review instructions
+
+- Review `TestHubPromiseRejectedProjectionReturnsError` in `pkg/js/modules/sessionstream/module_test.go`.
+- Validate with the focused test command above or the full package suite.
+
+### Technical details
+
+The test pattern is:
+
+```js
+hub.command("ChatStartInference", (cmd, session, pub) => {
+  return pub.publish("ChatUserMessageAccepted", event)
+})
+hub.uiProjection(async () => {
+  await Promise.resolve()
+  throw new Error("ui boom")
+})
+await hub.submit("s-reject", "ChatStartInference", command)
+```

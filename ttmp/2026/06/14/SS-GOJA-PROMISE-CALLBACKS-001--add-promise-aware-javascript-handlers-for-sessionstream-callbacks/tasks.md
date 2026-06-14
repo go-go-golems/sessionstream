@@ -48,7 +48,7 @@
 - [x] Decode projection arrays only after Promise resolution.
 - [x] Preserve projection error policy behavior for rejected Promises.
 - [x] Add tests for async UI projection success and async timeline projection success.
-- [ ] Add explicit rejected async UI/timeline projection tests.
+- [x] Add explicit rejected async UI/timeline projection tests.
 
 ### 4. Event loop/runtime-owner integration
 

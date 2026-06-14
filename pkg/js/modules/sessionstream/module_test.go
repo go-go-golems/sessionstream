@@ -202,6 +202,85 @@ func TestHubPromiseRejectedCommandReturnsError(t *testing.T) {
 	require.Contains(t, err.Error(), "async boom")
 }
 
+func TestHubPromiseRejectedProjectionReturnsError(t *testing.T) {
+	registry := ss.NewSchemaRegistry()
+	require.NoError(t, chatdemo.RegisterSchemas(registry))
+	store, err := storesqlite.NewInMemory(registry)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	factory, err := gggengine.NewRuntimeFactoryBuilder().
+		WithModules(
+			gggengine.NativeModuleRegistrar{ModuleName: ModuleName, Loader: NewLoader(Options{DefaultHydrationStore: store})},
+			gggengine.NativeModuleRegistrar{ModuleName: chatdemov1.GojaBuilderFileChatProtoModuleName(), Loader: chatdemov1.NewGojaBuilderFileChatProtoLoader("")},
+		).
+		Build()
+	require.NoError(t, err)
+	rt, err := factory.NewRuntime(gggengine.WithStartupContext(context.Background()), gggengine.WithLifetimeContext(context.Background()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
+
+	cases := []struct {
+		name       string
+		setup      string
+		wantLabel  string
+		wantReason string
+	}{
+		{
+			name: "ui projection",
+			setup: `
+				hub.uiProjection(async () => {
+				  await Promise.resolve();
+				  throw new Error("ui boom");
+				});
+				hub.timelineProjection(() => []);
+			`,
+			wantLabel:  "sessionstream.uiProjection.ChatUserMessageAccepted",
+			wantReason: "ui boom",
+		},
+		{
+			name: "timeline projection",
+			setup: `
+				hub.uiProjection(() => []);
+				hub.timelineProjection(async () => {
+				  await Promise.resolve();
+				  throw new Error("timeline boom");
+				});
+			`,
+			wantLabel:  "sessionstream.timelineProjection.ChatUserMessageAccepted",
+			wantReason: "timeline boom",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			value, err := rt.Owner.Call(ctx, "sessionstream.projection.reject", func(_ context.Context, vm *goja.Runtime) (any, error) {
+				return vm.RunString(`(async () => {
+					const ss = require("sessionstream");
+					const pb = require("sessionstream.examples.chatdemo.v1");
+					const schemas = ss.schemas()
+					  .registerCommand("ChatStartInference", pb.StartInferenceCommand)
+					  .registerEvent("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent);
+					const hub = ss.hub({ schemas });
+					hub.command("ChatStartInference", (cmd, session, pub) => {
+					  return pub.publish("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent.builder()
+					    .messageId("m-reject").role("user").content(cmd.payload.prompt).streaming(false).build());
+					});
+					` + tc.setup + `
+					await hub.submit("s-reject", "ChatStartInference", pb.StartInferenceCommand.builder().prompt("hello").build());
+				})()`)
+			})
+			require.NoError(t, err)
+			_, err = waitTestPromise(ctx, rt, value.(goja.Value))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantLabel)
+			require.Contains(t, err.Error(), tc.wantReason)
+		})
+	}
+}
+
 func waitTestPromise(ctx context.Context, rt *gggengine.Runtime, value goja.Value) (goja.Value, error) {
 	promise, ok := value.Export().(*goja.Promise)
 	if !ok {

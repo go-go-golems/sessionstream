@@ -44,3 +44,12 @@ Removed experimental local hub.enqueue API and kept Promise-native JS submit/pub
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_hub.go — enqueue removal
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/typescript.go — enqueue removed from declarations
 
+
+## 2026-06-14
+
+Added rejected async UI/timeline projection regressions for Promise-native submit/publish error propagation.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/module_test.go — Rejected async projection regressions
+
