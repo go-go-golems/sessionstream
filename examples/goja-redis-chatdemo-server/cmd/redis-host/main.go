@@ -24,22 +24,69 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
-	redisAddr := envOrDefault("REDIS_ADDR", "127.0.0.1:6379")
-	topic := envOrDefault("SESSIONSTREAM_BUS_TOPIC", "sessionstream.chatdemo.redis")
-	consumerID := envOrDefault("SESSIONSTREAM_CONSUMER_ID", fmt.Sprintf("redis-chatdemo-%d", os.Getpid()))
+	bridge := &redisBridge{settings: redisHostSettings{
+		RedisAddr:  "127.0.0.1:6379",
+		BusTopic:   "sessionstream.chatdemo.redis",
+		ConsumerID: fmt.Sprintf("redis-chatdemo-%d", os.Getpid()),
+	}}
+	defer bridge.Close()
 
-	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
-	if err := redisClient.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("ping redis %s: %w", redisAddr, err)
+	bundle, err := chatdemoruntime.NewBundle(chatdemoruntime.Options{
+		Out: os.Stdout,
+		ConfigureServices: func(services *app.HostServices) {
+			_ = services.SetHostService(ssprovider.HostServiceKey, ssprovider.HostOptions{
+				HubOptions: []ss.HubOption{bridge.HubOption()},
+			})
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create xgoja runtime bundle: %w", err)
 	}
-	defer func() { _ = redisClient.Close() }()
+
+	root := &cobra.Command{
+		Use:   "redis-chatdemo",
+		Short: "xgoja chatdemo host wired to Redis-backed Watermill events",
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			return bridge.Open(cmd.Context())
+		},
+	}
+	bundle.AttachDefaultCommands(root)
+	root.SetArgs(args)
+	return root.ExecuteContext(ctx)
+}
+
+type redisHostSettings struct {
+	RedisAddr  string
+	BusTopic   string
+	ConsumerID string
+}
+
+type redisBridge struct {
+	settings    redisHostSettings
+	redisClient *redis.Client
+	publisher   *redisstream.Publisher
+	subscriber  *redisstream.Subscriber
+}
+
+func (b *redisBridge) Open(ctx context.Context) error {
+	if b == nil {
+		return fmt.Errorf("redis bridge is not configured")
+	}
+	if b.publisher != nil && b.subscriber != nil {
+		return nil
+	}
+	redisClient := redis.NewClient(&redis.Options{Addr: b.settings.RedisAddr})
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		_ = redisClient.Close()
+		return fmt.Errorf("ping redis %s: %w", b.settings.RedisAddr, err)
+	}
 
 	logger := watermill.NopLogger{}
 	publisher, err := redisstream.NewPublisher(redisstream.PublisherConfig{Client: redisClient}, logger)
 	if err != nil {
+		_ = redisClient.Close()
 		return fmt.Errorf("create redisstream publisher: %w", err)
 	}
-	defer func() { _ = publisher.Close() }()
 
 	// Use fan-out mode (empty ConsumerGroup) so every server process receives every
 	// event and can fan it out to its own websocket clients. A shared ConsumerGroup
@@ -47,7 +94,7 @@ func run(ctx context.Context, args []string) error {
 	// event.
 	subscriber, err := redisstream.NewSubscriber(redisstream.SubscriberConfig{
 		Client:                        redisClient,
-		Consumer:                      consumerID,
+		Consumer:                      b.settings.ConsumerID,
 		ConsumerGroup:                 "",
 		FanOutOldestId:                "$",
 		BlockTime:                     time.Second,
@@ -61,36 +108,37 @@ func run(ctx context.Context, args []string) error {
 		ConsumerTimeout:               5 * time.Minute,
 	}, logger)
 	if err != nil {
+		_ = publisher.Close()
+		_ = redisClient.Close()
 		return fmt.Errorf("create redisstream subscriber: %w", err)
 	}
-	defer func() { _ = subscriber.Close() }()
 
-	bundle, err := chatdemoruntime.NewBundle(chatdemoruntime.Options{
-		Out: os.Stdout,
-		ConfigureServices: func(services *app.HostServices) {
-			_ = services.SetHostService(ssprovider.HostServiceKey, ssprovider.HostOptions{
-				HubOptions: []ss.HubOption{
-					ss.WithEventBus(publisher, subscriber, ss.WithBusTopic(topic)),
-				},
-			})
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("create xgoja runtime bundle: %w", err)
-	}
-
-	root := &cobra.Command{
-		Use:   "redis-chatdemo",
-		Short: "xgoja chatdemo host wired to Redis-backed Watermill events",
-	}
-	bundle.AttachDefaultCommands(root)
-	root.SetArgs(args)
-	return root.ExecuteContext(ctx)
+	b.redisClient = redisClient
+	b.publisher = publisher
+	b.subscriber = subscriber
+	return nil
 }
 
-func envOrDefault(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+func (b *redisBridge) HubOption() ss.HubOption {
+	return func(h *ss.Hub) error {
+		if b == nil || b.publisher == nil || b.subscriber == nil {
+			return fmt.Errorf("redis bridge is not open")
+		}
+		return ss.WithEventBus(b.publisher, b.subscriber, ss.WithBusTopic(b.settings.BusTopic))(h)
 	}
-	return fallback
+}
+
+func (b *redisBridge) Close() {
+	if b == nil {
+		return
+	}
+	if b.subscriber != nil {
+		_ = b.subscriber.Close()
+	}
+	if b.publisher != nil {
+		_ = b.publisher.Close()
+	}
+	if b.redisClient != nil {
+		_ = b.redisClient.Close()
+	}
 }

@@ -26,15 +26,15 @@ compose-down:
 	docker compose -f $(CURDIR)/docker-compose.yml down
 
 serve: generate
-	cd $(SESSIONSTREAM) && REDIS_ADDR=$(REDIS_ADDR) SESSIONSTREAM_BUS_TOPIC=$(BUS_TOPIC) go run ./examples/goja-redis-chatdemo-server/cmd/redis-host serve chatbot serve --http-listen $(HTTP_ADDR)
+	cd $(SESSIONSTREAM) && go run ./examples/goja-redis-chatdemo-server/cmd/redis-host serve chatbot serve --http-listen $(HTTP_ADDR)
 
 smoke: doctor compose-up generate
 	@set -eu; \
 	cd $(SESSIONSTREAM); \
 	log1=$$(mktemp); log2=$$(mktemp); \
-	REDIS_ADDR=$(REDIS_ADDR) SESSIONSTREAM_BUS_TOPIC=$(BUS_TOPIC) SESSIONSTREAM_CONSUMER_ID=redis-demo-a go run ./examples/goja-redis-chatdemo-server/cmd/redis-host serve chatbot serve --http-listen 127.0.0.1:18889 >$$log1 2>&1 & \
+	go run ./examples/goja-redis-chatdemo-server/cmd/redis-host serve chatbot serve --http-listen 127.0.0.1:18889 >$$log1 2>&1 & \
 	pid1=$$!; \
-	REDIS_ADDR=$(REDIS_ADDR) SESSIONSTREAM_BUS_TOPIC=$(BUS_TOPIC) SESSIONSTREAM_CONSUMER_ID=redis-demo-b go run ./examples/goja-redis-chatdemo-server/cmd/redis-host serve chatbot serve --http-listen 127.0.0.1:18890 >$$log2 2>&1 & \
+	go run ./examples/goja-redis-chatdemo-server/cmd/redis-host serve chatbot serve --http-listen 127.0.0.1:18890 >$$log2 2>&1 & \
 	pid2=$$!; \
 	trap 'kill $$pid1 $$pid2 >/dev/null 2>&1 || true; wait $$pid1 $$pid2 >/dev/null 2>&1 || true; rm -f $$log1 $$log2' EXIT; \
 	sleep 2; \

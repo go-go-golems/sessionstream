@@ -50,20 +50,14 @@ Run two processes against the same Redis topic:
 ```bash
 cd /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream
 
-REDIS_ADDR=127.0.0.1:6379 \
-SESSIONSTREAM_BUS_TOPIC=sessionstream.chatdemo.redis \
-SESSIONSTREAM_CONSUMER_ID=server-a \
 go run ./examples/goja-redis-chatdemo-server/cmd/redis-host \
   serve chatbot serve --http-listen 127.0.0.1:18889
 
-REDIS_ADDR=127.0.0.1:6379 \
-SESSIONSTREAM_BUS_TOPIC=sessionstream.chatdemo.redis \
-SESSIONSTREAM_CONSUMER_ID=server-b \
 go run ./examples/goja-redis-chatdemo-server/cmd/redis-host \
   serve chatbot serve --http-listen 127.0.0.1:18890
 ```
 
-Open both URLs. Submitting a prompt on one process should publish events to Redis; both processes consume the events and fan out to their connected websocket clients.
+Open both URLs. Submitting a prompt on one process should publish events to Redis; both processes consume the events and fan out to their connected websocket clients. The example host uses Redis at `127.0.0.1:6379` and topic `sessionstream.chatdemo.redis`.
 
 ## Redis-only CLI verbs
 
@@ -94,8 +88,6 @@ commands:
 The regular `sites` source provides the HTTP server verb. The Redis example adds a separate `redis` jsverb package for CLI tools that only make sense when the host is wired to Redis/Watermill:
 
 ```bash
-REDIS_ADDR=127.0.0.1:6379 \
-SESSIONSTREAM_BUS_TOPIC=sessionstream.chatdemo.redis \
 go run ./examples/goja-redis-chatdemo-server/cmd/redis-host \
   verbs redis publish-trace \
   --session-id demo \
