@@ -32,3 +32,23 @@ Tightened schema map design to support only generated MessageNamespace values an
 
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/ttmp/2026/06/15/SS-GOJA-SCHEMA-MAP-001--analyze-lossy-goja-schema-map-export-and-protobuf-namespace-handling/design-doc/01-goja-schema-map-protobuf-namespace-analysis-and-implementation-guide.md — Updated API decision and implementation plan
 
+
+## 2026-06-16
+
+Implemented strict bulk schema registration by walking original Goja objects, preserving generated namespace prototypes, and rejecting plain descriptor objects.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_schemas.go — Removed ExportTo/map[string]any schema handling and added direct Goja section traversal
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/module_test.go — Added bulk namespace
+
+
+## 2026-06-16
+
+Committed strict bulk schema registration implementation (298d0496b4a2661d44ca80f74d5538fe81e28e51).
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_schemas.go — Committed direct Goja schema traversal
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/module_test.go — Committed regression coverage
+

@@ -10,6 +10,10 @@ DocType: reference
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: pkg/js/modules/sessionstream/api_schemas.go
+      Note: Implemented direct Goja bulk schema traversal and removed lossy map schema resolution
+    - Path: pkg/js/modules/sessionstream/module_test.go
+      Note: Regression tests for bulk namespace/string schemas and descriptor rejection
     - Path: ttmp/2026/06/15/SS-GOJA-SCHEMA-MAP-001--analyze-lossy-goja-schema-map-export-and-protobuf-namespace-handling/scripts/01-search-lossy-js-boundaries.sh
       Note: Reproducible inventory script for lossy JS/Go conversion boundaries
     - Path: ttmp/2026/06/15/SS-GOJA-SCHEMA-MAP-001--analyze-lossy-goja-schema-map-export-and-protobuf-namespace-handling/scripts/02-reproduce-bulk-schema-failure.sh
@@ -22,6 +26,7 @@ LastUpdated: 2026-06-15T19:40:00-04:00
 WhatFor: Records what was inspected, reproduced, and documented for SS-GOJA-SCHEMA-MAP-001.
 WhenToUse: Read before implementing the schema bulk registration fix or resuming the ticket.
 ---
+
 
 
 # Diary
@@ -342,3 +347,108 @@ THen implement them one by one, committing at appropriate intervals, keeping a d
 
 ### Technical details
 - Updated design doc: `ttmp/2026/06/15/SS-GOJA-SCHEMA-MAP-001--analyze-lossy-goja-schema-map-export-and-protobuf-namespace-handling/design-doc/01-goja-schema-map-protobuf-namespace-analysis-and-implementation-guide.md`.
+
+## Step 6: Implement strict bulk schema registration
+
+I implemented the stricter schema registration path described by the updated design. Bulk `ss.schemas({...})` now walks the original Goja input object, reads lower-case schema sections directly, and resolves each schema leaf while it is still a `goja.Value`. This preserves generated protobuf namespace hidden prototype tokens and removes the old `ExportTo`/`map[string]any` schema path entirely.
+
+The resulting API supports exactly generated `MessageNamespace` values and primitive protobuf full-name strings. Plain object descriptors such as `{ type: "..." }` and `{ typeName: "..." }` now fail immediately with the same schema type error as any other unsupported object.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 5)
+
+**Assistant interpretation:** Implement the tightened API and keep the diary current while validating each task.
+
+**Inferred user intent:** Move from design to code with a clean API cutover and strong regression coverage.
+
+**Commit (code):** 298d0496b4a2661d44ca80f74d5538fe81e28e51 — "Fix bulk schema registration for Goja protobuf namespaces"
+
+### What I did
+- Added regression tests in `pkg/js/modules/sessionstream/module_test.go`:
+  - `TestSchemasBulkRegisterGeneratedPrototypeNamespaces`
+  - `TestSchemasBulkRegisterStringFullNames`
+  - `TestSchemasRejectPlainObjectDescriptors`
+- Verified the new tests fail against the old implementation before changing production code.
+- Refactored `pkg/js/modules/sessionstream/api_schemas.go`:
+  - removed `schemaInput`;
+  - removed `mustResolveSchemaSpec(spec any)`;
+  - removed the `map[string]any` branch;
+  - removed `goja.Runtime.ExportTo` from `schemasBuilder`;
+  - added `registerSchemaSection` over original `goja.Value` objects;
+  - tightened `mustResolveSchemaValue` to accept generated namespaces or primitive strings only.
+- Ran `gofmt`.
+
+### Why
+- `ExportTo` stripped hidden generated-protobuf prototype tokens and also failed to populate lower-case TypeScript section keys in the reproduction.
+- Removing the exported-map path makes bulk registration behave like fluent registration.
+
+### What worked
+- The focused tests now pass:
+
+```bash
+go test ./pkg/js/modules/sessionstream -run 'TestSchemas(BulkRegisterGeneratedPrototypeNamespaces|BulkRegisterStringFullNames|RejectPlainObjectDescriptors)' -count=1
+# ok github.com/go-go-golems/sessionstream/pkg/js/modules/sessionstream 0.005s
+```
+
+- Package tests now pass:
+
+```bash
+go test ./pkg/js/modules/sessionstream -count=1
+# ok github.com/go-go-golems/sessionstream/pkg/js/modules/sessionstream 0.072s
+```
+
+- Full repository tests now pass:
+
+```bash
+go test ./... -count=1
+# ok github.com/go-go-golems/sessionstream/... (all packages with tests passed)
+```
+
+- The pre-commit hook also passed `GOWORK=off go test ./...` and `golangci-lint run -v` before creating commit `298d0496b4a2661d44ca80f74d5538fe81e28e51`.
+
+### What didn't work
+- The new tests failed as expected before implementation:
+
+```text
+--- FAIL: TestSchemasBulkRegisterGeneratedPrototypeNamespaces
+Error: GoError: unknown command "ChatStartInference"
+
+--- FAIL: TestSchemasBulkRegisterStringFullNames
+Error: GoError: unknown command "ChatStartInference"
+
+--- FAIL: TestSchemasRejectPlainObjectDescriptors/typeName
+Error: An error is expected but got nil.
+
+--- FAIL: TestSchemasRejectPlainObjectDescriptors/type
+Error: An error is expected but got nil.
+```
+
+### What I learned
+- Lower-case bulk sections must be read from the original JavaScript object. Relying on Go struct export tags here is both unnecessary and fragile.
+- Checking `value.Export().(string)` is stricter than `value.String()` and avoids accidentally treating arbitrary objects as strings.
+
+### What was tricky to build
+- Promise-returning hub operations can hide asynchronous handler/projection failures if a test only checks `RunString` errors. The bulk generated namespace test now checks that the returned Promise is fulfilled, which exercises command, event, UI event, and timeline entity schemas.
+- Descriptor rejection needed to call `ss.schemas(...)` directly after the refactor because schema values are resolved during registration rather than later at submit time.
+
+### What warrants a second pair of eyes
+- Review `registerSchemaSection` for Goja object semantics, especially whether `obj.Keys()` is the right key set for this API.
+- Review the hard cutover from `{ type: "..." }` to primitive string full names.
+
+### What should be done in the future
+- Consider a small go-go-goja documentation update warning consumers not to call `ExportTo` before `protogoja.MessagePrototypeFromValue` / `MessageFromValue`.
+
+### Code review instructions
+- Start with `pkg/js/modules/sessionstream/api_schemas.go` and confirm `ExportTo` is gone from schema registration.
+- Then review `pkg/js/modules/sessionstream/module_test.go` for the three new regression tests.
+- Validate with:
+
+```bash
+go test ./pkg/js/modules/sessionstream -count=1
+go test ./... -count=1
+```
+
+### Technical details
+- Modified code file: `/home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_schemas.go`.
+- Modified test file: `/home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/module_test.go`.
