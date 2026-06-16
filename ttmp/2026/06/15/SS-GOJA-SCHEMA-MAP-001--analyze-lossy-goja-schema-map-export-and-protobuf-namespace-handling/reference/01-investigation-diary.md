@@ -10,6 +10,8 @@ DocType: reference
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: pkg/js/modules/sessionstream/README.md
+      Note: Documents strict schema registration API and typeName metadata distinction
     - Path: pkg/js/modules/sessionstream/api_schemas.go
       Note: Implemented direct Goja bulk schema traversal and removed lossy map schema resolution
     - Path: pkg/js/modules/sessionstream/module_test.go
@@ -26,6 +28,7 @@ LastUpdated: 2026-06-15T19:40:00-04:00
 WhatFor: Records what was inspected, reproduced, and documented for SS-GOJA-SCHEMA-MAP-001.
 WhenToUse: Read before implementing the schema bulk registration fix or resuming the ticket.
 ---
+
 
 
 
@@ -500,3 +503,48 @@ After committing the implementation and diary updates, I regenerated the ticket 
 ### Technical details
 - Remote path: `/ai/2026/06/15/SS-GOJA-SCHEMA-MAP-001`.
 - Bundle name: `SS-GOJA-SCHEMA-MAP-001 schema map protobuf namespace guide`.
+
+## Step 8: Document `typeName` metadata versus schema input
+
+I updated the sessionstream Goja module README to explain the tightened schema API in user-facing terms. The docs now state that schema values are either generated `MessageNamespace` objects or protobuf full-name strings, and that `.typeName` is metadata rather than authority.
+
+This closes the ambiguity from the implementation discussion: generated protobuf objects may expose public `.typeName`, but sessionstream does not accept arbitrary `{ typeName: "..." }` or `{ type: "..." }` descriptor objects as schema values.
+
+### Prompt Context
+
+**User prompt (verbatim):** "update the docs."
+
+**Assistant interpretation:** Add documentation that clarifies the distinction between generated protobuf `typeName` metadata and accepted sessionstream schema inputs.
+
+**Inferred user intent:** Prevent future contributors/users from reintroducing `{ typeName: ... }` descriptor fallback or misunderstanding the strict schema API.
+
+**Commit (code):** pending — documentation update before commit.
+
+### What I did
+- Updated `pkg/js/modules/sessionstream/README.md` with a new schema registration section.
+- Documented bulk registration, fluent registration, and string full-name registration.
+- Explicitly documented that plain descriptor objects are rejected.
+
+### Why
+- The code now enforces the tighter API, and the README needed to match.
+
+### What worked
+- The README now directly states: `.typeName` is useful metadata, but not authority by itself.
+
+### What didn't work
+- N/A
+
+### What I learned
+- The clearest wording is “metadata, not authority”: it keeps `.typeName` useful without making it an accepted schema descriptor.
+
+### What was tricky to build
+- The tricky part was avoiding wording that implies string full names and `{ typeName: ... }` objects are equivalent. Only primitive strings are accepted as explicit names.
+
+### What warrants a second pair of eyes
+- Review whether the README should include a small rejected-input snippet, or whether prose is sufficient.
+
+### What should be done in the future
+- Keep go-go-goja protobuf builder docs aligned with the same hidden-reference rule.
+
+### Code review instructions
+- Review `pkg/js/modules/sessionstream/README.md`, especially the new “Schema registration” section.

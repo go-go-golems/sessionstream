@@ -61,3 +61,12 @@ Refreshed and re-uploaded reMarkable bundle after implementation diary/design up
 
 - /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/ttmp/2026/06/15/SS-GOJA-SCHEMA-MAP-001--analyze-lossy-goja-schema-map-export-and-protobuf-namespace-handling/sources/SS-GOJA-SCHEMA-MAP-001 schema map protobuf namespace guide.pdf — Updated rendered bundle
 
+
+## 2026-06-16
+
+Documented strict sessionstream schema inputs and clarified that typeName is metadata, not descriptor authority.
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/README.md — User-facing schema registration docs
+

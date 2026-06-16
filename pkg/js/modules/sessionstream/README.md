@@ -26,6 +26,57 @@ Phase-1 coverage:
   integration step.
 - `TypeScriptModule()` exposes handwritten DTS for xgoja declaration bundles.
 
+## Schema registration
+
+`schemas()` accepts schema values in exactly two forms:
+
+1. a generated protobuf message namespace, for example `pb.StartInferenceCommand`;
+2. a protobuf full-name string, for example
+   `"sessionstream.examples.chatdemo.v1.StartInferenceCommand"`.
+
+A generated namespace is the preferred form when the protobuf builder module is
+available. It carries a hidden `protogoja` prototype token that Go can recover
+with `protogoja.MessagePrototypeFromValue`. Its public `.typeName` property is
+useful metadata for logging and inspection, but it is not authority by itself.
+Sessionstream intentionally rejects plain descriptor objects such as
+`{ typeName: "..." }` or `{ type: "..." }`; use the namespace object or the
+string directly instead.
+
+Bulk registration:
+
+```js
+const ss = require("sessionstream");
+const pb = require("sessionstream.examples.chatdemo.v1");
+
+const schemas = ss.schemas({
+  commands: { ChatStartInference: pb.StartInferenceCommand },
+  events: { ChatUserMessageAccepted: pb.UserMessageAcceptedEvent },
+  uiEvents: { ChatMessageAccepted: pb.ChatMessageUpdate },
+  entities: { ChatMessage: pb.ChatMessageEntity },
+});
+```
+
+Fluent registration:
+
+```js
+const schemas = ss.schemas()
+  .registerCommand("ChatStartInference", pb.StartInferenceCommand)
+  .registerEvent("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent)
+  .registerUIEvent("ChatMessageAccepted", pb.ChatMessageUpdate)
+  .registerTimelineEntity("ChatMessage", pb.ChatMessageEntity);
+```
+
+String full-name registration:
+
+```js
+const schemas = ss.schemas({
+  commands: {
+    ChatStartInference:
+      "sessionstream.examples.chatdemo.v1.StartInferenceCommand",
+  },
+});
+```
+
 Minimal JavaScript:
 
 ```js
