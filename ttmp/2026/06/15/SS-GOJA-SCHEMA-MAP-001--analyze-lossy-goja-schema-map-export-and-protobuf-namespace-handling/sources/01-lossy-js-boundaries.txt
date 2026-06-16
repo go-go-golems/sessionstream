@@ -1,0 +1,22 @@
+pkg/js/modules/sessionstream/api_view.go:37:		out := make([]map[string]any, 0, len(entities))
+pkg/js/modules/sessionstream/module.go:168:	return raw.Export()
+pkg/js/modules/sessionstream/module_test.go:318:	promise, ok := value.Export().(*goja.Promise)
+examples/goja-chatdemo-server/cmd/smoke-client/main.go:105:	if err := conn.WriteJSON(map[string]any{"subscribe": map[string]any{"sessionId": "demo", "sinceSnapshotOrdinal": "0"}}); err != nil {
+pkg/js/modules/sessionstream/api_hub.go:143:	entities := make([]map[string]any, 0, len(snap.Entities))
+pkg/js/modules/sessionstream/api_hub.go:151:	return m.vm.ToValue(map[string]any{
+pkg/js/modules/sessionstream/api_schemas.go:12:	Commands map[string]any `json:"commands"`
+pkg/js/modules/sessionstream/api_schemas.go:13:	Events   map[string]any `json:"events"`
+pkg/js/modules/sessionstream/api_schemas.go:14:	UIEvents map[string]any `json:"uiEvents"`
+pkg/js/modules/sessionstream/api_schemas.go:15:	Entities map[string]any `json:"entities"`
+pkg/js/modules/sessionstream/api_schemas.go:25:		if err := m.vm.ExportTo(arg, &input); err != nil {
+pkg/js/modules/sessionstream/api_schemas.go:64:	case map[string]any:
+pkg/js/modules/sessionstream/codec.go:59:	payload := value.Export()
+pkg/js/modules/sessionstream/codec.go:140:func (m *moduleRuntime) uiEventToJS(ev ss.UIEvent) (map[string]any, error) {
+pkg/js/modules/sessionstream/codec.go:145:	return map[string]any{"name": ev.Name, "payload": value.Export()}, nil
+pkg/js/modules/sessionstream/codec.go:148:func (m *moduleRuntime) timelineEntityToJS(ent ss.TimelineEntity) (map[string]any, error) {
+pkg/js/modules/sessionstream/codec.go:153:	return map[string]any{
+pkg/js/modules/sessionstream/codec.go:158:		"payload":          value.Export(),
+pkg/js/modules/sessionstream/api_promises.go:55:			if promise, ok := value.Export().(*goja.Promise); ok {
+pkg/js/modules/sessionstream/api_promises.go:76:	if promise, ok := value.Export().(*goja.Promise); ok {
+pkg/js/modules/sessionstream/api_fanout.go:53:		out := make([]map[string]any, 0, len(copied))
+pkg/js/modules/sessionstream/api_fanout.go:61:		batch := map[string]any{"sessionId": string(sid), "ordinal": strconv.FormatUint(ord, 10), "events": out}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>xgoja sessionstream chatbot</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+  <main class="shell">
+    <h1>xgoja sessionstream chatbot</h1>
+    <p class="sub">All app logic is JavaScript. Go provides xgoja, protobuf builders, sessionstream, Express, and the WebSocket handler.</p>
+    <p class="sub small">Pass a session with <code>?sessionId=your-session</code>; otherwise the server default is used.</p>
+    <div class="panes">
+      <section class="pane chat-pane">
+        <h2>Chat</h2>
+        <div id="messages" aria-live="polite"></div>
+      </section>
+      <section class="pane trace-pane">
+        <h2>Trace events</h2>
+        <div id="traces" aria-live="polite"></div>
+      </section>
+    </div>
+    <form id="form">
+      <input id="prompt" value="explain what is handling this request" autocomplete="off" />
+      <button>Send</button>
+    </form>
+    <div id="status">connecting…</div>
+  </main>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

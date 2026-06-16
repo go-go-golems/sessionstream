@@ -148,12 +148,22 @@ func WithErrorObserver(observer ErrorObserver) HubOption {
 
 func WithUIFanout(f UIFanout) HubOption {
 	return func(h *Hub) error {
-		if f == nil {
-			return fmt.Errorf("ui fanout is nil")
-		}
-		h.fanout = f
-		return nil
+		return h.SetUIFanout(f)
 	}
+}
+
+// SetUIFanout attaches or replaces the live UI fanout for this hub.
+//
+// Most Go callers should prefer WithUIFanout at construction time. This setter
+// exists for dynamic hosts such as Goja/xgoja where JavaScript first creates a
+// Hub, then asks another native module to create a Go-backed WebSocket server
+// that should receive future projected UI events.
+func (h *Hub) SetUIFanout(f UIFanout) error {
+	if f == nil {
+		return fmt.Errorf("ui fanout is nil")
+	}
+	h.fanout = f
+	return nil
 }
 
 func NewHub(opts ...HubOption) (*Hub, error) {
@@ -227,6 +237,16 @@ func (h *Hub) Submit(ctx context.Context, sid SessionId, name string, payload pr
 	}
 	cmd := Command{Name: name, SessionId: sid, Payload: payload}
 	return h.dispatch(ctx, cmd)
+}
+
+// Publish publishes an already-decided backend event through the configured
+// event path. With a local hub this applies projections immediately; with an
+// event bus this publishes the encoded event for consumers to apply/fan out.
+func (h *Hub) Publish(ctx context.Context, ev Event) error {
+	if h == nil {
+		return fmt.Errorf("hub is nil")
+	}
+	return h.publisher().Publish(ctx, ev)
 }
 
 func (h *Hub) Snapshot(ctx context.Context, sid SessionId) (Snapshot, error) {

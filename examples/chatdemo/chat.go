@@ -19,6 +19,7 @@ const (
 	EventUserMessageAccepted = "ChatUserMessageAccepted"
 	EventInferenceStarted    = "ChatInferenceStarted"
 	EventTokensDelta         = "ChatTokensDelta"
+	EventInferenceTrace      = "ChatInferenceTrace"
 	EventInferenceFinished   = "ChatInferenceFinished"
 	EventInferenceStopped    = "ChatInferenceStopped"
 
@@ -77,6 +78,7 @@ func RegisterSchemas(reg *sessionstream.SchemaRegistry) error {
 		reg.RegisterEvent(EventUserMessageAccepted, &chatdemov1.UserMessageAcceptedEvent{}),
 		reg.RegisterEvent(EventInferenceStarted, &chatdemov1.InferenceStartedEvent{}),
 		reg.RegisterEvent(EventTokensDelta, &chatdemov1.TokensDeltaEvent{}),
+		reg.RegisterEvent(EventInferenceTrace, &chatdemov1.InferenceTraceEvent{}),
 		reg.RegisterEvent(EventInferenceFinished, &chatdemov1.InferenceFinishedEvent{}),
 		reg.RegisterEvent(EventInferenceStopped, &chatdemov1.InferenceStoppedEvent{}),
 		reg.RegisterUIEvent(UIMessageAccepted, &chatdemov1.ChatMessageUpdate{}),

@@ -36,6 +36,13 @@ message TokensDeltaEvent {
   bool streaming = 7;
 }
 
+message InferenceTraceEvent {
+  string message_id = 1;
+  string stage = 2;
+  string detail = 3;
+  int64 elapsed_ms = 4;
+}
+
 message InferenceFinishedEvent {
   string message_id = 1;
   string role = 2;

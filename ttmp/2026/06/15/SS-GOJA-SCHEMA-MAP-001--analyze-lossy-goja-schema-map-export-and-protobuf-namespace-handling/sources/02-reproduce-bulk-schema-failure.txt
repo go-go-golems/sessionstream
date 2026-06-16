@@ -1,0 +1,15 @@
+--- FAIL: TestTmpBulkSchemaLowercaseNamespaceFails (0.00s)
+    schema_bulk_tmp_test.go:28: 
+        	Error Trace:	/home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/schema_bulk_tmp_test.go:28
+        	Error:      	Received unexpected error:
+        	            	GoError: unknown command "ChatStartInference" at github.com/go-go-golems/sessionstream/pkg/js/modules/sessionstream.(*moduleRuntime).wrapHub.func1 (native)
+        	Test:       	TestTmpBulkSchemaLowercaseNamespaceFails
+--- FAIL: TestTmpBulkSchemaCapitalizedNamespaceFailsAfterExportToMap (0.00s)
+    schema_bulk_tmp_test.go:44: 
+        	Error Trace:	/home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/schema_bulk_tmp_test.go:44
+        	Error:      	Received unexpected error:
+        	            	TypeError: schema values must be protobuf full-name strings or generated message namespace objects at github.com/go-go-golems/sessionstream/pkg/js/modules/sessionstream.(*moduleRuntime).schemasBuilder-fm (native)
+        	Test:       	TestTmpBulkSchemaCapitalizedNamespaceFailsAfterExportToMap
+FAIL
+FAIL	github.com/go-go-golems/sessionstream/pkg/js/modules/sessionstream	0.005s
+FAIL

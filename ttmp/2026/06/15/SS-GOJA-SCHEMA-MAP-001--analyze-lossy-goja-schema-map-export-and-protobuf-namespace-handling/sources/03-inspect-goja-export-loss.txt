@@ -1,0 +1,11 @@
+CASE 1: lower-case SchemaMap key used by TypeScript contract
+ExportTo error: <nil>
+commands nil: true
+
+CASE 2: capitalized Go struct field name
+ExportTo error: <nil>
+commands nil: false
+command "ChatStartInference" exported as map[string]interface {}
+  keys: [builder clone from is typeName]
+  typeName: sessionstream.examples.chatdemo.v1.StartInferenceCommand (string)
+  type: <nil> (<nil>)
