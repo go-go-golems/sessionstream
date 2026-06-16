@@ -61,6 +61,94 @@ func TestSchemasRegisterGeneratedPrototypeTokens(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSchemasBulkRegisterGeneratedPrototypeNamespaces(t *testing.T) {
+	vm := goja.New()
+	reg := noderequire.NewRegistry()
+	Register(reg, Options{})
+	require.NoError(t, chatdemov1.RegisterGojaBuilderFileChatProtoModule(reg, ""))
+	reg.Enable(vm)
+	value, err := vm.RunString(`
+		const ss = require("sessionstream");
+		const pb = require("sessionstream.examples.chatdemo.v1");
+		const schemas = ss.schemas({
+		  commands: { ChatStartInference: pb.StartInferenceCommand },
+		  events: { ChatUserMessageAccepted: pb.UserMessageAcceptedEvent },
+		  uiEvents: { ChatMessageAccepted: pb.ChatMessageUpdate },
+		  entities: { ChatMessage: pb.ChatMessageEntity },
+		});
+		const hub = ss.hub({ schemas });
+		hub.command("ChatStartInference", (cmd, session, pub) => {
+		  return pub.publish("ChatUserMessageAccepted", pb.UserMessageAcceptedEvent.builder()
+		    .messageId("m-bulk").role("user").content(cmd.payload.prompt).streaming(false).build());
+		});
+		hub.uiProjection((event) => [{
+		  name: "ChatMessageAccepted",
+		  payload: pb.ChatMessageUpdate.builder()
+		    .messageId(event.payload.messageId).role("user").content(event.payload.content).streaming(false).build(),
+		}]);
+		hub.timelineProjection((event) => [{
+		  kind: "ChatMessage",
+		  id: event.payload.messageId,
+		  payload: pb.ChatMessageEntity.builder()
+		    .messageId(event.payload.messageId).role("user").content(event.payload.content).status("accepted").streaming(false).build(),
+		}]);
+		hub.submit("s-bulk", "ChatStartInference", pb.StartInferenceCommand.builder().prompt("typed").build());
+	`)
+	require.NoError(t, err)
+	requireFulfilledPromise(t, value)
+}
+
+func TestSchemasBulkRegisterStringFullNames(t *testing.T) {
+	vm := goja.New()
+	reg := noderequire.NewRegistry()
+	Register(reg, Options{})
+	require.NoError(t, chatdemov1.RegisterGojaBuilderFileChatProtoModule(reg, ""))
+	reg.Enable(vm)
+	value, err := vm.RunString(`
+		const ss = require("sessionstream");
+		const pb = require("sessionstream.examples.chatdemo.v1");
+		const schemas = ss.schemas({
+		  commands: { ChatStartInference: "sessionstream.examples.chatdemo.v1.StartInferenceCommand" },
+		});
+		const hub = ss.hub({ schemas });
+		hub.command("ChatStartInference", () => {});
+		hub.submit("s-string", "ChatStartInference", pb.StartInferenceCommand.builder().prompt("typed").build());
+	`)
+	require.NoError(t, err)
+	requireFulfilledPromise(t, value)
+}
+
+func TestSchemasRejectPlainObjectDescriptors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec string
+	}{
+		{name: "typeName", spec: `{ typeName: "sessionstream.examples.chatdemo.v1.StartInferenceCommand" }`},
+		{name: "type", spec: `{ type: "sessionstream.examples.chatdemo.v1.StartInferenceCommand" }`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vm := goja.New()
+			reg := noderequire.NewRegistry()
+			Register(reg, Options{})
+			require.NoError(t, chatdemov1.RegisterGojaBuilderFileChatProtoModule(reg, ""))
+			reg.Enable(vm)
+			_, err := vm.RunString(`
+				const ss = require("sessionstream");
+				ss.schemas({ commands: { ChatStartInference: ` + tc.spec + ` } });
+			`)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "schema must be a generated message namespace or protobuf full name")
+		})
+	}
+}
+
+func requireFulfilledPromise(t *testing.T, value goja.Value) {
+	t.Helper()
+	promise, ok := value.Export().(*goja.Promise)
+	require.True(t, ok, "expected a Promise, got %T", value.Export())
+	require.Equal(t, goja.PromiseStateFulfilled, promise.State(), "promise result: %s", jsValueString(promise.Result()))
+}
+
 func TestHubCommandProjectionAndSnapshotFromJavaScript(t *testing.T) {
 	vm := goja.New()
 	reg := noderequire.NewRegistry()
