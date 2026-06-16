@@ -452,3 +452,51 @@ go test ./... -count=1
 ### Technical details
 - Modified code file: `/home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/api_schemas.go`.
 - Modified test file: `/home/manuel/workspaces/2026-06-12/goja-sessionstream/sessionstream/pkg/js/modules/sessionstream/module_test.go`.
+
+## Step 7: Refresh delivered PDF after implementation updates
+
+After committing the implementation and diary updates, I regenerated the ticket PDF bundle and re-uploaded it to reMarkable so the delivered copy matches the final design, tasks, changelog, and diary.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 5)
+
+**Assistant interpretation:** Keep ticket documentation and external delivery synchronized after implementation.
+
+**Inferred user intent:** Ensure the ticket remains the durable source of truth for future review.
+
+**Commit (code):** N/A — rendered documentation refresh only.
+
+### What I did
+- Regenerated the PDF bundle with `remarquee upload bundle --pdf-only`.
+- Re-uploaded the bundle with `remarquee upload bundle --force`.
+- Verified the remote listing under `/ai/2026/06/15/SS-GOJA-SCHEMA-MAP-001`.
+
+### Why
+- The design and diary changed after the initial upload, so the reMarkable copy needed to be refreshed.
+
+### What worked
+- The PDF regenerated successfully.
+- The reMarkable upload succeeded and the remote listing shows the bundle.
+
+### What didn't work
+- N/A
+
+### What I learned
+- Implementation updates can make previously uploaded ticket bundles stale; refresh them when the ticket document is part of the deliverable.
+
+### What was tricky to build
+- N/A
+
+### What warrants a second pair of eyes
+- N/A
+
+### What should be done in the future
+- N/A
+
+### Code review instructions
+- Check the rendered PDF under `sources/` only if reviewing the reMarkable artifact.
+
+### Technical details
+- Remote path: `/ai/2026/06/15/SS-GOJA-SCHEMA-MAP-001`.
+- Bundle name: `SS-GOJA-SCHEMA-MAP-001 schema map protobuf namespace guide`.
