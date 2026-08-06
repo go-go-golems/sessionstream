@@ -8,6 +8,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	sessionstream "github.com/go-go-golems/sessionstream/pkg/sessionstream"
 	sessionstreamv1 "github.com/go-go-golems/sessionstream/pkg/sessionstream/pb/proto/sessionstream/v1"
@@ -24,6 +25,37 @@ var (
 
 const defaultMaxHydrationBufferedBatches = 1024
 
+// ConnectionConfig bounds one upgraded websocket connection and configures
+// application-level ping/pong liveness using the generated transport frames.
+type ConnectionConfig struct {
+	MaxReadBytes      int64
+	SendQueueSize     int
+	WriteTimeout      time.Duration
+	HeartbeatInterval time.Duration
+	PongTimeout       time.Duration
+}
+
+// DefaultConnectionConfig returns conservative production-safe connection bounds.
+func DefaultConnectionConfig() ConnectionConfig {
+	return ConnectionConfig{
+		MaxReadBytes:      1 << 20,
+		SendQueueSize:     128,
+		WriteTimeout:      10 * time.Second,
+		HeartbeatInterval: 30 * time.Second,
+		PongTimeout:       10 * time.Second,
+	}
+}
+
+func (c ConnectionConfig) validate() error {
+	if c.MaxReadBytes <= 0 || c.SendQueueSize <= 0 {
+		return fmt.Errorf("websocket read limit and send queue size must be positive")
+	}
+	if c.WriteTimeout <= 0 || c.HeartbeatInterval <= 0 || c.PongTimeout <= 0 {
+		return fmt.Errorf("websocket write/heartbeat/pong timeouts must be positive")
+	}
+	return nil
+}
+
 // SnapshotProvider provides snapshot lookup for subscribe flows.
 type SnapshotProvider interface {
 	Snapshot(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error)
@@ -31,6 +63,31 @@ type SnapshotProvider interface {
 
 // Option configures a websocket Server.
 type Option func(*Server) error
+
+// WithConnectionConfig replaces the default connection bounds and heartbeat policy.
+func WithConnectionConfig(config ConnectionConfig) Option {
+	return func(s *Server) error {
+		if err := config.validate(); err != nil {
+			return err
+		}
+		s.connectionConfig = config
+		return nil
+	}
+}
+
+// SubscribeAuthorizer authorizes a session before snapshot hydration begins.
+type SubscribeAuthorizer func(ctx context.Context, sid sessionstream.SessionId) error
+
+// WithSubscribeAuthorizer installs a fail-closed subscription authorization hook.
+func WithSubscribeAuthorizer(authorize SubscribeAuthorizer) Option {
+	return func(s *Server) error {
+		if authorize == nil {
+			return fmt.Errorf("websocket subscribe authorizer is nil")
+		}
+		s.authorizeSubscribe = authorize
+		return nil
+	}
+}
 
 // WithUpgrader overrides the default websocket upgrader.
 func WithUpgrader(u websocket.Upgrader) Option {
@@ -70,17 +127,22 @@ func WithHydrationBufferLimit(maxBatches int) Option {
 // intentionally permissive for local labs and examples; use WithUpgrader to
 // install a stricter CheckOrigin policy.
 type Server struct {
-	snapshots SnapshotProvider
-	upgrader  websocket.Upgrader
-	observer  TransportObserver
+	snapshots          SnapshotProvider
+	upgrader           websocket.Upgrader
+	observer           TransportObserver
+	connectionConfig   ConnectionConfig
+	authorizeSubscribe SubscribeAuthorizer
 
 	maxHydrationBufferedBatches int
 
 	nextID uint64
 
-	mu        sync.RWMutex
-	conns     map[sessionstream.ConnectionId]*connection
-	bySession map[sessionstream.SessionId]map[sessionstream.ConnectionId]struct{}
+	mu          sync.RWMutex
+	conns       map[sessionstream.ConnectionId]*connection
+	bySession   map[sessionstream.SessionId]map[sessionstream.ConnectionId]struct{}
+	lifecycleMu sync.Mutex
+	closing     bool
+	wg          sync.WaitGroup
 }
 
 type connection struct {
@@ -89,6 +151,8 @@ type connection struct {
 	send   chan outboundFrame
 	close  sync.Once
 	closed atomic.Bool
+	done   chan struct{}
+	pongs  chan string
 
 	mu   sync.RWMutex
 	subs map[sessionstream.SessionId]subscription
@@ -135,6 +199,7 @@ func NewServer(snapshots SnapshotProvider, opts ...Option) (*Server, error) {
 	server := &Server{
 		snapshots:                   snapshots,
 		maxHydrationBufferedBatches: defaultMaxHydrationBufferedBatches,
+		connectionConfig:            DefaultConnectionConfig(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool { return true },
 		},
@@ -161,17 +226,29 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	cid := sessionstream.ConnectionId(fmt.Sprintf("conn-%d", atomic.AddUint64(&s.nextID, 1)))
 	c := &connection{
-		id:   cid,
-		ws:   conn,
-		send: make(chan outboundFrame, 128),
-		subs: map[sessionstream.SessionId]subscription{},
+		id:    cid,
+		ws:    conn,
+		send:  make(chan outboundFrame, s.connectionConfig.SendQueueSize),
+		subs:  map[sessionstream.SessionId]subscription{},
+		done:  make(chan struct{}),
+		pongs: make(chan string, 1),
 	}
 	s.mu.Lock()
 	s.conns[cid] = c
 	s.mu.Unlock()
 	s.observe(r.Context(), TransportRecord{Stage: TransportStageConnected, ConnectionId: cid})
 
-	go s.writeLoop(r.Context(), c)
+	s.lifecycleMu.Lock()
+	if s.closing {
+		s.lifecycleMu.Unlock()
+		s.closeConnection(c)
+		return
+	}
+	s.wg.Add(3)
+	s.lifecycleMu.Unlock()
+	defer s.wg.Done()
+	go func() { defer s.wg.Done(); s.writeLoop(r.Context(), c) }()
+	go func() { defer s.wg.Done(); s.heartbeatLoop(r.Context(), c) }()
 	_ = s.sendFrame(c, newHelloFrame(cid))
 	s.readLoop(r.Context(), c)
 	s.closeConnection(c)
@@ -220,6 +297,7 @@ func (s *Server) Connections() []ConnectionInfo {
 }
 
 func (s *Server) readLoop(ctx context.Context, c *connection) {
+	c.ws.SetReadLimit(s.connectionConfig.MaxReadBytes)
 	for {
 		select {
 		case <-ctx.Done():
@@ -253,12 +331,23 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *se
 	case *sessionstreamv1.ClientFrame_Ping:
 		return s.sendFrame(c, newPongFrame(typed.Ping.GetNonce()))
 	case *sessionstreamv1.ClientFrame_Pong:
+		select {
+		case c.pongs <- typed.Pong.GetNonce():
+		default:
+		}
+		s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatPongReceived, Direction: FrameDirectionClientToServer, ConnectionId: c.id, FrameType: "pong"})
 		return nil
 	case *sessionstreamv1.ClientFrame_Subscribe:
 		sub := typed.Subscribe
 		sid := sessionstream.SessionId(sub.GetSessionId())
 		if sid == "" {
 			return fmt.Errorf("subscribe missing session id")
+		}
+		if s.authorizeSubscribe != nil {
+			if err := s.authorizeSubscribe(ctx, sid); err != nil {
+				s.observe(ctx, TransportRecord{Stage: TransportStageSubscribeDenied, ConnectionId: c.id, SessionId: sid, Err: err})
+				return fmt.Errorf("subscribe session %q: %w", sid, err)
+			}
 		}
 		since := sub.GetSinceSnapshotOrdinal()
 		s.observe(ctx, TransportRecord{Stage: TransportStageSubscribeReceived, Direction: FrameDirectionClientToServer, ConnectionId: c.id, SessionId: sid, FrameType: "subscribe", SinceSnapshotOrdinal: since})
@@ -323,7 +412,12 @@ func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *se
 }
 
 func (s *Server) writeLoop(ctx context.Context, c *connection) {
+	defer s.closeConnection(c)
 	for msg := range c.send {
+		if err := c.ws.SetWriteDeadline(time.Now().Add(s.connectionConfig.WriteTimeout)); err != nil {
+			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
+			return
+		}
 		if err := c.ws.WriteMessage(websocket.TextMessage, msg.body); err != nil {
 			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
 			return
@@ -332,11 +426,61 @@ func (s *Server) writeLoop(ctx context.Context, c *connection) {
 	}
 }
 
+func (s *Server) heartbeatLoop(ctx context.Context, c *connection) {
+	ticker := time.NewTicker(s.connectionConfig.HeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
+		case <-ticker.C:
+		}
+		nonce := fmt.Sprintf("%s-%d", c.id, time.Now().UnixNano())
+		if err := s.sendFrame(c, newPingFrame(nonce)); err != nil {
+			s.closeConnection(c)
+			return
+		}
+		s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatPingQueued, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: "ping"})
+		timer := time.NewTimer(s.connectionConfig.PongTimeout)
+		matched := false
+		for !matched {
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return
+			case <-c.done:
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return
+			case pong := <-c.pongs:
+				matched = pong == nonce
+			case <-timer.C:
+				err := fmt.Errorf("connection %s heartbeat pong timeout", c.id)
+				s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatTimeout, ConnectionId: c.id, Err: err})
+				s.closeConnection(c)
+				return
+			}
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}
+}
+
 func (s *Server) closeConnection(c *connection) {
 	if c == nil {
 		return
 	}
 	c.close.Do(func() {
+		close(c.done)
 		c.mu.Lock()
 		subs := make([]sessionstream.SessionId, 0, len(c.subs))
 		for sid := range c.subs {
@@ -357,9 +501,42 @@ func (s *Server) closeConnection(c *connection) {
 
 		c.closed.Store(true)
 		close(c.send)
-		_ = c.ws.Close()
+		if c.ws != nil {
+			_ = c.ws.Close()
+		}
 		s.observe(context.Background(), TransportRecord{Stage: TransportStageDisconnected, ConnectionId: c.id})
 	})
+}
+
+// Close closes all upgraded connections and waits for their read, write, and
+// heartbeat loops to exit or for ctx to expire.
+func (s *Server) Close(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		return fmt.Errorf("close websocket server context is nil")
+	}
+	s.lifecycleMu.Lock()
+	s.closing = true
+	s.lifecycleMu.Unlock()
+	s.mu.RLock()
+	connections := make([]*connection, 0, len(s.conns))
+	for _, connection := range s.conns {
+		connections = append(connections, connection)
+	}
+	s.mu.RUnlock()
+	for _, connection := range connections {
+		s.closeConnection(connection)
+	}
+	done := make(chan struct{})
+	go func() { s.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Server) connectionsForSession(sid sessionstream.SessionId) []*connection {
@@ -585,6 +762,10 @@ func newErrorFrame(code, message, sessionID string) *sessionstreamv1.ServerFrame
 
 func newPongFrame(nonce string) *sessionstreamv1.ServerFrame {
 	return &sessionstreamv1.ServerFrame{Frame: &sessionstreamv1.ServerFrame_Pong{Pong: &sessionstreamv1.PongFrame{Nonce: nonce}}}
+}
+
+func newPingFrame(nonce string) *sessionstreamv1.ServerFrame {
+	return &sessionstreamv1.ServerFrame{Frame: &sessionstreamv1.ServerFrame_Ping{Ping: &sessionstreamv1.PingFrame{Nonce: nonce}}}
 }
 
 func encodeSnapshotEntities(in []sessionstream.TimelineEntity) []*sessionstreamv1.SnapshotEntity {

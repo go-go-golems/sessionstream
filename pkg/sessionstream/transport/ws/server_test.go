@@ -2,7 +2,9 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -137,27 +139,140 @@ func TestServerRejectsCommandFramesAsUnsupported(t *testing.T) {
 }
 
 func newTestHubAndServer(t *testing.T) (*sessionstream.Hub, *Server) {
-	t.Helper()
-	reg := sessionstream.NewSchemaRegistry()
-	require.NoError(t, reg.RegisterCommand(testCommandName, &structpb.Struct{}))
-	require.NoError(t, reg.RegisterEvent(testEventName, &structpb.Struct{}))
-	require.NoError(t, reg.RegisterUIEvent(testUIEventName, &structpb.Struct{}))
-	require.NoError(t, reg.RegisterTimelineEntity(testEntityKind, &structpb.Struct{}))
+	return newTestHubAndServerWithOptions(t)
+}
 
-	store, err := storesqlite.NewInMemory(reg)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	server, err := NewServer(snapshotAdapter{store: store})
-	require.NoError(t, err)
+func TestHeartbeatTimeoutClosesUnresponsiveConnection(t *testing.T) {
+	records := newRecordingTransportObserver()
+	config := DefaultConnectionConfig()
+	config.HeartbeatInterval = 10 * time.Millisecond
+	config.PongTimeout = 20 * time.Millisecond
+	_, server := newTestHubAndServerWithOptions(t, WithConnectionConfig(config), WithTransportObserver(records))
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
 
-	hub, err := sessionstream.NewHub(
-		sessionstream.WithSchemaRegistry(reg),
-		sessionstream.WithHydrationStore(store),
-		sessionstream.WithUIFanout(server),
+	conn := dialWS(t, httpServer.URL)
+	defer func() { _ = conn.Close() }()
+	_ = readServerFrame(t, conn)
+	ping := readServerFrame(t, conn)
+	require.NotEmpty(t, ping.GetPing().GetNonce())
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	_, _, err := conn.ReadMessage()
+	require.Error(t, err)
+	require.Eventually(t, func() bool {
+		return containsStage(records.stages(), TransportStageHeartbeatTimeout)
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestConnectionConfigRejectsUnboundedValues(t *testing.T) {
+	config := DefaultConnectionConfig()
+	config.MaxReadBytes = 0
+	_, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{}, nil
+	}), WithConnectionConfig(config))
+	require.ErrorContains(t, err, "read limit")
+
+	config = DefaultConnectionConfig()
+	config.PongTimeout = 0
+	_, err = NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{}, nil
+	}), WithConnectionConfig(config))
+	require.ErrorContains(t, err, "timeouts")
+}
+
+func TestHeartbeatPongKeepsConnectionAlive(t *testing.T) {
+	config := DefaultConnectionConfig()
+	config.HeartbeatInterval = 10 * time.Millisecond
+	config.PongTimeout = 50 * time.Millisecond
+	_, server := newTestHubAndServerWithOptions(t, WithConnectionConfig(config))
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer func() { require.NoError(t, conn.Close()) }()
+	_ = readServerFrame(t, conn)
+	first := readServerFrame(t, conn)
+	nonce := first.GetPing().GetNonce()
+	require.NotEmpty(t, nonce)
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Pong{Pong: &sessionstreamv1.PongFrame{Nonce: nonce}}})
+	second := readServerFrame(t, conn)
+	require.NotEmpty(t, second.GetPing().GetNonce())
+}
+
+func TestReadLimitClosesOversizedClientFrame(t *testing.T) {
+	records := newRecordingTransportObserver()
+	config := DefaultConnectionConfig()
+	config.MaxReadBytes = 32
+	_, server := newTestHubAndServerWithOptions(t, WithConnectionConfig(config), WithTransportObserver(records))
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer func() { _ = conn.Close() }()
+	_ = readServerFrame(t, conn)
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"ping":{"nonce":"`+strings.Repeat("x", 64)+`"}}`)))
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	_, _, err := conn.ReadMessage()
+	require.Error(t, err)
+	require.Eventually(t, func() bool {
+		return containsStage(records.stages(), TransportStageReadError)
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestSubscribeAuthorizerDeniesBeforeHydration(t *testing.T) {
+	records := newRecordingTransportObserver()
+	_, server := newTestHubAndServerWithOptions(t,
+		WithTransportObserver(records),
+		WithSubscribeAuthorizer(func(context.Context, sessionstream.SessionId) error { return errors.New("denied") }),
 	)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer func() { require.NoError(t, conn.Close()) }()
+	_ = readServerFrame(t, conn)
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "forbidden"}}})
+	response := readServerFrame(t, conn)
+	require.Equal(t, "protocol_error", response.GetError().GetCode())
+	require.Empty(t, server.Connections()[0].Subscriptions)
+	require.Contains(t, records.stages(), TransportStageSubscribeDenied)
+}
+
+func TestLiveQueueOverflowClosesConnection(t *testing.T) {
+	records := newRecordingTransportObserver()
+	server, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{}, nil
+	}), WithTransportObserver(records))
 	require.NoError(t, err)
-	registerTestFlow(t, hub)
-	return hub, server
+	conn := &connection{
+		id: "slow", send: make(chan outboundFrame, 1), done: make(chan struct{}), pongs: make(chan string, 1),
+		subs: map[sessionstream.SessionId]subscription{"session-1": {state: subscriptionStateLive}},
+	}
+	conn.send <- outboundFrame{body: []byte("occupied")}
+	server.conns[conn.id] = conn
+	server.bySession["session-1"] = map[sessionstream.ConnectionId]struct{}{conn.id: {}}
+	payload, err := structpb.NewStruct(map[string]any{"text": "cannot queue"})
+	require.NoError(t, err)
+	require.Error(t, server.PublishUI(context.Background(), "session-1", 1, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
+	require.Empty(t, server.Connections())
+	require.Contains(t, records.stages(), TransportStageServerFrameQueueFull)
+}
+
+func TestServerCloseClosesUpgradedConnections(t *testing.T) {
+	_, server := newTestHubAndServer(t)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	conn := dialWS(t, httpServer.URL)
+	defer func() { _ = conn.Close() }()
+	_ = readServerFrame(t, conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, server.Close(ctx))
+	require.Empty(t, server.Connections())
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	_, _, err := conn.ReadMessage()
+	require.Error(t, err)
 }
 
 func registerTestFlow(t *testing.T, hub *sessionstream.Hub) {
