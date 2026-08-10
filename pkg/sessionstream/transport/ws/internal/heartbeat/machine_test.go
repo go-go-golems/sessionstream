@@ -2,6 +2,7 @@ package heartbeat
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -208,29 +209,264 @@ func TestEveryPhaseEventCombinationIsDefined(t *testing.T) {
 	}
 }
 
+const fuzzMaxOperations = 4096
+
+type fuzzOperation uint8
+
+const (
+	fuzzAdvance fuzzOperation = iota
+	fuzzReady
+	fuzzTick
+	fuzzPingWritten
+	fuzzPingWriteFailed
+	fuzzPongReceived
+	fuzzDeadlineElapsed
+	fuzzStop
+)
+
+type fuzzIdentityMode uint8
+
+const (
+	fuzzIdentityCurrent fuzzIdentityMode = iota
+	fuzzIdentityPrevious
+	fuzzIdentityFutureStale
+	fuzzIdentityEmpty
+)
+
+type fuzzTimeMode uint8
+
+const (
+	fuzzTimeNext fuzzTimeMode = iota
+	fuzzTimeBeforeDeadline
+	fuzzTimeAtDeadline
+	fuzzTimeAfterDeadline
+	fuzzTimeAtWrite
+	fuzzTimeSame
+	fuzzTimeAfterTimeout
+	fuzzTimeAfterSecond
+)
+
+func TestHeartbeatFuzzAdvanceTraversesTwoHealthyCycles(t *testing.T) {
+	m := newMachine(t)
+	cursor := epoch
+	advance := fuzzByte(fuzzAdvance, fuzzIdentityCurrent, fuzzTimeNext)
+	for range 7 {
+		event, nextCursor := decodeFuzzEvent(advance, m.State(), cursor)
+		actions, err := m.Step(event)
+		require.NoError(t, err)
+		assertFuzzActionContracts(t, m.State(), actions)
+		cursor = nextCursor
+	}
+	require.Equal(t, PhaseIdle, m.State().Phase)
+	require.Equal(t, uint64(2), m.State().Generation)
+}
+
 func FuzzMachinePreservesInvariants(f *testing.F) {
-	f.Add([]byte{0, 1, 2, 4, 5, 6})
-	f.Add([]byte{0, 1, 3, 6})
+	addHeartbeatFuzzSeeds(f)
 	f.Fuzz(func(t *testing.T, input []byte) {
 		m, err := New(Config{PongTimeout: 5 * time.Second})
 		require.NoError(t, err)
+		cursor := epoch
 		lastGeneration := uint64(0)
-		for i, raw := range input {
-			kind := EventKind(raw % byte(len(allEventKinds())))
-			state := m.State()
-			generation := state.Generation
-			nonce := "nonce"
-			if kind == EventTick {
-				nonce = "next"
+		if len(input) > fuzzMaxOperations {
+			input = input[:fuzzMaxOperations]
+		}
+		for _, raw := range input {
+			before := m.State()
+			event, nextCursor := decodeFuzzEvent(raw, before, cursor)
+			actions, stepErr := m.Step(event)
+			after := m.State()
+
+			if stepErr != nil {
+				require.True(t, errors.Is(stepErr, ErrMissingNonce) || errors.Is(stepErr, ErrEarlyDeadline), "unexpected reducer error: %v", stepErr)
+				require.Equal(t, before, after, "expected input errors must be atomic")
+				require.Empty(t, actions)
+			} else {
+				assertFuzzActionContracts(t, after, actions)
 			}
-			at := epoch.Add(time.Duration(i+20) * time.Second)
-			_, _ = m.Step(Event{Kind: kind, At: at, Generation: generation, Nonce: nonce})
-			current := m.State()
-			require.GreaterOrEqual(t, current.Generation, lastGeneration)
-			assertStateWellFormed(t, current)
-			lastGeneration = current.Generation
+			if before.Phase == PhaseStopped {
+				require.Equal(t, before, after, "stopped must be absorbing")
+				require.Empty(t, actions)
+			}
+			require.GreaterOrEqual(t, after.Generation, lastGeneration)
+			assertStateWellFormed(t, after)
+			cursor = nextCursor
+			lastGeneration = after.Generation
 		}
 	})
+}
+
+func addHeartbeatFuzzSeeds(f *testing.F) {
+	advance := fuzzByte(fuzzAdvance, fuzzIdentityCurrent, fuzzTimeNext)
+	f.Add([]byte{advance, advance, advance, advance, advance, advance, advance, advance}) // two healthy cycles
+	f.Add([]byte{advance, advance, fuzzByte(fuzzPongReceived, fuzzIdentityCurrent, fuzzTimeNext), advance})
+	f.Add([]byte{advance, advance, advance, fuzzByte(fuzzPongReceived, fuzzIdentityFutureStale, fuzzTimeNext), advance})
+	f.Add([]byte{advance, advance, advance, fuzzByte(fuzzDeadlineElapsed, fuzzIdentityCurrent, fuzzTimeBeforeDeadline), fuzzByte(fuzzDeadlineElapsed, fuzzIdentityCurrent, fuzzTimeAtDeadline)})
+	f.Add([]byte{advance, advance, fuzzByte(fuzzPingWriteFailed, fuzzIdentityCurrent, fuzzTimeNext)})
+	f.Add([]byte{advance, advance, advance, fuzzByte(fuzzStop, fuzzIdentityCurrent, fuzzTimeNext)})
+	f.Add([]byte{advance, fuzzByte(fuzzStop, fuzzIdentityCurrent, fuzzTimeNext), advance, fuzzByte(fuzzPongReceived, fuzzIdentityCurrent, fuzzTimeAfterDeadline)})
+}
+
+func fuzzByte(operation fuzzOperation, identity fuzzIdentityMode, timeMode fuzzTimeMode) byte {
+	return byte(operation&0x07) | byte(identity&0x03)<<3 | byte(timeMode&0x07)<<5
+}
+
+func decodeFuzzEvent(raw byte, state State, cursor time.Time) (Event, time.Time) {
+	operation := fuzzOperation(raw & 0x07)
+	identity := fuzzIdentityMode((raw >> 3) & 0x03)
+	timeMode := fuzzTimeMode((raw >> 5) & 0x07)
+	at := fuzzEventTime(timeMode, state, cursor)
+	generation, nonce := fuzzEventIdentity(identity, state)
+	kind := fuzzEventKind(operation)
+
+	if operation == fuzzAdvance {
+		kind, generation, nonce, at = fuzzAdvanceEvent(state, cursor)
+	} else if kind == EventTick {
+		switch identity {
+		case fuzzIdentityCurrent:
+			nonce = fmt.Sprintf("fuzz-%d", state.Generation+1)
+		case fuzzIdentityPrevious:
+			nonce = fmt.Sprintf("stale-%d", state.Generation)
+		case fuzzIdentityFutureStale:
+			nonce = fmt.Sprintf("future-%d", state.Generation+2)
+		case fuzzIdentityEmpty:
+			nonce = ""
+		default:
+			nonce = ""
+		}
+	}
+	if at.After(cursor) {
+		cursor = at
+	}
+	return Event{Kind: kind, At: at, Generation: generation, Nonce: nonce, Err: errors.New("fuzz write failure")}, cursor
+}
+
+func fuzzEventKind(operation fuzzOperation) EventKind {
+	switch operation {
+	case fuzzAdvance, fuzzReady:
+		return EventReady
+	case fuzzTick:
+		return EventTick
+	case fuzzPingWritten:
+		return EventPingWritten
+	case fuzzPingWriteFailed:
+		return EventPingWriteFailed
+	case fuzzPongReceived:
+		return EventPongReceived
+	case fuzzDeadlineElapsed:
+		return EventDeadlineElapsed
+	case fuzzStop:
+		return EventStop
+	default:
+		return EventStop
+	}
+}
+
+func fuzzAdvanceEvent(state State, cursor time.Time) (EventKind, uint64, string, time.Time) {
+	next := cursor.Add(time.Millisecond)
+	switch state.Phase {
+	case PhaseBooting:
+		return EventReady, state.Generation, "", next
+	case PhaseIdle:
+		return EventTick, state.Generation, fmt.Sprintf("fuzz-%d", state.Generation+1), next
+	case PhaseWriting:
+		return EventPingWritten, state.Generation, state.Nonce, next
+	case PhaseAwaiting:
+		return EventPongReceived, state.Generation, state.Nonce, state.Deadline.Add(-time.Nanosecond)
+	case PhaseSuspected, PhaseStopped:
+		return EventStop, state.Generation, state.Nonce, next
+	default:
+		return EventStop, state.Generation, state.Nonce, next
+	}
+}
+
+func fuzzEventIdentity(mode fuzzIdentityMode, state State) (uint64, string) {
+	switch mode {
+	case fuzzIdentityCurrent:
+		return state.Generation, state.Nonce
+	case fuzzIdentityPrevious:
+		generation := state.Generation
+		if generation > 0 {
+			generation--
+		}
+		return generation, state.Nonce
+	case fuzzIdentityFutureStale:
+		return state.Generation + 1, "stale"
+	case fuzzIdentityEmpty:
+		return state.Generation, ""
+	default:
+		return state.Generation, state.Nonce
+	}
+}
+
+func fuzzEventTime(mode fuzzTimeMode, state State, cursor time.Time) time.Time {
+	switch mode {
+	case fuzzTimeNext:
+		return cursor.Add(time.Millisecond)
+	case fuzzTimeBeforeDeadline:
+		if !state.Deadline.IsZero() {
+			return state.Deadline.Add(-time.Nanosecond)
+		}
+		return cursor.Add(time.Millisecond)
+	case fuzzTimeAtDeadline:
+		if !state.Deadline.IsZero() {
+			return state.Deadline
+		}
+		return cursor
+	case fuzzTimeAfterDeadline:
+		if !state.Deadline.IsZero() {
+			return state.Deadline.Add(time.Nanosecond)
+		}
+		return cursor.Add(5*time.Second + time.Nanosecond)
+	case fuzzTimeAtWrite:
+		if !state.WrittenAt.IsZero() {
+			return state.WrittenAt
+		}
+		return cursor
+	case fuzzTimeSame:
+		return cursor
+	case fuzzTimeAfterTimeout:
+		return cursor.Add(5 * time.Second)
+	case fuzzTimeAfterSecond:
+		return cursor.Add(time.Second)
+	default:
+		return cursor
+	}
+}
+
+func assertFuzzActionContracts(t *testing.T, state State, actions []Action) {
+	t.Helper()
+	suspected := 0
+	closed := 0
+	for _, action := range actions {
+		if action.Generation != 0 {
+			require.LessOrEqual(t, action.Generation, state.Generation)
+		}
+		switch action.Kind {
+		case ActionSendPing:
+			require.Equal(t, PhaseWriting, state.Phase)
+			require.Equal(t, state.Generation, action.Generation)
+			require.Equal(t, state.Nonce, action.Nonce)
+		case ActionArmDeadline:
+			require.Equal(t, PhaseAwaiting, state.Phase)
+			require.Equal(t, state.Generation, action.Generation)
+			require.Equal(t, state.Deadline, action.Deadline)
+		case ActionRecordPong, ActionScheduleTick:
+			require.Equal(t, PhaseIdle, state.Phase)
+		case ActionRecordSuspected:
+			suspected++
+			require.Equal(t, PhaseSuspected, state.Phase)
+		case ActionCloseConnection:
+			closed++
+			require.Equal(t, PhaseSuspected, state.Phase)
+		case ActionStop:
+			require.Equal(t, PhaseStopped, state.Phase)
+		case ActionCancelDeadline, ActionRecordStalePong:
+		default:
+			t.Fatalf("unknown action kind %d", action.Kind)
+		}
+	}
+	require.Equal(t, suspected, closed, "suspicion and close actions must be paired")
 }
 
 func newMachine(t *testing.T) *Machine {
