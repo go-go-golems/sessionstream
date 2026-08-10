@@ -11,6 +11,8 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: repo://README.md
+      Note: Operational heartbeat suspicion, timeout, observer, and shutdown contract
     - Path: repo://cmd/sessionstream-systemlab/static/js/websocket.js
       Note: Shared browser nonce-echo implementation
     - Path: repo://pkg/sessionstream/hub.go
@@ -45,6 +47,7 @@ WhenToUse: Before changing heartbeat, connection lifecycle, observer dispatch, s
 
 
 
+
 # Intern Guide to the Timed Failure Detector and WebSocket Heartbeat State Machine
 
 ## Executive summary
@@ -67,7 +70,7 @@ The proposed implementation keeps the existing public wire contract and `Connect
 
 Phases 0 through 6 were implemented on `task/sessionstream-005-heartbeat-machine` in commits `d0693bf` and `dbfbf02`. The implementation added the pure reducer under `internal/heartbeat`, the runtime adapter in `heartbeat.go`, generation-safe timer and nonce seams, a bounded observer dispatcher, and deterministic fake-time tests. It removed the old pong channel, latest-pong replacement helper, free-running ticker, and legacy heartbeat loops.
 
-Implementation uncovered one scheduler-order refinement not explicit in the initial proposal: a real client can return a pong after the socket write succeeds but before the supervisor selects the writer acknowledgement. `PhaseWriting` therefore retains the earliest matching pong timestamp as pending. When `PingWritten` arrives, the reducer accepts that pending response only if it is at or after the successful write timestamp and before the derived deadline. This keeps correctness independent of Go `select` ordering.
+Implementation uncovered one scheduler-order refinement not explicit in the initial proposal: a real client can receive and answer a ping before the local `WriteMessage` call returns, and the supervisor may select that pong before the writer acknowledgement. `PhaseWriting` therefore retains the earliest matching pong timestamp as pending. When `PingWritten` arrives, the reducer accepts that pending response if it precedes the derived deadline; it does not impose a lower bound at local write-return time. The tracked write result separately carries the exact local completion timestamp used to derive the deadline. This keeps correctness independent of Go `select` and syscall-return ordering.
 
 ## 1. Audience and learning goals
 

@@ -11,6 +11,8 @@ DocType: reference
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: repo://README.md
+      Note: Operational documentation completed in Step 5
     - Path: repo://pkg/sessionstream/transport/ws/heartbeat.go
       Note: Integrated supervisor in Step 4 at commit dbfbf02
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine.go
@@ -32,6 +34,7 @@ LastUpdated: 2026-08-10T20:10:00-04:00
 WhatFor: Continuing the heartbeat state-machine implementation with evidence, decisions, validation commands, and review guidance intact.
 WhenToUse: Read before implementing or reviewing SESSIONSTREAM-005.
 ---
+
 
 
 
@@ -409,7 +412,7 @@ I changed those assertions to bounded `require.Eventually` checks, matching the 
 - A pong can arrive after the socket write but before the supervisor selects the write-ack channel. Treating every pong in `PhaseWriting` as stale would make correctness depend on `select` ordering.
 - The reducer therefore needs a pending-pong substate even with one reader and writer.
 - Keeping the **earliest** matching pending timestamp is correct: a later duplicate must not overwrite a timely valid response while write acknowledgement is delayed.
-- A pong timestamped before successful write must not acknowledge the challenge even if its nonce happens to match.
+- A peer can receive and answer bytes before the local `WriteMessage` call returns; local write completion is the deadline origin, not a valid lower bound on pong arrival.
 - Observer isolation necessarily changes callback timing; tests and API comments must assert eventual ordered delivery rather than synchronous completion.
 
 ### What was tricky to build
@@ -419,7 +422,7 @@ The supervisor must remain responsive while waiting for four independent inputs:
 Writer acknowledgement and pong arrival can be observed in either order. The updated `PhaseWriting` stores the earliest matching pong timestamp. On `PingWritten`, it accepts that response only when:
 
 ```text
-WrittenAt <= PendingPongAt < WrittenAt + PongTimeout
+PendingPongAt < WrittenAt + PongTimeout
 ```
 
 This converts scheduler nondeterminism into explicit timestamp semantics.
@@ -433,7 +436,7 @@ Observer shutdown required a separate lifecycle from connection workers. `Close`
 - Review the public addition of `ObserverDroppedRecords` and the fixed 1,024-record dispatcher capacity.
 - Review storing original callback contexts until asynchronous delivery; they may already be canceled when consumed.
 - Review whether nonce generation failure should have a dedicated transport stage rather than `protocol_error`.
-- Confirm earliest-pending-pong semantics and the inclusive lower/exclusive upper timestamp bounds.
+- Confirm earliest-pending-pong semantics and the exclusive deadline upper bound.
 
 ### What should be done in the future
 
@@ -464,4 +467,116 @@ Per server with observer:
   one observer worker
   one observer queue (capacity 1024)
   dropped-record counter
+```
+
+## Step 5: Remove scheduler ordering from write and deadline semantics
+
+This step followed repeated stress failures back to two deeper serialization mistakes. The code originally timestamped `PingWritten` when the supervisor selected the acknowledgement, and it allowed a simultaneously ready timer to win over an already admitted timely pong.
+
+Tracked writes now carry the timestamp captured by the sole writer immediately when `WriteMessage` returns. Before applying a deadline event, the supervisor drains the bounded heartbeat control queue so a pong admitted before the timer cannot lose solely because Go's `select` chose the timer case.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 3)
+
+**Assistant interpretation:** Treat repeated stress failures as evidence of model/adapter defects, correct the event-time boundaries, and continue only after high-repetition validation.
+
+**Inferred user intent:** Achieve a heartbeat implementation whose correctness follows explicit event-time rules rather than probabilistic scheduler behavior.
+
+**Commit (code):** afe9496efff266bc207f73f076fcd40658d9cddc — "fix(ws): order heartbeat events by wire completion"
+
+### What I did
+
+- Replaced tracked write `chan error` with `chan frameWriteResult` carrying both completion timestamp and error.
+- Captured that timestamp inside the sole writer immediately after write setup or `WriteMessage` returns.
+- Used the captured timestamp—not supervisor receive time—for `PingWritten` and deadline derivation.
+- Preserved pending matching pongs while the writer acknowledgement is waiting to be selected.
+- Kept the earliest pending matching pong so a late duplicate cannot overwrite timely evidence.
+- Drained at most the bounded heartbeat queue capacity before applying a ready deadline event.
+- Added explicit reducer tests for pong-before-write-return and duplicate pending pongs.
+- Increased the real-time responsive-pong test margin while retaining fake-time boundary authority.
+- Added operational README documentation covering suspicion semantics, interval/deadline behavior, observer dispatch, drop accounting, and shutdown.
+- Ran 300 repeated race-enabled heartbeat integration tests after the corrections.
+- Ran 100 full transport-package race repetitions successfully.
+
+### Why
+
+- The timestamp at supervisor channel selection can be arbitrarily later than actual write completion and can invert pong/write ordering.
+- A Go `select` chooses pseudo-randomly among ready cases; that choice must not override a pong already admitted before its deadline.
+- The fake-time reducer tests should own exact boundary assertions, while real-socket tests should use enough timing margin to test integration rather than host scheduler speed.
+
+### What worked
+
+- Three hundred repeated race-enabled responsive, hydration-blocked, observer-blocked, and fake-clock heartbeat tests passed after the final event-time correction.
+- One hundred complete transport-package race repetitions passed.
+- Full repository tests, vet, and lint passed before commit.
+- Pre-commit full tests and lint passed.
+- The timeout still begins at local write completion, while a pong physically received before the call returns is accepted as valid.
+
+### What didn't work
+
+The first full 100-run race attempt after integration failed once in the hydration-blocked test at a 25 ms deadline. Raising that deadline exposed further failures rather than merely masking them. A 200-run focused test still produced timeout disconnects after several successful ping/pong cycles.
+
+The diagnostic stage sequence was especially useful:
+
+```text
+... heartbeat_ping_queued
+server_frame_written
+client_frame_read
+client_frame_decoded
+heartbeat_pong_received
+...
+heartbeat_timeout
+disconnected
+```
+
+This proved the client was responding and the reader was decoding pongs. The defect was downstream event ordering.
+
+The first attempted correction required `PendingPongAt >= PingWritten.At`. That was also wrong. A peer can receive kernel-written bytes and answer before the local `WriteMessage` function returns, so the recorded pong can legitimately precede local completion. Removing that lower bound and retaining only the exclusive deadline upper bound fixed the stress failures.
+
+### What I learned
+
+- “Actually written” has multiple observable moments: kernel/network visibility and local API completion are not globally ordered with remote response processing.
+- Local API completion remains a conservative deadline origin, but it cannot reject evidence already returned by the peer.
+- A timer channel and input channel need an explicit tie policy; state-machine purity alone does not solve adapter-level event serialization.
+- Bounded queue draining is safe here because there are at most eight admitted control events and the reducer validates each timestamp and nonce.
+
+### What was tricky to build
+
+The machine and adapter observe different orders. The writer owns the authoritative local completion time, while the supervisor owns state mutation. Passing a timestamped result preserves both ownership rules. A pong selected during `Writing` remains pending; when the timestamped acknowledgement arrives, the reducer either completes the cycle or arms a deadline from the exact completion time.
+
+At deadline selection, the supervisor processes up to `heartbeatEventQueueSize` queued pong events first. A timely matching pong transitions the machine to idle, making the subsequent stale deadline event harmless. A pong at or after the deadline remains stale by reducer timestamp comparison, so draining does not extend the deadline.
+
+### What warrants a second pair of eyes
+
+- Confirm that bounded queue draining before deadline is the clearest linearization policy.
+- Confirm accepting a matching pending pong before local write return is appropriate given cryptographically random challenge nonces and non-authentication semantics.
+- Review whether tracked timestamps should use the heartbeat clock for all frames or only heartbeat frames; the implementation uses the injected clock consistently.
+- Review whether real-time integration margins are sufficient under slow CI race instrumentation.
+
+### What should be done in the future
+
+- Run final full validation, including repository-wide race tests and release hooks.
+- Resolve any unrelated full-race fixture issue explicitly rather than ignoring it.
+- Complete ticket validation, diary, changelog, and final branch audit.
+
+### Code review instructions
+
+- Begin at `frameWriteResult`, `writeLoop`, and the `writeAck` supervisor case.
+- Review the deadline queue-drain block alongside reducer deadline timestamp checks.
+- Run the four focused heartbeat integration tests 300 times under `-race`.
+- Run all transport packages 100 times under `-race`.
+
+### Technical details
+
+```text
+Writer result:
+  frameWriteResult{at: heartbeatNow(), err: writeError}
+
+Deadline:
+  result.at + PongTimeout
+
+Deadline tie policy:
+  drain at most 8 admitted heartbeat events
+  then apply generation-tagged deadline event
 ```

@@ -47,3 +47,14 @@ Phases 3-6: replaced legacy heartbeat loops with the state-machine supervisor an
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/observer.go — Bounded asynchronous observation
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/server.go — Lifecycle integration and legacy removal
 
+
+## 2026-08-10
+
+Corrected write/deadline event serialization, passed 300 focused and 100 full transport race repetitions, and documented operations (commit afe9496)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/README.md — Operational contract
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/heartbeat.go — Deadline queue tie policy
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/server.go — Timestamped writer completion
+
