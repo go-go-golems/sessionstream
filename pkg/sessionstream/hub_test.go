@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -352,6 +353,7 @@ func registerTestHandler(t *testing.T, hub *Hub) {
 }
 
 type testHydrationStore struct {
+	mu        sync.RWMutex
 	snapshots map[SessionId]Snapshot
 }
 
@@ -360,6 +362,8 @@ func newTestHydrationStore() HydrationStore {
 }
 
 func (s *testHydrationStore) Apply(_ context.Context, sid SessionId, ord uint64, entities []TimelineEntity) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	snap := s.snapshots[sid]
 	snap.SessionId = sid
 	if ord > snap.SnapshotOrdinal {
@@ -386,6 +390,8 @@ func (s *testHydrationStore) Apply(_ context.Context, sid SessionId, ord uint64,
 }
 
 func (s *testHydrationStore) Snapshot(_ context.Context, sid SessionId, _ uint64) (Snapshot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	snap, ok := s.snapshots[sid]
 	if !ok {
 		return Snapshot{SessionId: sid}, nil
@@ -406,6 +412,8 @@ func (s *testHydrationStore) View(ctx context.Context, sid SessionId) (TimelineV
 }
 
 func (s *testHydrationStore) Cursor(_ context.Context, sid SessionId) (uint64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.snapshots[sid].SnapshotOrdinal, nil
 }
 
@@ -421,6 +429,8 @@ func newTestEventStore() *testEventStore {
 }
 
 func (s *testEventStore) AppendEvent(_ context.Context, ev Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.events = append(s.events, Event{Name: ev.Name, SessionId: ev.SessionId, Ordinal: ev.Ordinal, Payload: proto.Clone(ev.Payload)})
 	if ev.Ordinal > s.eventCursor {
 		s.eventCursor = ev.Ordinal
@@ -429,6 +439,8 @@ func (s *testEventStore) AppendEvent(_ context.Context, ev Event) error {
 }
 
 func (s *testEventStore) Events(_ context.Context, sid SessionId, after uint64, limit int) ([]Event, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	out := make([]Event, 0)
 	for _, ev := range s.events {
 		if ev.SessionId != sid || ev.Ordinal <= after {
@@ -443,14 +455,20 @@ func (s *testEventStore) Events(_ context.Context, sid SessionId, after uint64, 
 }
 
 func (s *testEventStore) EventCursor(context.Context, SessionId) (uint64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.eventCursor, nil
 }
 
 func (s *testEventStore) ProjectionCursor(_ context.Context, projector string, sid SessionId) (uint64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.snapshots[sid].SnapshotOrdinal, nil
 }
 
 func (s *testEventStore) AdvanceProjectionCursor(_ context.Context, projector string, sid SessionId, ord uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	snap := s.snapshots[sid]
 	snap.SessionId = sid
 	if ord > snap.SnapshotOrdinal {
@@ -461,11 +479,15 @@ func (s *testEventStore) AdvanceProjectionCursor(_ context.Context, projector st
 }
 
 func (s *testEventStore) ClearTimeline(_ context.Context, sid SessionId) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	delete(s.snapshots, sid)
 	return nil
 }
 
 func (s *testEventStore) RecordError(_ context.Context, rec ErrorRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.errors = append(s.errors, rec)
 	return nil
 }
