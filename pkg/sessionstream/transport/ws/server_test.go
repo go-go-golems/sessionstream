@@ -143,6 +143,23 @@ func newTestHubAndServer(t *testing.T) (*sessionstream.Hub, *Server) {
 	return newTestHubAndServerWithOptions(t)
 }
 
+func TestHelloIsQueuedBeforeHeartbeatStarts(t *testing.T) {
+	config := DefaultConnectionConfig()
+	config.SendQueueSize = 1
+	config.HeartbeatInterval = time.Nanosecond
+	config.PongTimeout = time.Second
+	_, server := newTestHubAndServerWithOptions(t, WithConnectionConfig(config))
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	for range 100 {
+		conn := dialWS(t, httpServer.URL)
+		first := readServerFrame(t, conn)
+		require.NotNil(t, first.GetHello())
+		require.NoError(t, conn.Close())
+	}
+}
+
 func TestServerFrameTypeClassifiesHeartbeatFrames(t *testing.T) {
 	require.Equal(t, "ping", serverFrameType(newPingFrame("ping-nonce")))
 	require.Equal(t, "pong", serverFrameType(newPongFrame("pong-nonce")))

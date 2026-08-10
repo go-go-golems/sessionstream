@@ -153,6 +153,7 @@ type connection struct {
 	closed   atomic.Bool
 	queueMu  sync.Mutex
 	done     chan struct{}
+	ready    chan struct{}
 	pongs    chan string
 	requests chan *sessionstreamv1.ClientFrame
 
@@ -249,12 +250,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		send:     make(chan outboundFrame, s.connectionConfig.SendQueueSize),
 		subs:     map[sessionstream.SessionId]subscription{},
 		done:     make(chan struct{}),
+		ready:    make(chan struct{}),
 		pongs:    make(chan string, 1),
 		requests: make(chan *sessionstreamv1.ClientFrame, s.connectionConfig.SendQueueSize),
 	}
 	// Publish Connected before making c visible to Close. This keeps observer
 	// ordering stable without invoking user observer code under lifecycleMu.
 	s.observe(r.Context(), TransportRecord{Stage: TransportStageConnected, ConnectionId: cid})
+	// Queue the protocol preface before heartbeat or any other outbound producer
+	// can run. ConnectionConfig validation guarantees at least one queue slot.
+	helloWritten, err := s.sendFrameTracked(c, newHelloFrame(cid))
+	if err != nil {
+		s.closeConnection(c)
+		return
+	}
 
 	s.lifecycleMu.Lock()
 	if s.closing {
@@ -268,9 +277,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.wg.Add(3)
 	s.lifecycleMu.Unlock()
 	go func() { defer s.wg.Done(); s.writeLoop(ctx, c) }()
-	go func() { defer s.wg.Done(); s.heartbeatLoop(ctx, c) }()
-	go func() { defer s.wg.Done(); s.runRequestLoop(ctx, c) }()
-	_ = s.sendFrame(c, newHelloFrame(cid))
+	go func() { defer s.wg.Done(); s.heartbeatLoopAfterReady(ctx, c) }()
+	go func() { defer s.wg.Done(); s.requestLoopAfterReady(ctx, c) }()
+	select {
+	case <-ctx.Done():
+		s.closeConnection(c)
+		return
+	case <-c.done:
+		return
+	case err := <-helloWritten:
+		if err != nil {
+			s.closeConnection(c)
+			return
+		}
+	}
+	close(c.ready)
 	s.readLoop(ctx, c)
 	s.closeConnection(c)
 }
@@ -367,6 +388,17 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			_ = s.sendFrame(c, newErrorFrame("request_queue_full", err.Error(), ""))
 			return
 		}
+	}
+}
+
+func (s *Server) requestLoopAfterReady(ctx context.Context, c *connection) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-c.done:
+		return
+	case <-c.ready:
+		s.runRequestLoop(ctx, c)
 	}
 }
 
@@ -490,17 +522,28 @@ func (s *Server) writeLoop(ctx context.Context, c *connection) {
 		case msg = <-c.send:
 		}
 		if err := c.ws.SetWriteDeadline(time.Now().Add(s.connectionConfig.WriteTimeout)); err != nil {
-			notifyFrameWritten(msg, err)
 			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
+			notifyFrameWritten(msg, err)
 			return
 		}
 		if err := c.ws.WriteMessage(websocket.TextMessage, msg.body); err != nil {
-			notifyFrameWritten(msg, err)
 			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
+			notifyFrameWritten(msg, err)
 			return
 		}
-		notifyFrameWritten(msg, nil)
 		s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWritten, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body)})
+		notifyFrameWritten(msg, nil)
+	}
+}
+
+func (s *Server) heartbeatLoopAfterReady(ctx context.Context, c *connection) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-c.done:
+		return
+	case <-c.ready:
+		s.heartbeatLoop(ctx, c)
 	}
 }
 
