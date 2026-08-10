@@ -18,7 +18,9 @@ RelatedFiles:
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine.go
       Note: Implemented in Step 3 at commit d0693bf
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go
-      Note: Validated reducer invariants in Step 3 at commit d0693bf
+      Note: |-
+        Validated reducer invariants in Step 3 at commit d0693bf
+        State-aware fuzzing implemented and run in Step 7 at commit a7a49e4
     - Path: repo://pkg/sessionstream/transport/ws/observer.go
       Note: Moved callbacks off critical paths in Step 4 at commit dbfbf02
     - Path: repo://pkg/sessionstream/transport/ws/server.go
@@ -34,6 +36,7 @@ LastUpdated: 2026-08-10T20:10:00-04:00
 WhatFor: Continuing the heartbeat state-machine implementation with evidence, decisions, validation commands, and review guidance intact.
 WhenToUse: Read before implementing or reviewing SESSIONSTREAM-005.
 ---
+
 
 
 
@@ -658,4 +661,99 @@ bits 0..2: operation
 bits 3..4: identity mode
 bits 5..7: time mode
 campaign: go test -run='^$' -fuzz=FuzzMachinePreservesInvariants -fuzztime=60s
+```
+
+## Step 7: Implement and run state-aware reducer fuzzing
+
+This step implemented exactly the bounded fuzzing plan from Step 6. The native Go target can now move through repeated healthy generations while independently mutating event kind, challenge identity, and boundary time.
+
+The campaign completed without finding a reducer violation. The new harness stays entirely in `machine_test.go`; it adds no runtime API, dependency, generated code, or CI-duration commitment.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 6)
+
+**Assistant interpretation:** Implement the approved small fuzzing enhancement, validate seeds under ordinary and race execution, run the planned bounded campaign, and record concrete evidence.
+
+**Inferred user intent:** Gain meaningful property-testing confidence now without expanding the shipment into a formal verification project.
+
+**Commit (code):** a7a49e450ee3a4302536edd667bde37e4b0fb820 — "test: add state-aware heartbeat fuzzing"
+
+### What I did
+
+- Replaced direct byte-to-event mapping with an 8/4/8 operation, identity, and time decoder.
+- Added phase-sensitive `Advance` behavior for healthy multi-generation traversal.
+- Added current, previous, future/stale, and empty identity modes.
+- Added before/exact/after deadline, write-time, duplicate-time, timeout, and one-second time modes.
+- Bounded each fuzz execution to 4,096 operations.
+- Added seven readable seeds for healthy cycles, pending pong, stale pong, early/exact deadline, write failure, active stop, and post-stop events.
+- Added error-atomicity checks for `ErrMissingNonce` and `ErrEarlyDeadline`.
+- Added stable action-contract assertions for send, arm, pong, suspicion/close pairing, schedule, and stop.
+- Added a deterministic test proving seven `Advance` bytes complete two healthy generations.
+- Ran 100 ordinary seed regressions.
+- Ran 100 race-enabled seed regressions.
+- Ran the planned 60-second fuzz campaign.
+
+### Why
+
+- State-aware advance prevents random traces from becoming trapped by accidental nonce mismatch.
+- Separate direct operations preserve malformed and stale-event exploration.
+- One-byte encoding lets Go's mutator and minimizer alter one semantic dimension cheaply.
+- Error atomicity is a strong property not tied to the reducer's internal switch layout.
+
+### What worked
+
+The bounded campaign reported:
+
+```text
+baseline coverage: 7/7 completed
+workers: 8
+executions: 111066
+new interesting: 153
+total interesting: 160
+result: PASS
+elapsed: 61.075s
+```
+
+No failure corpus was produced. Seed regressions, race-enabled seed regressions, lint, full pre-commit tests, and pre-commit lint all passed.
+
+### What didn't work
+
+The campaign periodically reported zero executions per second for several three-second reporting windows after reaching larger interesting inputs. It resumed repeatedly and completed successfully. The per-input 4,096-operation cap bounded work; no timeout, crash, or test failure occurred.
+
+### What I learned
+
+- A small semantic decoder significantly increased interesting corpus discovery while remaining easy to inspect.
+- The deterministic two-generation test is valuable because corpus execution alone does not report which phases were reached.
+- Coarse action properties complement rather than duplicate the exact transition tests.
+
+### What was tricky to build
+
+Expected reducer errors must not be treated as fuzz failures. The harness accepts only missing nonce and early deadline errors, then proves both are atomic by comparing complete before/after state and requiring no actions. Any other error fails immediately.
+
+Action assertions inspect the final state after the complete ordered action slice. This permits combinations such as cancel-plus-stop while still enforcing that send leaves `Writing`, arm leaves `Awaiting`, successful pong leaves `Idle`, and suspicion is paired with close.
+
+### What warrants a second pair of eyes
+
+- Review the decoder's bit masks and enum coverage.
+- Review whether the action generation upper-bound assertion has the right exception for generation-zero lifecycle actions.
+- Review the expected-error allowlist when future reducer errors are introduced.
+
+### What should be done in the future
+
+N/A for this shipment. Future reducer changes should add readable seeds only when they introduce a new semantic category.
+
+### Code review instructions
+
+- Start at `TestHeartbeatFuzzAdvanceTraversesTwoHealthyCycles` and `FuzzMachinePreservesInvariants`.
+- Follow `decodeFuzzEvent` into operation, identity, and time helpers.
+- Run the documented 60-second command when changing reducer semantics.
+
+### Technical details
+
+```text
+Commit: a7a49e4
+Seed regressions: 100 ordinary + 100 race-enabled
+Campaign: 60 seconds, 111066 executions, PASS
+Production changes: none
 ```

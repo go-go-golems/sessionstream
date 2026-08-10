@@ -34,6 +34,10 @@ This plan makes the existing fuzzer **state-aware** without introducing a second
 
 The implementation remains one fuzz target in `machine_test.go`. It adds a small decoder, stronger action/state assertions, and a compact seed corpus. A bounded local campaign proves that the harness executes and produces reusable corpus artifacts if it finds a failure. This is intentionally the last fuzzing scope for shipment.
 
+### Implementation result
+
+Implemented in commit `a7a49e4`. One hundred ordinary seed regressions and one hundred race-enabled seed regressions passed. The 60-second native Go campaign completed successfully with 111,066 executions, 153 newly interesting inputs, and 160 total interesting corpus entries in the fuzz cache. No failure corpus was produced.
+
 ## Goals
 
 1. Reach `Booting`, `Idle`, `Writing`, `Awaiting`, `Suspected`, and `Stopped` through generated traces.

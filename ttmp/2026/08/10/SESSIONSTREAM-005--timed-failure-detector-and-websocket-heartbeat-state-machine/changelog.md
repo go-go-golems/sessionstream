@@ -68,3 +68,14 @@ Added the scoped design for state-aware heartbeat reducer fuzzing before impleme
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go — Planned implementation target
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/design-doc/02-pragmatic-stateful-fuzzing-plan-for-the-heartbeat-reducer.md — Pragmatic fuzzing design
 
+
+## 2026-08-10
+
+Implemented state-aware reducer fuzzing and completed a 60-second campaign with 111066 executions and no failure (commit a7a49e4)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go — Fuzz decoder, seeds, and properties
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/design-doc/02-pragmatic-stateful-fuzzing-plan-for-the-heartbeat-reducer.md — Implementation result and campaign evidence
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/reference/01-investigation-diary.md — Detailed implementation and run record
+
