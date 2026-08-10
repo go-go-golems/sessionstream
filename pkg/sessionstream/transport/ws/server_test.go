@@ -222,6 +222,45 @@ func TestHeartbeatPongKeepsConnectionAlive(t *testing.T) {
 	require.NotEmpty(t, second.GetPing().GetNonce())
 }
 
+func TestHeartbeatPongIsProcessedBeforeBlockingReadObserver(t *testing.T) {
+	records := newRecordingTransportObserver()
+	observerBlocked := make(chan struct{})
+	releaseObserver := make(chan struct{})
+	var blockOnce sync.Once
+	observer := TransportObserverFunc(func(ctx context.Context, record TransportRecord) {
+		records.OnTransport(ctx, record)
+		if record.Stage == TransportStageClientFrameRead {
+			blockOnce.Do(func() {
+				close(observerBlocked)
+				<-releaseObserver
+			})
+		}
+	})
+	config := DefaultConnectionConfig()
+	config.HeartbeatInterval = 100 * time.Millisecond
+	config.PongTimeout = 20 * time.Millisecond
+	_, server := newTestHubAndServerWithOptions(t, WithConnectionConfig(config), WithTransportObserver(observer))
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer func() { _ = conn.Close() }()
+	_ = readServerFrame(t, conn) // hello
+	ping := readServerFrame(t, conn)
+	require.NotEmpty(t, ping.GetPing().GetNonce())
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Pong{Pong: &sessionstreamv1.PongFrame{Nonce: ping.GetPing().GetNonce()}}})
+	select {
+	case <-observerBlocked:
+	case <-time.After(time.Second):
+		t.Fatal("client-frame observer did not block")
+	}
+
+	time.Sleep(2 * config.PongTimeout)
+	require.Len(t, server.Connections(), 1)
+	require.NotContains(t, records.stages(), TransportStageHeartbeatTimeout)
+	close(releaseObserver)
+}
+
 func TestHeartbeatTimeoutStartsAfterPingIsWritten(t *testing.T) {
 	records := newRecordingTransportObserver()
 	config := DefaultConnectionConfig()
@@ -343,7 +382,9 @@ func TestSubscribeAuthorizerDeniesBeforeHydration(t *testing.T) {
 	records := newRecordingTransportObserver()
 	_, server := newTestHubAndServerWithOptions(t,
 		WithTransportObserver(records),
-		WithSubscribeAuthorizer(func(context.Context, sessionstream.SessionId) error { return errors.New("denied") }),
+		WithSubscribeAuthorizer(func(context.Context, sessionstream.SessionId) error {
+			return errors.New("sensitive policy backend detail")
+		}),
 	)
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
@@ -353,9 +394,13 @@ func TestSubscribeAuthorizerDeniesBeforeHydration(t *testing.T) {
 	_ = readServerFrame(t, conn)
 	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "forbidden"}}})
 	response := readServerFrame(t, conn)
-	require.Equal(t, "protocol_error", response.GetError().GetCode())
+	require.Equal(t, "subscribe_denied", response.GetError().GetCode())
+	require.Equal(t, "subscription not authorized", response.GetError().GetMessage())
+	require.Equal(t, "forbidden", response.GetError().GetSessionId())
+	require.NotContains(t, response.GetError().GetMessage(), "sensitive")
 	require.Empty(t, server.Connections()[0].Subscriptions)
 	require.Contains(t, records.stages(), TransportStageSubscribeDenied)
+	require.ErrorContains(t, records.first(TransportStageSubscribeDenied).Err, "sensitive policy backend detail")
 }
 
 func TestRequestWorkerPanicClosesOnlyAffectedConnection(t *testing.T) {

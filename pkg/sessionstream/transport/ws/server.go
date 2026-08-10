@@ -352,17 +352,19 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			s.observe(ctx, TransportRecord{Stage: TransportStageReadError, Direction: FrameDirectionClientToServer, ConnectionId: c.id, Err: err})
 			return
 		}
-		s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameRead, Direction: FrameDirectionClientToServer, ConnectionId: c.id, RawBytes: len(raw)})
 		frame := &sessionstreamv1.ClientFrame{}
 		if err := unmarshalOpts.Unmarshal(raw, frame); err != nil {
+			s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameRead, Direction: FrameDirectionClientToServer, ConnectionId: c.id, RawBytes: len(raw)})
 			s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameDecodeError, Direction: FrameDirectionClientToServer, ConnectionId: c.id, RawBytes: len(raw), Err: err})
 			_ = s.sendFrame(c, newErrorFrame("bad_client_frame", err.Error(), ""))
 			continue
 		}
-		s.observe(ctx, clientFrameRecord(TransportStageClientFrameDecoded, c.id, frame, len(raw)))
 		switch typed := frame.GetFrame().(type) {
 		case *sessionstreamv1.ClientFrame_Ping:
-			if err := s.sendFrame(c, newPongFrame(typed.Ping.GetNonce())); err != nil {
+			err := s.sendFrame(c, newPongFrame(typed.Ping.GetNonce()))
+			s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameRead, Direction: FrameDirectionClientToServer, ConnectionId: c.id, RawBytes: len(raw)})
+			s.observe(ctx, clientFrameRecord(TransportStageClientFrameDecoded, c.id, frame, len(raw)))
+			if err != nil {
 				return
 			}
 			continue
@@ -371,9 +373,13 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			case c.pongs <- typed.Pong.GetNonce():
 			default:
 			}
+			s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameRead, Direction: FrameDirectionClientToServer, ConnectionId: c.id, RawBytes: len(raw)})
+			s.observe(ctx, clientFrameRecord(TransportStageClientFrameDecoded, c.id, frame, len(raw)))
 			s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatPongReceived, Direction: FrameDirectionClientToServer, ConnectionId: c.id, FrameType: "pong"})
 			continue
 		}
+		s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameRead, Direction: FrameDirectionClientToServer, ConnectionId: c.id, RawBytes: len(raw)})
+		s.observe(ctx, clientFrameRecord(TransportStageClientFrameDecoded, c.id, frame, len(raw)))
 		select {
 		case c.requests <- frame:
 		case <-ctx.Done():
@@ -445,7 +451,10 @@ func (s *Server) handleRequestFrame(ctx context.Context, c *connection, frame *s
 		if s.authorizeSubscribe != nil {
 			if err := s.authorizeSubscribe(ctx, sid); err != nil {
 				s.observe(ctx, TransportRecord{Stage: TransportStageSubscribeDenied, ConnectionId: c.id, SessionId: sid, Err: err})
-				return fmt.Errorf("subscribe session %q: %w", sid, err)
+				if sendErr := s.sendFrame(c, newErrorFrame("subscribe_denied", "subscription not authorized", string(sid))); sendErr != nil {
+					return fmt.Errorf("send subscription denial: %w", sendErr)
+				}
+				return nil
 			}
 		}
 		since := sub.GetSinceSnapshotOrdinal()
