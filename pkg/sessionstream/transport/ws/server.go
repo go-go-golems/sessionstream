@@ -369,10 +369,7 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			}
 			continue
 		case *sessionstreamv1.ClientFrame_Pong:
-			select {
-			case c.pongs <- typed.Pong.GetNonce():
-			default:
-			}
+			offerLatestPong(c, typed.Pong.GetNonce())
 			s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameRead, Direction: FrameDirectionClientToServer, ConnectionId: c.id, RawBytes: len(raw)})
 			s.observe(ctx, clientFrameRecord(TransportStageClientFrameDecoded, c.id, frame, len(raw)))
 			s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatPongReceived, Direction: FrameDirectionClientToServer, ConnectionId: c.id, FrameType: "pong"})
@@ -394,6 +391,24 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			_ = s.sendFrame(c, newErrorFrame("request_queue_full", err.Error(), ""))
 			return
 		}
+	}
+}
+
+func offerLatestPong(c *connection, nonce string) {
+	select {
+	case c.pongs <- nonce:
+		return
+	default:
+	}
+	// The socket has one reader, so replacing the single buffered value is a
+	// latest-wins operation even while heartbeatLoop consumes concurrently.
+	select {
+	case <-c.pongs:
+	default:
+	}
+	select {
+	case c.pongs <- nonce:
+	default:
 	}
 }
 

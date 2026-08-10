@@ -222,6 +222,13 @@ func TestHeartbeatPongKeepsConnectionAlive(t *testing.T) {
 	require.NotEmpty(t, second.GetPing().GetNonce())
 }
 
+func TestOfferLatestPongReplacesStaleBufferedNonce(t *testing.T) {
+	conn := &connection{pongs: make(chan string, 1)}
+	conn.pongs <- "stale"
+	offerLatestPong(conn, "current")
+	require.Equal(t, "current", <-conn.pongs)
+}
+
 func TestHeartbeatPongIsProcessedBeforeBlockingReadObserver(t *testing.T) {
 	records := newRecordingTransportObserver()
 	observerBlocked := make(chan struct{})
