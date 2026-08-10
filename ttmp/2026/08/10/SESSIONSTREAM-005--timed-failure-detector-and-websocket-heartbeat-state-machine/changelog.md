@@ -105,3 +105,22 @@ PR #11 review: detached queued observer contexts from producer cancellation whil
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/observer.go — Queued observer context ownership correction
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/server_test.go — Cancellation-detachment regression test
 
+
+## 2026-08-10
+
+Designed shared deadline arbitration and a separate runtime fuzz harness, including trace-refinement theory, invariants, fuzzing techniques, APIs, tests, and phased intern implementation guidance
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/heartbeat.go — Reported overdue-on-arm ordering path analyzed
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/design-doc/03-intern-guide-to-heartbeat-supervisor-event-arbitration-and-runtime-fuzzing.md — New supervisor arbitration and runtime fuzzing intern guide
+
+
+## 2026-08-10
+
+Validated and uploaded the Supervisor Arbitration and Runtime Fuzzing Guide to reMarkable at /ai/2026/08/10/SESSIONSTREAM-005
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/design-doc/03-intern-guide-to-heartbeat-supervisor-event-arbitration-and-runtime-fuzzing.md — Validated and delivered design guide
+

@@ -39,6 +39,8 @@ RelatedFiles:
       Note: Wire-contract evidence inspected during Step 1
     - Path: repo://ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/design-doc/01-intern-guide-to-the-timed-failure-detector-and-websocket-heartbeat-state-machine.md
       Note: Primary design deliverable produced by the investigation
+    - Path: repo://ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/design-doc/03-intern-guide-to-heartbeat-supervisor-event-arbitration-and-runtime-fuzzing.md
+      Note: Supervisor arbitration and runtime fuzzing design delivered to reMarkable
 ExternalSources:
     - https://github.com/go-go-golems/sessionstream/pull/10
 Summary: Chronological research and design record for the timed WebSocket failure-detector state machine.
@@ -46,6 +48,7 @@ LastUpdated: 2026-08-10T20:10:00-04:00
 WhatFor: Continuing the heartbeat state-machine implementation with evidence, decisions, validation commands, and review guidance intact.
 WhenToUse: Read before implementing or reviewing SESSIONSTREAM-005.
 ---
+
 
 
 
@@ -1004,4 +1007,100 @@ Focused race repetitions: 50 PASS
 Full repository tests: PASS
 Go vet: PASS
 Pre-commit test/lint: PASS
+```
+
+## Step 10: Design supervisor arbitration and its runtime fuzz harness
+
+A second PR #11 finding exposed a boundary not covered by the reducer fuzzer: the supervisor can apply an overdue deadline recursively while handling a writer acknowledgement, before reading a timely pong already admitted to the bounded event queue. The reducer is correct for the sequence it receives, but the runtime serializes the concurrent history into the wrong reducer trace.
+
+I created a 7,299-word intern guide that reconstructs the execution, defines the supervisor refinement invariant, specifies one shared deadline-arbitration helper for timer and overdue-on-arm paths, and designs deterministic and state-aware runtime coverage. The guide includes labeled-transition-system, partial-order, happens-before, linearization, trace-refinement, safety/liveness, failure-detector, and observational-equivalence foundations, followed by fuzzing techniques, APIs, pseudocode, diagrams, phases, decisions, risks, and review checklists. It passed docmgr validation and was uploaded successfully to reMarkable.
+
+### Prompt Context
+
+**User prompt (verbatim):** "write it out in a new design doc, and also add a section that goes into computer science theoretic underpinnings of the design and how it impacts invariants and creating fuzz harnesses, and what some design technique for fuzzing are. Create  a detailed analysis / design / implementation guide that is for a new intern, explaining all the parts of the system needed to understand what it is, with prose paragraphs and bullet point sand pseudocode and diagrams and api references and file references. It should be very clear and technical. Store in the ticket and the nupload to remarkable."
+
+**Assistant interpretation:** Create a new comprehensive SESSIONSTREAM-005 design document that teaches the reported supervisor-ordering problem, its theoretical basis, the proposed shared arbitration API, and a practical runtime fuzzing strategy, then validate and upload it to reMarkable.
+
+**Inferred user intent:** Give a new intern enough theory, repository orientation, implementation detail, and verification guidance to fix the bug without conflating pure reducer correctness with concurrent runtime serialization.
+
+### What I did
+
+- Added `design-doc/03-intern-guide-to-heartbeat-supervisor-event-arbitration-and-runtime-fuzzing.md` through docmgr.
+- Inspected line-numbered reducer, supervisor, and existing fuzz implementation evidence.
+- Documented the exact `tw < tp < deadline < resume` schedule and why `PendingPongAt` and timer-only draining do not cover it.
+- Specified `applyDeadlineAfterAdmittedEvents` and both production call sites in pseudocode.
+- Defined reducer-local and supervisor-refinement invariants.
+- Designed `FuzzHeartbeatDeadlineArbitration`, its byte encoding, oracle, seeds, properties, campaign commands, and bounded resource contract.
+- Added theoretical sections on labeled transition systems, trace refinement, concurrent histories, partial orders, happens-before, linearization points, safety, liveness, failure detectors, and observational equivalence.
+- Added practical sections on property-based, model-based, stateful, structure-aware, boundary, equivalence-class, metamorphic, differential, schedule, shrinking, and coverage-guided fuzzing.
+- Related the four primary source/test files and updated the ticket changelog.
+- Ran frontmatter validation, `docmgr doctor`, Markdown fence checks, and `git diff --check`.
+- Performed the required reMarkable dry run and real upload.
+
+### Why
+
+- The existing reducer harness validates the transition function after event ordering has already been chosen.
+- The reported defect lives in the refinement from concurrent source history to reducer event trace.
+- A separate runtime arbitration harness preserves the purity and fault localization of the reducer fuzzer while testing the missing contract.
+- The implementation is small, but a new engineer needs a precise model to avoid replacing one scheduler-dependent ordering rule with another.
+
+### What worked
+
+- The generated design document passed `docmgr validate frontmatter`.
+- `docmgr doctor --ticket SESSIONSTREAM-005 --stale-after 30` reported all checks passed.
+- The 1,403-line document contains balanced code fences and no placeholders.
+- reMarkable dry-run rendering completed successfully.
+- The real upload returned:
+
+```text
+OK: uploaded SESSIONSTREAM-005 Supervisor Arbitration and Runtime Fuzzing Guide.pdf -> /ai/2026/08/10/SESSIONSTREAM-005
+```
+
+### What didn't work
+
+N/A
+
+### What I learned
+
+- A reducer fuzzer establishes properties of `delta(state,event)`, while the supervisor needs a separate refinement oracle for `serialize(concurrent history)`.
+- Native Go fuzzing is most effective here when scheduler state is encoded as bounded mailbox data rather than delegated to nondeterministic goroutine scheduling.
+- The core oracle can remain independent and small: the final result is successful exactly when the admitted queue contains a current-nonce pong strictly before the deadline.
+
+### What was tricky to build
+
+The guide needed to distinguish three order concepts without collapsing them: event timestamps, channel admission order, and supervisor selection order. The proposed linearization point is the nonblocking drain's empty observation. It guarantees consideration of events admitted before the deadline decision but does not claim that every remotely timely pong has already been admitted. That limitation preserves accurate fixed-threshold failure-detector semantics.
+
+The fuzz design also needed to cover production arbitration without adding channels or scheduler randomness to the pure reducer harness. The solution is a second target over a directly testable bounded helper, combined with one deterministic production-wiring regression and existing real WebSocket race tests.
+
+### What warrants a second pair of eyes
+
+- Review whether `heartbeatEventQueueSize` or `cap(events)` should define the drain bound; the guide recommends the named constant.
+- Confirm the factored test seam exercises the overdue `ActionArmDeadline` path rather than only the helper in isolation.
+- Review the independent oracle and ensure future event kinds cannot silently invalidate its pong-only assumption.
+
+### What should be done in the future
+
+- Implement the shared arbitration helper and route both deadline paths through it.
+- Add deterministic helper and production-wiring regressions.
+- Add and campaign the separate runtime arbitration fuzz target.
+- Reply to and resolve the PR #11 review thread after validation evidence is pushed.
+
+### Code review instructions
+
+- Read the new guide from Executive Summary through Sections 3–6 before reviewing pseudocode.
+- Compare its current-state citations against `heartbeat.go:121-130` and `heartbeat.go:192-212`.
+- Review Sections 8–10 for fuzz oracle independence and coverage-layer boundaries.
+- Validate with `docmgr doctor --ticket SESSIONSTREAM-005 --stale-after 30`.
+
+### Technical details
+
+```text
+Document: design-doc/03-intern-guide-to-heartbeat-supervisor-event-arbitration-and-runtime-fuzzing.md
+Length: 1,403 lines; 7,299 words
+Related source/test files: 4
+Frontmatter: PASS
+Docmgr doctor: PASS
+Markdown fences: balanced
+reMarkable: /ai/2026/08/10/SESSIONSTREAM-005/SESSIONSTREAM-005 Supervisor Arbitration and Runtime Fuzzing Guide.pdf
+Implementation status: proposed; no runtime code changed in this step
 ```
