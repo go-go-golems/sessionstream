@@ -191,10 +191,15 @@ type subscription struct {
 	buffer               []bufferedUIBatch
 }
 
+type frameWriteResult struct {
+	at  time.Time
+	err error
+}
+
 type outboundFrame struct {
 	body      []byte
 	frameType string
-	written   chan error
+	written   chan frameWriteResult
 }
 
 // ConnectionInfo describes the current transport-visible state of one connection.
@@ -306,8 +311,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case <-c.done:
 		return
-	case err := <-helloWritten:
-		if err != nil {
+	case result := <-helloWritten:
+		if result.err != nil {
 			s.closeConnection(c)
 			return
 		}
@@ -552,16 +557,16 @@ func (s *Server) writeLoop(ctx context.Context, c *connection) {
 		case msg = <-c.send:
 		}
 		if err := c.ws.SetWriteDeadline(time.Now().Add(s.connectionConfig.WriteTimeout)); err != nil {
-			notifyFrameWritten(msg, err)
+			notifyFrameWritten(msg, s.heartbeatNow(), err)
 			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
 			return
 		}
 		if err := c.ws.WriteMessage(websocket.TextMessage, msg.body); err != nil {
-			notifyFrameWritten(msg, err)
+			notifyFrameWritten(msg, s.heartbeatNow(), err)
 			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
 			return
 		}
-		notifyFrameWritten(msg, nil)
+		notifyFrameWritten(msg, s.heartbeatNow(), nil)
 		s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWritten, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body)})
 	}
 }
@@ -601,8 +606,10 @@ func (s *Server) closeConnection(c *connection) {
 	})
 }
 
-// Close closes all upgraded connections and waits for their read, write, and
-// heartbeat loops to exit or for ctx to expire.
+// Close closes all upgraded connections and waits for their reader, writer,
+// request worker, heartbeat supervisor, and accepted observer records to finish,
+// or for ctx to expire. Callers may invoke Close again after a deadline; it will
+// continue waiting for the same idempotent shutdown.
 func (s *Server) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
@@ -800,15 +807,15 @@ func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) er
 	return s.queueFrame(c, frame, nil)
 }
 
-func (s *Server) sendFrameTracked(c *connection, frame *sessionstreamv1.ServerFrame) (<-chan error, error) {
-	written := make(chan error, 1)
+func (s *Server) sendFrameTracked(c *connection, frame *sessionstreamv1.ServerFrame) (<-chan frameWriteResult, error) {
+	written := make(chan frameWriteResult, 1)
 	if err := s.queueFrame(c, frame, written); err != nil {
 		return nil, err
 	}
 	return written, nil
 }
 
-func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, written chan error) error {
+func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, written chan frameWriteResult) error {
 	frameType := serverFrameType(frame)
 	if c == nil {
 		return fmt.Errorf("connection is nil")
@@ -838,9 +845,9 @@ func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, w
 	}
 }
 
-func notifyFrameWritten(frame outboundFrame, err error) {
+func notifyFrameWritten(frame outboundFrame, at time.Time, err error) {
 	if frame.written != nil {
-		frame.written <- err
+		frame.written <- frameWriteResult{at: at, err: err}
 	}
 }
 

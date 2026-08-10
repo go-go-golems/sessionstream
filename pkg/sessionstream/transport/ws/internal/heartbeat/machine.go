@@ -233,7 +233,9 @@ func (m *Machine) stepWriting(event Event) ([]Action, error) {
 		return terminalActions(event, reason), nil
 	case EventPongReceived:
 		if event.Nonce == m.state.Nonce {
-			m.state.PendingPongAt = event.At
+			if m.state.PendingPongAt.IsZero() || event.At.Before(m.state.PendingPongAt) {
+				m.state.PendingPongAt = event.At
+			}
 			return nil, nil
 		}
 		return stalePongAction(event), nil

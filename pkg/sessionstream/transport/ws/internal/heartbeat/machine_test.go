@@ -53,6 +53,28 @@ func TestMatchingPongProcessedBeforeWriteAckCompletesCycle(t *testing.T) {
 	requireActionKinds(t, actions, ActionRecordPong, ActionScheduleTick)
 }
 
+func TestPendingPongKeepsEarliestMatchingArrival(t *testing.T) {
+	m := readyMachine(t)
+	generation, nonce := beginChallenge(t, m, epoch, "nonce-1")
+	first := epoch.Add(time.Second)
+	step(t, m, Event{Kind: EventPongReceived, At: first, Nonce: nonce})
+	step(t, m, Event{Kind: EventPongReceived, At: epoch.Add(20 * time.Second), Nonce: nonce})
+	require.Equal(t, first, m.State().PendingPongAt)
+
+	actions := step(t, m, Event{Kind: EventPingWritten, At: epoch, Generation: generation, Nonce: nonce})
+	require.Equal(t, PhaseIdle, m.State().Phase)
+	requireActionKinds(t, actions, ActionRecordPong, ActionScheduleTick)
+}
+
+func TestMatchingPongBeforeWriteCompletionIsAccepted(t *testing.T) {
+	m := readyMachine(t)
+	generation, nonce := beginChallenge(t, m, epoch, "nonce-1")
+	step(t, m, Event{Kind: EventPongReceived, At: epoch.Add(-time.Second), Nonce: nonce})
+	actions := step(t, m, Event{Kind: EventPingWritten, At: epoch, Generation: generation, Nonce: nonce})
+	require.Equal(t, PhaseIdle, m.State().Phase)
+	requireActionKinds(t, actions, ActionRecordPong, ActionScheduleTick)
+}
+
 func TestNonmatchingPongWhileWritingIsStale(t *testing.T) {
 	m := readyMachine(t)
 	_, _ = beginChallenge(t, m, epoch, "current")

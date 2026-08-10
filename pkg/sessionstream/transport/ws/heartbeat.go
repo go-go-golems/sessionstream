@@ -75,7 +75,7 @@ func (s *Server) runHeartbeatSupervisor(ctxDone <-chan struct{}, c *connection) 
 	var deadlineTimer heartbeatTimer
 	var deadlineC <-chan time.Time
 	var deadlineGeneration uint64
-	var writeAck <-chan error
+	var writeAck <-chan frameWriteResult
 	var writeGeneration uint64
 	var writeNonce string
 	stopped := false
@@ -182,16 +182,34 @@ func (s *Server) runHeartbeatSupervisor(ctxDone <-chan struct{}, c *connection) 
 				continue
 			}
 			apply(heartbeat.Event{Kind: heartbeat.EventTick, At: at, Nonce: nonce})
-		case err := <-writeAck:
+		case result := <-writeAck:
 			writeAck = nil
 			kind := heartbeat.EventPingWritten
-			if err != nil {
+			if result.err != nil {
 				kind = heartbeat.EventPingWriteFailed
 			}
-			apply(heartbeat.Event{Kind: kind, At: s.heartbeatNow(), Generation: writeGeneration, Nonce: writeNonce, Err: err})
+			apply(heartbeat.Event{Kind: kind, At: result.at, Generation: writeGeneration, Nonce: writeNonce, Err: result.err})
 		case at := <-deadlineC:
 			deadlineC = nil
-			apply(heartbeat.Event{Kind: heartbeat.EventDeadlineElapsed, At: at, Generation: deadlineGeneration})
+			// A pong may have been admitted before the deadline while Go's
+			// select chose the simultaneously ready timer. Process the bounded
+			// control queue first so scheduler choice cannot override event time.
+			deadlineApplied := false
+			for range heartbeatEventQueueSize {
+				select {
+				case event := <-c.heartbeat.events:
+					apply(event)
+				default:
+					apply(heartbeat.Event{Kind: heartbeat.EventDeadlineElapsed, At: at, Generation: deadlineGeneration})
+					deadlineApplied = true
+				}
+				if deadlineApplied {
+					break
+				}
+			}
+			if !deadlineApplied {
+				apply(heartbeat.Event{Kind: heartbeat.EventDeadlineElapsed, At: at, Generation: deadlineGeneration})
+			}
 		}
 	}
 }

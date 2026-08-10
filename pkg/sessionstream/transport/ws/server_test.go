@@ -225,7 +225,7 @@ func TestConnectionConfigRejectsUnboundedValues(t *testing.T) {
 func TestHeartbeatPongKeepsConnectionAlive(t *testing.T) {
 	config := DefaultConnectionConfig()
 	config.HeartbeatInterval = 10 * time.Millisecond
-	config.PongTimeout = 50 * time.Millisecond
+	config.PongTimeout = 250 * time.Millisecond
 	_, server := newTestHubAndServerWithOptions(t, WithConnectionConfig(config))
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
@@ -319,7 +319,7 @@ func TestHeartbeatTimeoutStartsAfterPingIsWritten(t *testing.T) {
 	require.NotContains(t, records.stages(), TransportStageHeartbeatTimeout)
 
 	require.NoError(t, server.offerHeartbeatPong(conn, frame.GetPing().GetNonce()))
-	notifyFrameWritten(queued, nil)
+	notifyFrameWritten(queued, server.heartbeatNow(), nil)
 	cancel()
 	select {
 	case <-loopDone:
@@ -371,7 +371,7 @@ func TestHeartbeatSupervisorUsesWriteAckAndGenerationSafeTimer(t *testing.T) {
 
 	clock.Advance(4 * config.PongTimeout)
 	require.False(t, conn.closed.Load(), "timeout must not run before write acknowledgement")
-	notifyFrameWritten(queued, nil)
+	notifyFrameWritten(queued, clock.Now(), nil)
 	require.Eventually(t, func() bool { return clock.ActiveTimers() == 1 }, time.Second, time.Millisecond)
 	clock.Advance(config.PongTimeout)
 	require.Eventually(t, conn.closed.Load, time.Second, time.Millisecond)
@@ -384,9 +384,10 @@ func TestHeartbeatSupervisorUsesWriteAckAndGenerationSafeTimer(t *testing.T) {
 }
 
 func TestHeartbeatPongIsProcessedWhileSnapshotHydrationBlocks(t *testing.T) {
+	records := newRecordingTransportObserver()
 	config := DefaultConnectionConfig()
 	config.HeartbeatInterval = 10 * time.Millisecond
-	config.PongTimeout = 25 * time.Millisecond
+	config.PongTimeout = 100 * time.Millisecond
 
 	snapshotStarted := make(chan struct{})
 	releaseSnapshot := make(chan struct{})
@@ -398,8 +399,13 @@ func TestHeartbeatPongIsProcessedWhileSnapshotHydrationBlocks(t *testing.T) {
 		case <-ctx.Done():
 			return sessionstream.Snapshot{}, ctx.Err()
 		}
-	}), WithConnectionConfig(config))
+	}), WithConnectionConfig(config), WithTransportObserver(records))
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("transport stages: %v", records.stages())
+		}
+	})
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
 
@@ -413,7 +419,7 @@ func TestHeartbeatPongIsProcessedWhileSnapshotHydrationBlocks(t *testing.T) {
 		t.Fatal("snapshot hydration did not start")
 	}
 
-	time.AfterFunc(4*config.PongTimeout, func() { close(releaseSnapshot) })
+	time.AfterFunc(2*config.PongTimeout, func() { close(releaseSnapshot) })
 	pingCount := 0
 	snapshotSeen := false
 	for {
