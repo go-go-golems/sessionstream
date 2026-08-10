@@ -11,10 +11,14 @@ DocType: reference
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: repo://pkg/sessionstream/transport/ws/heartbeat.go
+      Note: Integrated supervisor in Step 4 at commit dbfbf02
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine.go
       Note: Implemented in Step 3 at commit d0693bf
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go
       Note: Validated reducer invariants in Step 3 at commit d0693bf
+    - Path: repo://pkg/sessionstream/transport/ws/observer.go
+      Note: Moved callbacks off critical paths in Step 4 at commit dbfbf02
     - Path: repo://pkg/sessionstream/transport/ws/server.go
       Note: Primary implementation evidence inspected during Step 1
     - Path: repo://proto/sessionstream/v1/transport.proto
@@ -28,6 +32,7 @@ LastUpdated: 2026-08-10T20:10:00-04:00
 WhatFor: Continuing the heartbeat state-machine implementation with evidence, decisions, validation commands, and review guidance intact.
 WhenToUse: Read before implementing or reviewing SESSIONSTREAM-005.
 ---
+
 
 
 
@@ -325,4 +330,138 @@ Kernel input:  Event{Kind, At, Generation, Nonce, Err}
 Kernel output: []Action in execution order
 Timeout basis: PingWritten.At + PongTimeout
 Challenge identity: monotonically increasing generation + opaque nonce
+```
+
+## Step 4: Replace the legacy loops with the supervisor and isolate observers
+
+This step integrated the pure detector into the production WebSocket lifecycle. Each upgraded connection now owns one heartbeat runtime and one supervisor; the old ticker loop, one-slot pong channel, and freshness helper are gone.
+
+The integration also moved transport observers onto one bounded ordered dispatcher. Socket reads, writes, heartbeat transitions, request processing, and connection closure now enqueue immutable records without invoking extension code on their critical paths.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 3)
+
+**Assistant interpretation:** Continue from the kernel milestone through complete runtime replacement, observer isolation, repeated concurrency validation, and focused commits.
+
+**Inferred user intent:** Ensure the mathematical model actually governs production behavior and removes—not merely wraps—the old concurrency mechanism.
+
+**Commit (code):** dbfbf0221e11a7ca70c2679f45b0bfdfaa5b972a — "refactor(ws): supervise heartbeat state machine"
+
+### What I did
+
+- Added `pkg/sessionstream/transport/ws/heartbeat.go` as the only runtime adapter around the pure machine.
+- Added one bounded heartbeat event queue per connection.
+- Added cryptographically random opaque default nonces and deterministic test injection seams.
+- Added timer and clock seams and a fake-clock supervisor test.
+- Started the supervisor before read processing but gated its `Ready` event on the existing hello-written barrier.
+- Routed decoded pongs to the reducer before any observer record.
+- Kept one socket reader and one socket writer.
+- Converted tracked writer completion into `PingWritten` or `PingWriteFailed` events.
+- Moved write acknowledgements before observation dispatch.
+- Replaced a free-running ticker with one scheduled idle timer after readiness or successful pong.
+- Removed `connection.pongs`, `offerLatestPong`, `heartbeatLoopAfterReady`, and `heartbeatLoop`.
+- Added a bounded 1,024-record ordered observer dispatcher with drop accounting through `ObserverDroppedRecords`.
+- Made `Close(ctx)` stop and drain accepted observer records after connection workers finish while retaining retryable deadline behavior.
+- Added test cleanup that closes observer workers.
+- Added deterministic and repeated race coverage for the supervisor, observer backpressure, hydration interference, write acknowledgement, and shutdown.
+
+### Why
+
+- A single supervisor is the only mutator of detector state, eliminating timer/pong channel policy races.
+- Actual write acknowledgement remains the transition from `Writing` to `Awaiting`, so local queue delay never consumes pong budget.
+- A bounded observer dispatcher prevents extension callbacks from starving heartbeat control while avoiding unbounded goroutines.
+- One-shot idle timers prevent accumulated ticker ticks from causing catch-up ping bursts.
+
+### What worked
+
+- Twenty full transport-package race repetitions passed before the integration commit.
+- One hundred full transport-package race repetitions passed after fixing the reconnect test synchronization.
+- `make lint` passed with zero issues.
+- `GOWORK=off go vet ./...` passed.
+- Full pre-commit tests and lint passed.
+- Existing heartbeat timeout, responsive pong, hello-first, blocked hydration, blocked observer, close deadline, and browser wire tests continue to pass.
+- The fake clock proves no pong deadline exists before writer acknowledgement.
+
+### What didn't work
+
+The first 100-run race suite exposed four failures in `TestServerReconnectGetsSnapshotThenNextLive`:
+
+```text
+Error: Received unexpected error:
+       connection conn-1: connection conn-1 is closed
+Test:  TestServerReconnectGetsSnapshotThenNextLive
+```
+
+The test closed the browser socket and immediately submitted the next event before the server reader had removed the old subscription. `PublishUI` legitimately found that closing target and reported delivery failure. I added an explicit wait for `server.Connections()` to become empty before the next submit. One hundred repeated race runs then passed.
+
+After observation became asynchronous, two tests made immediate assertions before the dispatcher consumed their records:
+
+```text
+TestLiveQueueOverflowClosesConnection: stages did not yet contain server_frame_queue_full
+TestTransportObserverFanoutNoTargets: expected session "missing", observed zero-value record
+```
+
+I changed those assertions to bounded `require.Eventually` checks, matching the documented best-effort asynchronous contract.
+
+### What I learned
+
+- A pong can arrive after the socket write but before the supervisor selects the write-ack channel. Treating every pong in `PhaseWriting` as stale would make correctness depend on `select` ordering.
+- The reducer therefore needs a pending-pong substate even with one reader and writer.
+- Keeping the **earliest** matching pending timestamp is correct: a later duplicate must not overwrite a timely valid response while write acknowledgement is delayed.
+- A pong timestamped before successful write must not acknowledge the challenge even if its nonce happens to match.
+- Observer isolation necessarily changes callback timing; tests and API comments must assert eventual ordered delivery rather than synchronous completion.
+
+### What was tricky to build
+
+The supervisor must remain responsive while waiting for four independent inputs: decoded pong events, writer acknowledgement, idle timer, and deadline timer. It uses nil-disabled select channels and keeps timer identity local to the sole owner. Reducer generations independently protect against stale deadline events.
+
+Writer acknowledgement and pong arrival can be observed in either order. The updated `PhaseWriting` stores the earliest matching pong timestamp. On `PingWritten`, it accepts that response only when:
+
+```text
+WrittenAt <= PendingPongAt < WrittenAt + PongTimeout
+```
+
+This converts scheduler nondeterminism into explicit timestamp semantics.
+
+Observer shutdown required a separate lifecycle from connection workers. `Close` first closes connections and waits for all handlers/workers, then linearizes observer shutdown, drains already accepted records, and waits for the dispatcher. If a callback blocks, `Close(ctx)` returns its deadline while a later `Close` can continue waiting after the callback is released.
+
+### What warrants a second pair of eyes
+
+- Review the recursive action application used for immediate queue/write/timer failures in `runHeartbeatSupervisor`.
+- Review whether `heartbeatEventQueueSize = 8` is sufficient and whether overflow-close is the desired abuse policy.
+- Review the public addition of `ObserverDroppedRecords` and the fixed 1,024-record dispatcher capacity.
+- Review storing original callback contexts until asynchronous delivery; they may already be canceled when consumed.
+- Review whether nonce generation failure should have a dedicated transport stage rather than `protocol_error`.
+- Confirm earliest-pending-pong semantics and the inclusive lower/exclusive upper timestamp bounds.
+
+### What should be done in the future
+
+- Complete full repository, vulnerability, build, hook, release, JavaScript, and documentation validation.
+- Update operational docs and design status to match the implementation.
+- Run a final dead-code, race, resource-bound, and diff audit before pushing.
+
+### Code review instructions
+
+- Read `heartbeat.go` from supervisor setup through each select input and action effect.
+- Confirm `server.go` contains no legacy pong channel or heartbeat loop.
+- Review `observer.go` queue admission and stop/drain linearization alongside `Server.Close`.
+- Run `GOWORK=off go test -race ./pkg/sessionstream/transport/ws/... -count=100`.
+- Start with `TestHeartbeatSupervisorUsesWriteAckAndGenerationSafeTimer`, the blocked observer/hydration tests, and the pure pending-pong tests.
+
+### Technical details
+
+```text
+Per connection:
+  one socket reader
+  one socket writer
+  one ordered request worker
+  one heartbeat supervisor
+  one heartbeat event queue (capacity 8)
+  at most one idle timer and one deadline timer
+
+Per server with observer:
+  one observer worker
+  one observer queue (capacity 1024)
+  dropped-record counter
 ```

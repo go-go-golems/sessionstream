@@ -17,6 +17,8 @@ RelatedFiles:
       Note: Domain pipeline and UI fanout ownership boundary
     - Path: repo://pkg/sessionstream/hydration.go
       Note: Snapshot contract whose blocking behavior must not starve heartbeat processing
+    - Path: repo://pkg/sessionstream/transport/ws/heartbeat.go
+      Note: Production supervisor, timer, nonce, event queue, and action adapter
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine.go
       Note: Pure timed failure-detector reducer and state-event-action contract
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go
@@ -42,6 +44,7 @@ WhenToUse: Before changing heartbeat, connection lifecycle, observer dispatch, s
 
 
 
+
 # Intern Guide to the Timed Failure Detector and WebSocket Heartbeat State Machine
 
 ## Executive summary
@@ -59,6 +62,12 @@ The core idea is:
 A timeout does not mathematically prove that a client failed. In an asynchronous system, silence may also mean delay, queue congestion, scheduler starvation, or a blocked local callback. The detector therefore establishes **suspicion under a configured timing assumption**. Sessionstream's policy may close a suspected connection, but the distinction remains important for naming, metrics, tests, and future adaptive policies.
 
 The proposed implementation keeps the existing public wire contract and `ConnectionConfig` fields. It introduces an internal package, a typed event/action model, a monotonic generation number, a single outstanding challenge, timer-generation validation, and deterministic tests. The migration is intentionally internal-first: callers should not be forced onto a new public API while the model is being proven.
+
+### Implementation status
+
+Phases 0 through 6 were implemented on `task/sessionstream-005-heartbeat-machine` in commits `d0693bf` and `dbfbf02`. The implementation added the pure reducer under `internal/heartbeat`, the runtime adapter in `heartbeat.go`, generation-safe timer and nonce seams, a bounded observer dispatcher, and deterministic fake-time tests. It removed the old pong channel, latest-pong replacement helper, free-running ticker, and legacy heartbeat loops.
+
+Implementation uncovered one scheduler-order refinement not explicit in the initial proposal: a real client can return a pong after the socket write succeeds but before the supervisor selects the writer acknowledgement. `PhaseWriting` therefore retains the earliest matching pong timestamp as pending. When `PingWritten` arrives, the reducer accepts that pending response only if it is at or after the successful write timestamp and before the derived deadline. This keeps correctness independent of Go `select` ordering.
 
 ## 1. Audience and learning goals
 
@@ -380,7 +389,7 @@ Start with an internal package:
 pkg/sessionstream/transport/ws/
   server.go
   observer.go
-  heartbeat_adapter.go
+  heartbeat.go
   internal/
     heartbeat/
       doc.go
@@ -414,11 +423,12 @@ const (
 )
 
 type State struct {
-    Phase      Phase
-    Generation uint64
-    Nonce      string
-    WrittenAt  time.Time
-    Deadline   time.Time
+    Phase         Phase
+    Generation    uint64
+    Nonce         string
+    WrittenAt     time.Time
+    Deadline      time.Time
+    PendingPongAt time.Time
 }
 
 type Machine struct {
@@ -506,7 +516,8 @@ type Action struct {
 | Idle | PongReceived | — | Idle | RecordStalePong |
 | Writing | PingWritten | event generation and nonce match | Awaiting | ArmDeadline |
 | Writing | PingWriteFailed | generation matches | Suspected | RecordSuspected, CloseConnection |
-| Writing | PongReceived | — | Writing | RecordStalePong |
+| Writing | PongReceived | nonce matches | Writing | retain earliest pending pong timestamp |
+| Writing | PongReceived | nonce differs | Writing | RecordStalePong |
 | Awaiting | PongReceived | nonce matches | Idle | CancelDeadline, RecordPong, ScheduleTick |
 | Awaiting | PongReceived | nonce differs | Awaiting | RecordStalePong |
 | Awaiting | DeadlineElapsed | generation matches and time is at/after deadline | Suspected | RecordSuspected, CloseConnection |
@@ -1300,7 +1311,7 @@ Review in this order:
 1. `proto/sessionstream/v1/transport.proto` for wire meaning.
 2. `pkg/sessionstream/transport/ws/internal/heartbeat/machine.go` for transition correctness.
 3. `machine_test.go` for exhaustive state/event coverage.
-4. `heartbeat_adapter.go` for timer, queue, and action execution.
+4. `heartbeat.go` for timer, queue, nonce, and action execution.
 5. `server.go` reader/writer ownership and lifecycle integration.
 6. `observer.go` for noninterference.
 7. browser clients for nonce echo behavior.

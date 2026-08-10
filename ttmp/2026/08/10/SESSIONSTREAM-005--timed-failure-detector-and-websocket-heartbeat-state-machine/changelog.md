@@ -36,3 +36,14 @@ Phase 0-2: froze heartbeat compatibility and added the pure exhaustive failure-d
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go — Model tests
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/server_test.go — Wire and default-configuration fixtures
 
+
+## 2026-08-10
+
+Phases 3-6: replaced legacy heartbeat loops with the state-machine supervisor and bounded observer dispatcher (commit dbfbf02)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/heartbeat.go — Supervisor integration
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/observer.go — Bounded asynchronous observation
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/server.go — Lifecycle integration and legacy removal
+
