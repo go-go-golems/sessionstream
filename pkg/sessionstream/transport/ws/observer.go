@@ -190,6 +190,8 @@ func serverFrameType(frame *sessionstreamv1.ServerFrame) string {
 		return "uiEvent"
 	case *sessionstreamv1.ServerFrame_Error:
 		return "error"
+	case *sessionstreamv1.ServerFrame_Ping:
+		return "ping"
 	case *sessionstreamv1.ServerFrame_Pong:
 		return "pong"
 	default:

@@ -143,6 +143,11 @@ func newTestHubAndServer(t *testing.T) (*sessionstream.Hub, *Server) {
 	return newTestHubAndServerWithOptions(t)
 }
 
+func TestServerFrameTypeClassifiesHeartbeatFrames(t *testing.T) {
+	require.Equal(t, "ping", serverFrameType(newPingFrame("ping-nonce")))
+	require.Equal(t, "pong", serverFrameType(newPongFrame("pong-nonce")))
+}
+
 func TestHeartbeatTimeoutClosesUnresponsiveConnection(t *testing.T) {
 	records := newRecordingTransportObserver()
 	config := DefaultConnectionConfig()
