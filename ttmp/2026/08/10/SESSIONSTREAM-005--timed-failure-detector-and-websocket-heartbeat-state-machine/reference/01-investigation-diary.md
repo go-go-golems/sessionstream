@@ -28,9 +28,13 @@ RelatedFiles:
         Validated reducer invariants in Step 3 at commit d0693bf
         State-aware fuzzing implemented and run in Step 7 at commit a7a49e4
     - Path: repo://pkg/sessionstream/transport/ws/observer.go
-      Note: Moved callbacks off critical paths in Step 4 at commit dbfbf02
+      Note: |-
+        Moved callbacks off critical paths in Step 4 at commit dbfbf02
+        Detaches accepted observations from producer cancellation while preserving values (commit 5005973)
     - Path: repo://pkg/sessionstream/transport/ws/server.go
       Note: Primary implementation evidence inspected during Step 1
+    - Path: repo://pkg/sessionstream/transport/ws/server_test.go
+      Note: Deterministic queued-context lifetime regression coverage (commit 5005973)
     - Path: repo://proto/sessionstream/v1/transport.proto
       Note: Wire-contract evidence inspected during Step 1
     - Path: repo://ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/design-doc/01-intern-guide-to-the-timed-failure-detector-and-websocket-heartbeat-state-machine.md
@@ -42,6 +46,7 @@ LastUpdated: 2026-08-10T20:10:00-04:00
 WhatFor: Continuing the heartbeat state-machine implementation with evidence, decisions, validation commands, and review guidance intact.
 WhenToUse: Read before implementing or reviewing SESSIONSTREAM-005.
 ---
+
 
 
 
@@ -903,4 +908,100 @@ Temporary go.work test/build: PASS
 Govulncheck: no reachable vulnerabilities
 Pre-push release snapshot: PASS
 Local gosec: 0 issues, nonzero loader failure (documented)
+```
+
+## Step 9: Detach accepted observer records from producer cancellation
+
+PR #11 review correctly identified that the bounded observer dispatcher retained each producer's original context. A record accepted from `ServeHTTP` or `readLoop` could wait behind a slow callback until the producer returned and canceled that context, causing the eventual observer callback to receive `context.Canceled` and potentially discard telemetry that shutdown promised to drain.
+
+The queue now stores `context.WithoutCancel(ctx)`. This preserves request-scoped values while deliberately removing producer cancellation and deadlines. A deterministic regression test blocks the dispatcher, enqueues a value-bearing context with a deadline, cancels the producer, and then proves the drained callback retains the value while observing no error or deadline.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Address
+pkg/sessionstream/transport/ws/observer.go
+    if ctx == nil {
+        ctx = context.Background()
+    }
+    item := observedTransportRecord{ctx: ctx, rec: cloneTransportRecord(rec)}
+@chatgpt-codex-connector
+chatgpt-codex-connector Bot
+16 minutes ago
+
+P2 Badge Detach contexts before queuing observer callbacks
+
+When observer delivery falls behind, records emitted from ServeHTTP or readLoop can remain queued until after the handler returns and its deferred cancellation runs. Because the queue retains the original context, OnTransport then receives context.Canceled; observers that use it for database writes or telemetry export can discard an accepted record even though shutdown claims to drain accepted observations. Preserve context values while detaching cancellation (for example, with context.WithoutCancel) before enqueueing.
+
+Useful? React with 👍 / 👎."
+
+**Assistant interpretation:** Apply the review finding by detaching queued observer contexts from producer cancellation, preserve context values, add a deterministic backlog regression test, validate, commit, and update PR #11.
+
+**Inferred user intent:** Ensure every accepted best-effort observation remains usable when the asynchronous dispatcher drains it after the originating request or connection operation has ended.
+
+**Commit (code):** 5005973cda9fecca3cdedbd5616b8ca6126f01d0 — "fix(ws): detach queued observer contexts"
+
+### What I did
+
+- Changed `observe` to enqueue `context.WithoutCancel(ctx)` after normalizing `nil` to `context.Background()`.
+- Expanded the `TransportObserver` contract comment to state that values survive while producer cancellation and deadlines do not.
+- Added `TestTransportObserverQueueDetachesCancellationAndPreservesValues`.
+- Blocked the first observer callback so the target record necessarily remained queued while its parent context was canceled.
+- Ran the focused test 100 times, its race-enabled form 50 times, full repository tests, `go vet`, and the pre-commit test/lint hook.
+
+### Why
+
+- Accepted observer records are server-owned queue entries once admission succeeds.
+- Retaining producer cancellation makes queue delay alter delivery semantics and weakens graceful-drain guarantees.
+- Context values may carry trace or correlation metadata that observers still need after producer completion.
+
+### What worked
+
+- `context.WithoutCancel` provided the exact contract: values preserved, `Done()` detached, `Err()` nil, and no inherited deadline.
+- The deterministic backlog test passed 100 ordinary repetitions and 50 race-enabled repetitions.
+- Full tests, vet, and the final pre-commit hook passed.
+
+### What didn't work
+
+The first two commit attempts failed lint because the regression test used a non-exhaustive switch over the typed `TransportStage` enum:
+
+```text
+pkg/sessionstream/transport/ws/server_test.go:869:3: missing cases in switch of type ws.TransportStage: ... (exhaustive)
+```
+
+Adding a `default` branch did not satisfy this repository's exhaustive-linter policy. Replacing the two-case switch with explicit `if` conditions removed the enum-exhaustiveness claim and the final pre-commit run passed.
+
+### What I learned
+
+- Asynchronous queue ownership must include cancellation ownership; copying a context pointer does not transfer a producer's lifetime safely.
+- The repository's exhaustive linter treats a switch over a closed enum as a declaration that every member should be named, even when a default exists.
+
+### What was tricky to build
+
+The regression needed to prove actual queue delay rather than merely pass an already-canceled context. It first blocks the dispatcher on a `Connected` callback, then admits the target record, cancels its value-bearing deadline context, and only then releases dispatch. This ordering reproduces the review scenario deterministically without sleeps.
+
+### What warrants a second pair of eyes
+
+- Confirm that detaching deadlines is the intended observer contract for database and telemetry exporters; the API comment now makes this behavior explicit.
+- Review whether any observer intentionally depended on producer cancellation. Such a dependency is incompatible with queued graceful delivery and should use its own operation timeout instead.
+
+### What should be done in the future
+
+- Watch PR #11 GitHub checks and resolve the review thread after the pushed commit is visible.
+
+### Code review instructions
+
+- Start with `pkg/sessionstream/transport/ws/observer.go:observe` and the new test beside the bounded-queue test in `server_test.go`.
+- Run `GOWORK=off go test -race ./pkg/sessionstream/transport/ws -run TestTransportObserverQueueDetachesCancellationAndPreservesValues -count=50`.
+- Run `GOWORK=off go test ./... -count=1` and `GOWORK=off go vet ./...`.
+
+### Technical details
+
+```text
+Producer context: value=request-value, deadline=set, then canceled
+Queued observer context: value=request-value, deadline=none, err=nil
+Focused ordinary repetitions: 100 PASS
+Focused race repetitions: 50 PASS
+Full repository tests: PASS
+Go vet: PASS
+Pre-commit test/lint: PASS
 ```

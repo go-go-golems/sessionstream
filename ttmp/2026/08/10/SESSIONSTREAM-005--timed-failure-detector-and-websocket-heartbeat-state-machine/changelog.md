@@ -95,3 +95,13 @@ Completed CI, race, workspace, vulnerability, JavaScript, hook, and release vali
 
 Ticket closed
 
+
+## 2026-08-10
+
+PR #11 review: detached queued observer contexts from producer cancellation while preserving values and added deterministic backlog coverage (commit 5005973)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/observer.go — Queued observer context ownership correction
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/server_test.go — Cancellation-detachment regression test
+
