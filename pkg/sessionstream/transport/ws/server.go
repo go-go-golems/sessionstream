@@ -230,9 +230,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "websocket server is closing", http.StatusServiceUnavailable)
 		return
 	}
+	// Count the handler before releasing lifecycleMu so Close either prevents
+	// this upgrade from starting or waits for its registration/cleanup path.
+	s.wg.Add(1)
+	s.lifecycleMu.Unlock()
+	defer s.wg.Done()
+
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		s.lifecycleMu.Unlock()
 		s.observe(r.Context(), TransportRecord{Stage: TransportStageUpgradeError, Err: err})
 		return
 	}
@@ -246,13 +251,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		pongs:    make(chan string, 1),
 		requests: make(chan *sessionstreamv1.ClientFrame, s.connectionConfig.SendQueueSize),
 	}
+	s.lifecycleMu.Lock()
+	if s.closing {
+		s.lifecycleMu.Unlock()
+		s.closeConnection(c)
+		return
+	}
 	s.mu.Lock()
 	s.conns[cid] = c
 	s.mu.Unlock()
-	s.wg.Add(4)
+	s.wg.Add(3)
 	s.lifecycleMu.Unlock()
 	s.observe(r.Context(), TransportRecord{Stage: TransportStageConnected, ConnectionId: cid})
-	defer s.wg.Done()
 	go func() { defer s.wg.Done(); s.writeLoop(ctx, c) }()
 	go func() { defer s.wg.Done(); s.heartbeatLoop(ctx, c) }()
 	go func() { defer s.wg.Done(); s.requestLoop(ctx, c) }()

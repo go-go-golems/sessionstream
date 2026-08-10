@@ -356,7 +356,7 @@ func TestLiveQueueOverflowClosesConnection(t *testing.T) {
 	require.Contains(t, records.stages(), TransportStageServerFrameQueueFull)
 }
 
-func TestServerCloseWaitsForUpgradeRegistration(t *testing.T) {
+func TestServerCloseDeadlineIncludesUpgradeRegistration(t *testing.T) {
 	upgradeEntered := make(chan struct{})
 	releaseUpgrade := make(chan struct{})
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool {
@@ -384,21 +384,25 @@ func TestServerCloseWaitsForUpgradeRegistration(t *testing.T) {
 		t.Fatal("websocket upgrade did not start")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- server.Close(ctx) }()
 	select {
 	case err := <-closeDone:
-		t.Fatalf("Close returned before upgrade registration completed: %v", err)
-	case <-time.After(25 * time.Millisecond):
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("Close did not honor its context while upgrade registration was blocked")
 	}
 
 	close(releaseUpgrade)
 	result := <-dialDone
 	require.NoError(t, result.err)
 	defer func() { _ = result.conn.Close() }()
-	require.NoError(t, <-closeDone)
+
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), time.Second)
+	defer finalCancel()
+	require.NoError(t, server.Close(finalCtx))
 	require.NoError(t, result.conn.SetReadDeadline(time.Now().Add(time.Second)))
 	for {
 		if _, _, err := result.conn.ReadMessage(); err != nil {
