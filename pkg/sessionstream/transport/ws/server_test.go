@@ -165,6 +165,23 @@ func TestServerFrameTypeClassifiesHeartbeatFrames(t *testing.T) {
 	require.Equal(t, "pong", serverFrameType(newPongFrame("pong-nonce")))
 }
 
+func TestHeartbeatWireAndDefaultConfigurationContract(t *testing.T) {
+	ping, err := marshalOptions.Marshal(newPingFrame("n-1"))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"ping":{"nonce":"n-1"}}`, string(ping))
+	pong, err := marshalOptions.Marshal(newPongFrame("n-1"))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"pong":{"nonce":"n-1"}}`, string(pong))
+
+	require.Equal(t, ConnectionConfig{
+		MaxReadBytes:      1 << 20,
+		SendQueueSize:     128,
+		WriteTimeout:      10 * time.Second,
+		HeartbeatInterval: 30 * time.Second,
+		PongTimeout:       10 * time.Second,
+	}, DefaultConnectionConfig())
+}
+
 func TestHeartbeatTimeoutClosesUnresponsiveConnection(t *testing.T) {
 	records := newRecordingTransportObserver()
 	config := DefaultConnectionConfig()
