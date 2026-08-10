@@ -2,9 +2,9 @@
 
 ## TODO
 
-- [ ] Freeze current heartbeat wire, configuration, hello-first, timeout, and shutdown behavior with characterization tests <!-- t:d4cb -->
-- [ ] Implement the pure internal heartbeat state-event-action reducer and typed invariants <!-- t:kk21 -->
-- [ ] Add exhaustive transition-table, stale-event, boundary-time, and property/fuzz tests <!-- t:9v77 -->
+- [x] Freeze current heartbeat wire, configuration, hello-first, timeout, and shutdown behavior with characterization tests <!-- t:d4cb -->
+- [x] Implement the pure internal heartbeat state-event-action reducer and typed invariants <!-- t:kk21 -->
+- [x] Add exhaustive transition-table, stale-event, boundary-time, and property/fuzz tests <!-- t:9v77 -->
 - [ ] Implement the per-connection supervisor with generation-safe timer and deterministic nonce seams <!-- t:6ybx -->
 - [ ] Integrate reader and writer acknowledgements while preserving one-reader/one-writer ownership <!-- t:myhd -->
 - [ ] Remove observer callbacks from heartbeat-critical paths with bounded best-effort dispatch <!-- t:9mm6 -->

@@ -11,6 +11,10 @@ DocType: reference
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine.go
+      Note: Implemented in Step 3 at commit d0693bf
+    - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go
+      Note: Validated reducer invariants in Step 3 at commit d0693bf
     - Path: repo://pkg/sessionstream/transport/ws/server.go
       Note: Primary implementation evidence inspected during Step 1
     - Path: repo://proto/sessionstream/v1/transport.proto
@@ -24,6 +28,7 @@ LastUpdated: 2026-08-10T20:10:00-04:00
 WhatFor: Continuing the heartbeat state-machine implementation with evidence, decisions, validation commands, and review guidance intact.
 WhenToUse: Read before implementing or reviewing SESSIONSTREAM-005.
 ---
+
 
 
 # Diary
@@ -220,4 +225,104 @@ Bundle: SESSIONSTREAM-005 Timed Failure Detector Guide.pdf
 Remote directory: /ai/2026/08/10/SESSIONSTREAM-005
 ToC depth: 2
 PDF smoke test: 39 pages
+```
+
+## Step 3: Freeze compatibility and implement the pure detector kernel
+
+This step began implementation by freezing the existing heartbeat wire/default configuration contract and adding the pure state/event/action reducer. The kernel is internal to the WebSocket transport and has no goroutines, channels, clocks, timers, sockets, protobuf dependencies, contexts, or observers.
+
+The reducer now makes readiness, writing, awaiting, suspicion, stopping, nonce matching, generation matching, deadline boundaries, and ordered side effects explicit. Exhaustive matrix tests and fuzzed event sequences exercise the model independently of real-time scheduling.
+
+### Prompt Context
+
+**User prompt (verbatim):** "ok, implement the new heartbeat system and replace the old one, keep a detailed diary as you work, and commit at appropriate intervals."
+
+**Assistant interpretation:** Implement SESSIONSTREAM-005 completely, remove the old heartbeat mechanism, maintain detailed chronological evidence, and make focused commits at meaningful milestones.
+
+**Inferred user intent:** Turn the theoretical design into production code while preserving compatibility and avoiding another long sequence of unstructured concurrency patches.
+
+**Commit (code):** d0693bf1d4990261f2ef3abe2ca45bc9ab94f161 — "feat(ws): add heartbeat failure detector kernel"
+
+### What I did
+
+- Created branch `task/sessionstream-005-heartbeat-machine` from PR #10 head `21724ab` so the new work does not alter the active PR branch.
+- Committed the ticket design bundle separately as `1d1b0e9`.
+- Added `pkg/sessionstream/transport/ws/internal/heartbeat/machine.go`.
+- Defined six phases, seven event kinds, nine action kinds, explicit state snapshots, configuration, and typed errors.
+- Implemented exact nonce and generation matching.
+- Defined a pong at or after its deadline as late/stale.
+- Made matching timer events before their deadline return `ErrEarlyDeadline`.
+- Made `Stopped` absorbing and cancellation explicit when stopping from `Awaiting`.
+- Added characterization coverage for protobuf JSON ping/pong frames and all default `ConnectionConfig` values.
+- Added deterministic transition, boundary, stale-event, write-failure, stop, generation, exhaustive phase/event, and fuzz tests.
+
+### Why
+
+- Compatibility fixtures provide evidence that the later integration does not drift public behavior.
+- A pure kernel permits correctness testing without `time.Sleep` or scheduler assumptions.
+- Local generation identity makes stale timer and write-completion events harmless even when nonce values are opaque.
+- Ordered actions separate policy effects from transition mechanics.
+
+### What worked
+
+- The kernel passed 100 race-enabled repetitions before commit.
+- The kernel and current transport passed 20 race-enabled repetitions together.
+- Repository lint passed with zero issues after exhaustive-switch corrections.
+- Full pre-commit tests and lint passed.
+- The wire fixtures remain `{"ping":{"nonce":"n-1"}}` and `{"pong":{"nonce":"n-1"}}`.
+
+### What didn't work
+
+The first commit attempt failed because the repository enables the `exhaustive` linter. The exact findings were:
+
+```text
+pkg/sessionstream/transport/ws/internal/heartbeat/machine.go:156:2: missing cases in switch of type heartbeat.Phase: heartbeat.PhaseStopped (exhaustive)
+pkg/sessionstream/transport/ws/internal/heartbeat/machine.go:173:2: missing cases in switch of type heartbeat.EventKind: heartbeat.EventTick, heartbeat.EventPingWritten, heartbeat.EventPingWriteFailed, heartbeat.EventDeadlineElapsed, heartbeat.EventStop (exhaustive)
+pkg/sessionstream/transport/ws/internal/heartbeat/machine.go:185:2: missing cases in switch of type heartbeat.EventKind: heartbeat.EventReady, heartbeat.EventPingWritten, heartbeat.EventPingWriteFailed, heartbeat.EventDeadlineElapsed, heartbeat.EventStop (exhaustive)
+pkg/sessionstream/transport/ws/internal/heartbeat/machine.go:201:2: missing cases in switch of type heartbeat.EventKind: heartbeat.EventReady, heartbeat.EventTick, heartbeat.EventDeadlineElapsed, heartbeat.EventStop (exhaustive)
+pkg/sessionstream/transport/ws/internal/heartbeat/machine.go:226:2: missing cases in switch of type heartbeat.EventKind: heartbeat.EventReady, heartbeat.EventTick, heartbeat.EventStop (exhaustive)
+pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go:248:2: missing cases in switch of type heartbeat.Phase: heartbeat.PhaseBooting, heartbeat.PhaseIdle, heartbeat.PhaseSuspected, heartbeat.PhaseStopped (exhaustive)
+```
+
+I corrected each switch to enumerate every known enum value explicitly, reran focused race tests and `make lint`, and only then committed.
+
+### What I learned
+
+- The exhaustive linter reinforces the state-machine goal: newly added phases or events force a compile-time-adjacent review of every transition function.
+- Keeping nonce creation outside the reducer preserves purity; `EventTick` carries a prepared nonce while the reducer owns generation advancement.
+- Separating `PhaseWriting` from `PhaseAwaiting` is necessary to prove that no pong timeout exists before write acknowledgement.
+
+### What was tricky to build
+
+The boundary between late pong and timeout cannot depend on Go `select` ordering. The reducer stores the successful write timestamp and exact deadline, then compares the pong event timestamp to that deadline. A pong exactly at the deadline is intentionally stale. A matching timer event timestamped before the deadline is an invariant error rather than a suspicion transition.
+
+The fuzz test also needs to accept arbitrary event order without weakening state invariants. Illegal or stale runtime combinations generally become no-ops, while structurally impossible timing such as an early matching deadline produces a typed error for adapter-level handling.
+
+### What warrants a second pair of eyes
+
+- Confirm the “pong exactly at deadline is late” boundary policy.
+- Confirm that write failure should use `PhaseSuspected` while retaining a distinct joined `ErrPingWriteFailed` reason.
+- Review whether unknown numeric enum values should return invariant errors in every phase; known stale events are intentionally ignored.
+- Review the decision to have the adapter prepare nonce identity before `EventTick` rather than add a separate nonce-generation action.
+
+### What should be done in the future
+
+- Integrate one per-connection supervisor around the kernel.
+- Replace the old pong channel, ticker loop, and direct timeout-close behavior.
+- Isolate heartbeat-critical observation from synchronous callbacks.
+
+### Code review instructions
+
+- Start with `machine.go` types and the transition table in the design guide.
+- Compare `Machine.Step` and each phase handler against HB-1 through HB-10.
+- Run `GOWORK=off go test -race ./pkg/sessionstream/transport/ws/internal/heartbeat -count=100`.
+- Review `TestEveryPhaseEventCombinationIsDefined` and `FuzzMachinePreservesInvariants` for complete state-space pressure.
+
+### Technical details
+
+```text
+Kernel input:  Event{Kind, At, Generation, Nonce, Err}
+Kernel output: []Action in execution order
+Timeout basis: PingWritten.At + PongTimeout
+Challenge identity: monotonically increasing generation + opaque nonce
 ```

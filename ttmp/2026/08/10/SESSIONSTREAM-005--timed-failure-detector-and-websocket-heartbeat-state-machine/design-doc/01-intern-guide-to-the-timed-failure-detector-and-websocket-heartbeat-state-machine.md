@@ -17,6 +17,10 @@ RelatedFiles:
       Note: Domain pipeline and UI fanout ownership boundary
     - Path: repo://pkg/sessionstream/hydration.go
       Note: Snapshot contract whose blocking behavior must not starve heartbeat processing
+    - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine.go
+      Note: Pure timed failure-detector reducer and state-event-action contract
+    - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go
+      Note: Deterministic transition matrix, boundary, stale-event, and fuzz coverage
     - Path: repo://pkg/sessionstream/transport/ws/observer.go
       Note: Current synchronous transport observation contract and control-path interference boundary
     - Path: repo://pkg/sessionstream/transport/ws/server.go
@@ -35,6 +39,7 @@ LastUpdated: 2026-08-10T20:10:00-04:00
 WhatFor: Designing, implementing, reviewing, and testing Sessionstream WebSocket heartbeat behavior without relying on timing-sensitive channel interactions.
 WhenToUse: Before changing heartbeat, connection lifecycle, observer dispatch, shutdown, or WebSocket control-frame handling in pkg/sessionstream/transport/ws.
 ---
+
 
 
 # Intern Guide to the Timed Failure Detector and WebSocket Heartbeat State Machine
