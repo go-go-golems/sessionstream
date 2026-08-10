@@ -13,8 +13,14 @@ Owners: []
 RelatedFiles:
     - Path: repo://README.md
       Note: Operational documentation completed in Step 5
+    - Path: repo://pkg/sessionstream/bus_test.go
+      Note: Per-session ordering assertion corrected in Step 8
+    - Path: repo://pkg/sessionstream/hub_test.go
+      Note: Race-safe shared hydration and event-store fixture from Step 8
     - Path: repo://pkg/sessionstream/transport/ws/heartbeat.go
       Note: Integrated supervisor in Step 4 at commit dbfbf02
+    - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/logcopter.go
+      Note: Generated package metadata required by CI
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine.go
       Note: Implemented in Step 3 at commit d0693bf
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go
@@ -36,6 +42,7 @@ LastUpdated: 2026-08-10T20:10:00-04:00
 WhatFor: Continuing the heartbeat state-machine implementation with evidence, decisions, validation commands, and review guidance intact.
 WhenToUse: Read before implementing or reviewing SESSIONSTREAM-005.
 ---
+
 
 
 
@@ -756,4 +763,144 @@ Commit: a7a49e4
 Seed regressions: 100 ordinary + 100 race-enabled
 Campaign: 60 seconds, 111066 executions, PASS
 Production changes: none
+```
+
+## Step 8: Complete repository and release validation
+
+This step completed the shipment-oriented validation after fuzzing. It also repaired two pre-existing test-fixture defects that prevented high-confidence repeated and repository-wide race runs from becoming clean evidence.
+
+All configured CI checks, full tests, build/generation, vet, lint, vulnerability analysis, JavaScript syntax checks, repository-wide race tests, temporary-workspace tests, hooks, and release snapshot now pass, with one separately documented local gosec loader limitation.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 6)
+
+**Assistant interpretation:** Finish the requested design/fuzz work without losing the broader heartbeat shipment gate, and document every validation failure and correction.
+
+**Inferred user intent:** Ship a clean, reproducible branch rather than stopping after one successful fuzz command.
+
+**Commit (test fixtures):** 18812254e824d287d60bf8ecbb8e274d7e6d3d86 — "test: stabilize concurrent bus fixtures"
+
+**Commit (generated metadata):** 217ab0b0a06a408e84a4140cb718b4dcfe7f1118 — "chore: generate heartbeat package logging metadata"
+
+### What I did
+
+- Ran repository-wide race tests.
+- Added locking to the shared in-memory hydration/event-store fixture after the race detector identified concurrent map and protobuf clone access.
+- Corrected a GoChannel test to assert ordering within session `s-a`, not callback order across independently consumed sessions.
+- Ran the sessionstream package 100 times and 20 times under race detection.
+- Ran `make ci-check`, including format, lint, boundary, schema-vet, logcopter, glazed-lint, tests, generation, and build.
+- Generated required `internal/heartbeat/logcopter.go` metadata.
+- Ran `govulncheck ./...` with no reachable vulnerabilities.
+- Ran all changed shipped JavaScript clients through `node --check`.
+- Ran the complete pre-push hook, including test, lint, and GoReleaser snapshot.
+- Ran a fresh full repository race test after fuzz implementation.
+- Tested and built through a temporary standalone `go.work` after the parent workspace rejected this worktree because it is not listed.
+
+### Why
+
+- The ticket's completion criteria require evidence beyond focused reducer tests.
+- Existing fixture races made a full race command fail even though the runtime heartbeat packages were clean; fixing the fixture produces durable repository-wide evidence.
+- Cross-session callback order is not a GoChannel contract, while per-session stream ordinal order is.
+- New packages must participate in repository generation conventions.
+
+### What worked
+
+- `make ci-check` passed completely after generation.
+- `GOWORK=off go test -race ./... -count=1` passed completely.
+- `GOWORK=off go test ./pkg/sessionstream -count=100` passed.
+- `GOWORK=off go test -race ./pkg/sessionstream -count=20` passed.
+- `govulncheck ./...` reported no vulnerabilities in called code.
+- All six JavaScript syntax checks passed.
+- Pre-push tests, lint, and release snapshot passed.
+- Temporary-workspace full tests and build passed.
+- GoReleaser produced the `0.1.1-next` Linux archive successfully.
+
+### What didn't work
+
+The first full race run reproduced the historical test-helper race:
+
+```text
+WARNING: DATA RACE
+Write: (*testHydrationStore).Apply at pkg/sessionstream/hub_test.go:384
+Read:  (*testHydrationStore).Cursor at pkg/sessionstream/hub_test.go:409
+Test:  TestHubEventBusFallsBackWithoutStreamID
+```
+
+Adding one `sync.RWMutex` around snapshot and event fixture state removed both map races and concurrent protobuf-clone races. One hundred focused race runs and the full race suite then passed.
+
+A subsequent 20-run package test exposed the known cross-session ordering assumption:
+
+```text
+TestHubEventBusGoChannelRoundTrip
+"1700000000000000002" is not greater than "1700000000000000003"
+```
+
+The consumer may interleave different sessions. The test now filters consumed records to `s-a` and asserts order only for that session.
+
+The first `make ci-check` failed with:
+
+```text
+logcopter-gen: generated file is not current:
+pkg/sessionstream/transport/ws/internal/heartbeat/logcopter.go
+```
+
+Running `make logcopter-generate` created the expected package metadata; the rerun passed.
+
+The repository's `make gosec` command reported zero security issues but exited nonzero because the locally installed `gosec` identifies itself as `dev` and failed package loading for internal-package imports:
+
+```text
+could not import .../transport/ws/internal/heartbeat (invalid package name: "")
+use of internal package .../internal/xgojaruntime not allowed
+Issues : 0
+```
+
+This is a scanner/package-loader limitation rather than a reported finding. `govulncheck`, configured lint, build, tests, and prior GitHub security jobs provide the usable security evidence; the branch should run GitHub's gosec job when pushed.
+
+Direct workspace mode initially failed because the parent `go.work` does not list `sessionstream-p111`:
+
+```text
+pattern ./pkg/sessionstream/transport/ws/...: directory prefix ... does not contain modules listed in go.work
+```
+
+A temporary `go.work` containing this module passed full tests and build, while `GOWORK=off` remained the repository's configured mode.
+
+### What I learned
+
+- High-repetition validation can turn “known flaky” behavior into a precise contract correction.
+- Repository generation checks are effective at keeping even logic-only internal packages integrated with logging metadata.
+- Workspace validation must distinguish source failure from a parent workspace that simply does not include the worktree.
+
+### What was tricky to build
+
+The hydration fixture embeds the same store in event-store tests, so one mutex needed to protect snapshots, cloned protobuf payloads, event cursor, events, and recorded errors without introducing nested-lock calls. `View` delegates to the already locked `Snapshot`, while direct methods take their own appropriate read or write lock.
+
+The GoChannel test needed to preserve its real assertion—stream-derived ordinals increase for one session—without imposing global consumer callback order across sessions.
+
+### What warrants a second pair of eyes
+
+- Review the fixture mutex coverage and ensure no test method recursively reacquires it.
+- Confirm the gosec package-loader failure reproduces independently of this branch before changing security tooling.
+- Review the final branch diff against `21724ab` before deciding whether to stack or fold it into PR #10.
+
+### What should be done in the future
+
+- Push the branch and run GitHub checks.
+- Decide whether SESSIONSTREAM-005 should be a stacked PR or folded into PR #10.
+
+### Code review instructions
+
+- Run `make ci-check` and `GOWORK=off go test -race ./... -count=1`.
+- Run `lefthook run pre-push` for release evidence.
+- Review `bus_test.go` and `hub_test.go` separately from heartbeat runtime code; they are validation-fixture repairs.
+
+### Technical details
+
+```text
+Configured CI: PASS
+Full repository race: PASS
+Temporary go.work test/build: PASS
+Govulncheck: no reachable vulnerabilities
+Pre-push release snapshot: PASS
+Local gosec: 0 issues, nonzero loader failure (documented)
 ```

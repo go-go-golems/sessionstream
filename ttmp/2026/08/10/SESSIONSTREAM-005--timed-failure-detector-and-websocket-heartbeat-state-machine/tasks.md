@@ -9,7 +9,7 @@
 - [x] Integrate reader and writer acknowledgements while preserving one-reader/one-writer ownership <!-- t:myhd -->
 - [x] Remove observer callbacks from heartbeat-critical paths with bounded best-effort dispatch <!-- t:9mm6 -->
 - [x] Remove the pong channel, latest-pong helper, ticker loop, and duplicate legacy heartbeat mechanics <!-- t:sfy1 -->
-- [ ] Run workspace and GOWORK=off tests, repeated race tests, vet, build, lint, vulnerability, hook, and release validation <!-- t:7tpx -->
+- [x] Run workspace and GOWORK=off tests, repeated race tests, vet, build, lint, vulnerability, hook, and release validation <!-- t:7tpx -->
 - [x] Update package and operational documentation with suspicion semantics, timeout tuning, and compatibility <!-- t:i37x -->
 - [x] Complete evidence-backed architecture analysis and intern implementation guide <!-- t:pyzo -->
 - [x] Create and maintain the investigation diary, file relations, and ticket changelog <!-- t:5vtl -->
