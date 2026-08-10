@@ -89,11 +89,12 @@ type Action struct {
 
 // State is an immutable snapshot of detector state.
 type State struct {
-	Phase      Phase
-	Generation uint64
-	Nonce      string
-	WrittenAt  time.Time
-	Deadline   time.Time
+	Phase         Phase
+	Generation    uint64
+	Nonce         string
+	WrittenAt     time.Time
+	Deadline      time.Time
+	PendingPongAt time.Time
 }
 
 // Config controls the fixed-threshold detector.
@@ -208,9 +209,20 @@ func (m *Machine) stepWriting(event Event) ([]Action, error) {
 			return nil, nil
 		}
 		deadline := event.At.Add(m.pongTimeout)
+		if !m.state.PendingPongAt.IsZero() && m.state.PendingPongAt.Before(deadline) {
+			pongAt := m.state.PendingPongAt
+			generation := m.state.Generation
+			nonce := m.state.Nonce
+			m.state = State{Phase: PhaseIdle, Generation: generation}
+			return []Action{
+				{Kind: ActionRecordPong, At: pongAt, Generation: generation, Nonce: nonce},
+				{Kind: ActionScheduleTick, At: pongAt, Generation: generation},
+			}, nil
+		}
 		m.state.Phase = PhaseAwaiting
 		m.state.WrittenAt = event.At
 		m.state.Deadline = deadline
+		m.state.PendingPongAt = time.Time{}
 		return []Action{{Kind: ActionArmDeadline, At: event.At, Generation: event.Generation, Nonce: event.Nonce, Deadline: deadline}}, nil
 	case EventPingWriteFailed:
 		if !m.matches(event) {
@@ -220,6 +232,10 @@ func (m *Machine) stepWriting(event Event) ([]Action, error) {
 		m.state.Phase = PhaseSuspected
 		return terminalActions(event, reason), nil
 	case EventPongReceived:
+		if event.Nonce == m.state.Nonce {
+			m.state.PendingPongAt = event.At
+			return nil, nil
+		}
 		return stalePongAction(event), nil
 	case EventReady, EventTick, EventDeadlineElapsed, EventStop:
 		return nil, nil

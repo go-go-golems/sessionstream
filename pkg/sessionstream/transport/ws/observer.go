@@ -96,7 +96,12 @@ type TransportRecord struct {
 	Err error
 }
 
-// TransportObserver receives best-effort websocket transport observations.
+const defaultObserverQueueSize = 1024
+
+// TransportObserver receives ordered, best-effort websocket transport
+// observations from a bounded dispatcher. Callbacks do not run on socket,
+// heartbeat, request, or connection-lifecycle critical paths. Implementations
+// should still return promptly so later diagnostic records can be delivered.
 type TransportObserver interface {
 	OnTransport(ctx context.Context, rec TransportRecord)
 }
@@ -118,13 +123,93 @@ func WithTransportObserver(observer TransportObserver) Option {
 	}
 }
 
+type observedTransportRecord struct {
+	ctx context.Context
+	rec TransportRecord
+}
+
+func (s *Server) startObserverDispatcher() {
+	if s == nil || s.observer == nil {
+		return
+	}
+	s.observerQueue = make(chan observedTransportRecord, defaultObserverQueueSize)
+	s.observerStop = make(chan struct{})
+	s.observerStopped = make(chan struct{})
+	go s.runObserverDispatcher()
+}
+
 func (s *Server) observe(ctx context.Context, rec TransportRecord) {
 	if s == nil || s.observer == nil {
 		return
 	}
-	safe := cloneTransportRecord(rec)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	item := observedTransportRecord{ctx: ctx, rec: cloneTransportRecord(rec)}
+	s.observerMu.Lock()
+	defer s.observerMu.Unlock()
+	if s.observerClosing || s.observerQueue == nil {
+		return
+	}
+	select {
+	case s.observerQueue <- item:
+	default:
+		s.observerDropped++
+	}
+}
+
+func (s *Server) runObserverDispatcher() {
+	defer close(s.observerStopped)
+	for {
+		select {
+		case item := <-s.observerQueue:
+			s.deliverObservation(item)
+		case <-s.observerStop:
+			for {
+				select {
+				case item := <-s.observerQueue:
+					s.deliverObservation(item)
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+func (s *Server) deliverObservation(item observedTransportRecord) {
 	defer func() { _ = recover() }()
-	s.observer.OnTransport(ctx, safe)
+	s.observer.OnTransport(item.ctx, item.rec)
+}
+
+func (s *Server) stopObserverDispatcher() {
+	if s == nil || s.observerStop == nil {
+		return
+	}
+	s.observerStopOnce.Do(func() {
+		s.observerMu.Lock()
+		s.observerClosing = true
+		close(s.observerStop)
+		s.observerMu.Unlock()
+	})
+}
+
+func (s *Server) waitObserverDispatcher() {
+	if s == nil || s.observerStopped == nil {
+		return
+	}
+	<-s.observerStopped
+}
+
+// ObserverDroppedRecords reports records discarded because the bounded
+// best-effort observer queue was full.
+func (s *Server) ObserverDroppedRecords() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.observerMu.Lock()
+	defer s.observerMu.Unlock()
+	return s.observerDropped
 }
 
 func cloneTransportRecord(in TransportRecord) TransportRecord {

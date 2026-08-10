@@ -39,6 +39,29 @@ func TestMatchingPongBeforeDeadlineReturnsIdle(t *testing.T) {
 	requireActionKinds(t, actions, ActionCancelDeadline, ActionRecordPong, ActionScheduleTick)
 }
 
+func TestMatchingPongProcessedBeforeWriteAckCompletesCycle(t *testing.T) {
+	m := readyMachine(t)
+	generation, nonce := beginChallenge(t, m, epoch, "nonce-1")
+	pongAt := epoch.Add(time.Second)
+	actions := step(t, m, Event{Kind: EventPongReceived, At: pongAt, Nonce: nonce})
+	require.Empty(t, actions)
+	require.Equal(t, PhaseWriting, m.State().Phase)
+	require.Equal(t, pongAt, m.State().PendingPongAt)
+
+	actions = step(t, m, Event{Kind: EventPingWritten, At: epoch, Generation: generation, Nonce: nonce})
+	require.Equal(t, PhaseIdle, m.State().Phase)
+	requireActionKinds(t, actions, ActionRecordPong, ActionScheduleTick)
+}
+
+func TestNonmatchingPongWhileWritingIsStale(t *testing.T) {
+	m := readyMachine(t)
+	_, _ = beginChallenge(t, m, epoch, "current")
+	actions := step(t, m, Event{Kind: EventPongReceived, At: epoch, Nonce: "old"})
+	require.Equal(t, PhaseWriting, m.State().Phase)
+	require.True(t, m.State().PendingPongAt.IsZero())
+	requireActionKinds(t, actions, ActionRecordStalePong)
+}
+
 func TestPongAtOrAfterDeadlineIsStale(t *testing.T) {
 	for _, offset := range []time.Duration{5 * time.Second, 5*time.Second + time.Nanosecond} {
 		t.Run(offset.String(), func(t *testing.T) {
