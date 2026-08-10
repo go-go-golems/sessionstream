@@ -1,7 +1,7 @@
 ---
 Title: Timed Failure Detector and WebSocket Heartbeat State Machine
 Ticket: SESSIONSTREAM-005
-Status: active
+Status: complete
 Topics:
     - websocket
     - architecture
@@ -14,10 +14,11 @@ RelatedFiles: []
 ExternalSources:
     - https://github.com/go-go-golems/sessionstream/pull/10
 Summary: Build a deterministic timed failure-detector state machine and per-connection supervisor for Sessionstream application-level WebSocket heartbeat handling.
-LastUpdated: 2026-08-10T20:10:00-04:00
+LastUpdated: 2026-08-10T18:13:33.405605492-04:00
 WhatFor: Tracking design and implementation of explicit, testable WebSocket heartbeat semantics.
 WhenToUse: Use this ticket for all work that extracts heartbeat state from ad hoc timers and pong channels into a pure reducer and supervisor.
 ---
+
 
 # Timed Failure Detector and WebSocket Heartbeat State Machine
 
