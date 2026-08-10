@@ -854,6 +854,64 @@ func TestTransportObserverQueueIsBoundedAndReportsDrops(t *testing.T) {
 	require.NoError(t, server.Close(ctx))
 }
 
+func TestTransportObserverQueueDetachesCancellationAndPreservesValues(t *testing.T) {
+	type observerContextKey struct{}
+	type observedContext struct {
+		value       string
+		err         error
+		hasDeadline bool
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	observed := make(chan observedContext, 1)
+	observer := TransportObserverFunc(func(ctx context.Context, record TransportRecord) {
+		if record.Stage == TransportStageConnected {
+			close(entered)
+			<-release
+			return
+		}
+		if record.Stage == TransportStageClientFrameRead {
+			_, hasDeadline := ctx.Deadline()
+			value, _ := ctx.Value(observerContextKey{}).(string)
+			observed <- observedContext{
+				value:       value,
+				err:         ctx.Err(),
+				hasDeadline: hasDeadline,
+			}
+		}
+	})
+	server, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{}, nil
+	}), WithTransportObserver(observer))
+	require.NoError(t, err)
+
+	server.observe(context.Background(), TransportRecord{Stage: TransportStageConnected})
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("observer dispatcher did not enter blocking callback")
+	}
+
+	parent, cancel := context.WithTimeout(context.WithValue(context.Background(), observerContextKey{}, "request-value"), time.Hour)
+	server.observe(parent, TransportRecord{Stage: TransportStageClientFrameRead})
+	cancel()
+	close(release)
+
+	select {
+	case got := <-observed:
+		require.Equal(t, "request-value", got.value)
+		require.NoError(t, got.err)
+		require.False(t, got.hasDeadline)
+	case <-time.After(time.Second):
+		t.Fatal("observer dispatcher did not drain accepted record")
+	}
+
+	ctx, closeCancel := context.WithTimeout(context.Background(), time.Second)
+	defer closeCancel()
+	require.NoError(t, server.Close(ctx))
+}
+
 func TestTransportObserverBadClientFrameAndPanicRecovery(t *testing.T) {
 	records := newRecordingTransportObserver()
 	panicObserver := TransportObserverFunc(func(ctx context.Context, rec TransportRecord) {

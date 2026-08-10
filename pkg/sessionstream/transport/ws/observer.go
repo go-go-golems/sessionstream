@@ -100,8 +100,11 @@ const defaultObserverQueueSize = 1024
 
 // TransportObserver receives ordered, best-effort websocket transport
 // observations from a bounded dispatcher. Callbacks do not run on socket,
-// heartbeat, request, or connection-lifecycle critical paths. Implementations
-// should still return promptly so later diagnostic records can be delivered.
+// heartbeat, request, or connection-lifecycle critical paths. Observer contexts
+// preserve values from the emitting operation but are detached from its
+// cancellation and deadline so accepted records remain deliverable after that
+// operation returns. Implementations should still return promptly so later
+// diagnostic records can be delivered.
 type TransportObserver interface {
 	OnTransport(ctx context.Context, rec TransportRecord)
 }
@@ -145,7 +148,7 @@ func (s *Server) observe(ctx context.Context, rec TransportRecord) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	item := observedTransportRecord{ctx: ctx, rec: cloneTransportRecord(rec)}
+	item := observedTransportRecord{ctx: context.WithoutCancel(ctx), rec: cloneTransportRecord(rec)}
 	s.observerMu.Lock()
 	defer s.observerMu.Unlock()
 	if s.observerClosing || s.observerQueue == nil {
