@@ -1,6 +1,7 @@
 import { fetchChapterHTML, fetchPhase4State, resetPhase4, runPhase4 } from "../api.js";
 import { byId, renderChecks, setHTML } from "../dom.js";
 import { renderClientFrames, renderConnectionSnapshot, renderError, renderTrace } from "../renderers.js";
+import { respondToHeartbeat } from "../websocket.js";
 
 const client = { socket: null, frames: [] };
 
@@ -72,7 +73,9 @@ function connectClient() {
   client.socket.onopen = () => renderClient({ status: "open", frames: client.frames });
   client.socket.onmessage = (event) => {
     try {
-      client.frames.push(JSON.parse(event.data));
+      const frame = JSON.parse(event.data);
+      respondToHeartbeat(client.socket, frame);
+      client.frames.push(frame);
     } catch {
       client.frames.push({ type: "raw", payload: event.data });
     }

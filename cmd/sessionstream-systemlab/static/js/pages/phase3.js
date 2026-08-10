@@ -1,6 +1,7 @@
 import { fetchChapterHTML, fetchPhase3State, resetPhase3, runPhase3 } from "../api.js";
 import { byId, renderChecks, setHTML } from "../dom.js";
 import { renderClientFrames, renderConnectionSnapshot, renderError, renderTrace } from "../renderers.js";
+import { respondToHeartbeat } from "../websocket.js";
 
 const clients = {
   a: makeClientState(),
@@ -83,7 +84,9 @@ function connectClient(name) {
   client.socket.onopen = () => renderClient(name, { status: "open", frames: client.frames });
   client.socket.onmessage = (event) => {
     try {
-      client.frames.push(JSON.parse(event.data));
+      const frame = JSON.parse(event.data);
+      respondToHeartbeat(client.socket, frame);
+      client.frames.push(frame);
     } catch {
       client.frames.push({ type: "raw", payload: event.data });
     }

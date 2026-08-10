@@ -87,6 +87,10 @@ function connectWebSocket(sessionId) {
   };
   ws.onmessage = (ev) => {
     const frame = JSON.parse(ev.data);
+    if (frame.ping) {
+      ws.send(JSON.stringify({ pong: { nonce: frame.ping.nonce || "" } }));
+      return;
+    }
     if (frame.hello) statusEl.textContent = "connected as " + frame.hello.connectionId + " · session " + sessionId;
     if (frame.snapshot) {
       for (const ent of frame.snapshot.entities || []) upsertFromPayload(payloadOf(ent));

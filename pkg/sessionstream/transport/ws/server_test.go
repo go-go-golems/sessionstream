@@ -199,6 +199,58 @@ func TestHeartbeatPongKeepsConnectionAlive(t *testing.T) {
 	require.NotEmpty(t, second.GetPing().GetNonce())
 }
 
+func TestHeartbeatPongIsProcessedWhileSnapshotHydrationBlocks(t *testing.T) {
+	config := DefaultConnectionConfig()
+	config.HeartbeatInterval = 10 * time.Millisecond
+	config.PongTimeout = 25 * time.Millisecond
+
+	snapshotStarted := make(chan struct{})
+	releaseSnapshot := make(chan struct{})
+	server, err := NewServer(snapshotProviderFunc(func(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		close(snapshotStarted)
+		select {
+		case <-releaseSnapshot:
+			return sessionstream.Snapshot{SessionId: sid}, nil
+		case <-ctx.Done():
+			return sessionstream.Snapshot{}, ctx.Err()
+		}
+	}), WithConnectionConfig(config))
+	require.NoError(t, err)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer func() { require.NoError(t, conn.Close()) }()
+	_ = readServerFrame(t, conn) // hello
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "slow-snapshot"}}})
+	select {
+	case <-snapshotStarted:
+	case <-time.After(time.Second):
+		t.Fatal("snapshot hydration did not start")
+	}
+
+	time.AfterFunc(4*config.PongTimeout, func() { close(releaseSnapshot) })
+	pingCount := 0
+	snapshotSeen := false
+	for {
+		frame := readServerFrame(t, conn)
+		switch {
+		case frame.GetPing() != nil:
+			pingCount++
+			writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Pong{Pong: &sessionstreamv1.PongFrame{Nonce: frame.GetPing().GetNonce()}}})
+		case frame.GetSnapshot() != nil:
+			require.Equal(t, "slow-snapshot", frame.GetSnapshot().GetSessionId())
+			snapshotSeen = true
+		case frame.GetSubscribed() != nil:
+			require.True(t, snapshotSeen)
+			require.GreaterOrEqual(t, pingCount, 2)
+			return
+		case frame.GetError() != nil:
+			t.Fatalf("unexpected protocol error while hydrating: %s", frame.GetError().GetMessage())
+		}
+	}
+}
+
 func TestReadLimitClosesOversizedClientFrame(t *testing.T) {
 	records := newRecordingTransportObserver()
 	config := DefaultConnectionConfig()

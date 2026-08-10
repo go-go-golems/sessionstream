@@ -146,13 +146,14 @@ type Server struct {
 }
 
 type connection struct {
-	id     sessionstream.ConnectionId
-	ws     *websocket.Conn
-	send   chan outboundFrame
-	close  sync.Once
-	closed atomic.Bool
-	done   chan struct{}
-	pongs  chan string
+	id       sessionstream.ConnectionId
+	ws       *websocket.Conn
+	send     chan outboundFrame
+	close    sync.Once
+	closed   atomic.Bool
+	done     chan struct{}
+	pongs    chan string
+	requests chan *sessionstreamv1.ClientFrame
 
 	mu   sync.RWMutex
 	subs map[sessionstream.SessionId]subscription
@@ -219,6 +220,9 @@ func NewServer(snapshots SnapshotProvider, opts ...Option) (*Server, error) {
 
 // ServeHTTP upgrades a connection and serves the websocket protocol.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.observe(r.Context(), TransportRecord{Stage: TransportStageUpgradeError, Err: err})
@@ -226,12 +230,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	cid := sessionstream.ConnectionId(fmt.Sprintf("conn-%d", atomic.AddUint64(&s.nextID, 1)))
 	c := &connection{
-		id:    cid,
-		ws:    conn,
-		send:  make(chan outboundFrame, s.connectionConfig.SendQueueSize),
-		subs:  map[sessionstream.SessionId]subscription{},
-		done:  make(chan struct{}),
-		pongs: make(chan string, 1),
+		id:       cid,
+		ws:       conn,
+		send:     make(chan outboundFrame, s.connectionConfig.SendQueueSize),
+		subs:     map[sessionstream.SessionId]subscription{},
+		done:     make(chan struct{}),
+		pongs:    make(chan string, 1),
+		requests: make(chan *sessionstreamv1.ClientFrame, s.connectionConfig.SendQueueSize),
 	}
 	s.mu.Lock()
 	s.conns[cid] = c
@@ -244,13 +249,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.closeConnection(c)
 		return
 	}
-	s.wg.Add(3)
+	s.wg.Add(4)
 	s.lifecycleMu.Unlock()
 	defer s.wg.Done()
-	go func() { defer s.wg.Done(); s.writeLoop(r.Context(), c) }()
-	go func() { defer s.wg.Done(); s.heartbeatLoop(r.Context(), c) }()
+	go func() { defer s.wg.Done(); s.writeLoop(ctx, c) }()
+	go func() { defer s.wg.Done(); s.heartbeatLoop(ctx, c) }()
+	go func() { defer s.wg.Done(); s.requestLoop(ctx, c) }()
 	_ = s.sendFrame(c, newHelloFrame(cid))
-	s.readLoop(r.Context(), c)
+	s.readLoop(ctx, c)
 	s.closeConnection(c)
 }
 
@@ -298,6 +304,7 @@ func (s *Server) Connections() []ConnectionInfo {
 
 func (s *Server) readLoop(ctx context.Context, c *connection) {
 	c.ws.SetReadLimit(s.connectionConfig.MaxReadBytes)
+	defer close(c.requests)
 	for {
 		select {
 		case <-ctx.Done():
@@ -317,26 +324,60 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			continue
 		}
 		s.observe(ctx, clientFrameRecord(TransportStageClientFrameDecoded, c.id, frame, len(raw)))
-		if err := s.handleClientFrame(ctx, c, frame); err != nil {
+		switch typed := frame.GetFrame().(type) {
+		case *sessionstreamv1.ClientFrame_Ping:
+			if err := s.sendFrame(c, newPongFrame(typed.Ping.GetNonce())); err != nil {
+				return
+			}
+			continue
+		case *sessionstreamv1.ClientFrame_Pong:
+			select {
+			case c.pongs <- typed.Pong.GetNonce():
+			default:
+			}
+			s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatPongReceived, Direction: FrameDirectionClientToServer, ConnectionId: c.id, FrameType: "pong"})
+			continue
+		}
+		select {
+		case c.requests <- frame:
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
+		default:
+			err := fmt.Errorf("connection %s client request queue full", c.id)
 			rec := clientFrameRecord(TransportStageProtocolError, c.id, frame, 0)
 			rec.Err = err
 			s.observe(ctx, rec)
-			_ = s.sendFrame(c, newErrorFrame("protocol_error", err.Error(), ""))
+			_ = s.sendFrame(c, newErrorFrame("request_queue_full", err.Error(), ""))
+			return
 		}
 	}
 }
 
-func (s *Server) handleClientFrame(ctx context.Context, c *connection, frame *sessionstreamv1.ClientFrame) error {
-	switch typed := frame.GetFrame().(type) {
-	case *sessionstreamv1.ClientFrame_Ping:
-		return s.sendFrame(c, newPongFrame(typed.Ping.GetNonce()))
-	case *sessionstreamv1.ClientFrame_Pong:
+func (s *Server) requestLoop(ctx context.Context, c *connection) {
+	for {
 		select {
-		case c.pongs <- typed.Pong.GetNonce():
-		default:
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
+		case frame, ok := <-c.requests:
+			if !ok {
+				return
+			}
+			if err := s.handleRequestFrame(ctx, c, frame); err != nil {
+				rec := clientFrameRecord(TransportStageProtocolError, c.id, frame, 0)
+				rec.Err = err
+				s.observe(ctx, rec)
+				_ = s.sendFrame(c, newErrorFrame("protocol_error", err.Error(), ""))
+			}
 		}
-		s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatPongReceived, Direction: FrameDirectionClientToServer, ConnectionId: c.id, FrameType: "pong"})
-		return nil
+	}
+}
+
+func (s *Server) handleRequestFrame(ctx context.Context, c *connection, frame *sessionstreamv1.ClientFrame) error {
+	switch typed := frame.GetFrame().(type) {
 	case *sessionstreamv1.ClientFrame_Subscribe:
 		sub := typed.Subscribe
 		sid := sessionstream.SessionId(sub.GetSessionId())
