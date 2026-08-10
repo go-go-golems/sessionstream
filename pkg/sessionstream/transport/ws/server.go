@@ -151,6 +151,7 @@ type connection struct {
 	send     chan outboundFrame
 	close    sync.Once
 	closed   atomic.Bool
+	queueMu  sync.Mutex
 	done     chan struct{}
 	pongs    chan string
 	requests chan *sessionstreamv1.ClientFrame
@@ -268,7 +269,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.lifecycleMu.Unlock()
 	go func() { defer s.wg.Done(); s.writeLoop(ctx, c) }()
 	go func() { defer s.wg.Done(); s.heartbeatLoop(ctx, c) }()
-	go func() { defer s.wg.Done(); s.requestLoop(ctx, c) }()
+	go func() { defer s.wg.Done(); s.runRequestLoop(ctx, c) }()
 	_ = s.sendFrame(c, newHelloFrame(cid))
 	s.readLoop(ctx, c)
 	s.closeConnection(c)
@@ -367,6 +368,17 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			return
 		}
 	}
+}
+
+func (s *Server) runRequestLoop(ctx context.Context, c *connection) {
+	defer func() {
+		if recover() != nil {
+			err := fmt.Errorf("connection %s request worker panic", c.id)
+			s.observe(ctx, TransportRecord{Stage: TransportStageProtocolError, ConnectionId: c.id, Err: err})
+			s.closeConnection(c)
+		}
+	}()
+	s.requestLoop(ctx, c)
 }
 
 func (s *Server) requestLoop(ctx context.Context, c *connection) {
@@ -558,7 +570,11 @@ func (s *Server) closeConnection(c *connection) {
 		return
 	}
 	c.close.Do(func() {
+		c.queueMu.Lock()
+		c.closed.Store(true)
 		close(c.done)
+		c.queueMu.Unlock()
+
 		c.mu.Lock()
 		subs := make([]sessionstream.SessionId, 0, len(c.subs))
 		for sid := range c.subs {
@@ -577,7 +593,6 @@ func (s *Server) closeConnection(c *connection) {
 		}
 		s.mu.Unlock()
 
-		c.closed.Store(true)
 		if c.ws != nil {
 			_ = c.ws.Close()
 		}
@@ -795,24 +810,25 @@ func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, w
 	if c == nil {
 		return fmt.Errorf("connection is nil")
 	}
-	if c.closed.Load() {
-		return fmt.Errorf("connection %s is closed", c.id)
-	}
 	body, err := marshalOptions.Marshal(frame)
 	if err != nil {
 		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameMarshalError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, Err: err})
 		return err
 	}
+	c.queueMu.Lock()
+	if c.closed.Load() {
+		c.queueMu.Unlock()
+		return fmt.Errorf("connection %s is closed", c.id)
+	}
 	queueLen := len(c.send)
 	queueCap := cap(c.send)
 	select {
 	case c.send <- outboundFrame{body: body, frameType: frameType, written: written}:
+		c.queueMu.Unlock()
 		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameQueued, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, RawBytes: len(body), QueueLen: queueLen, QueueCap: queueCap})
 		return nil
 	default:
-		if c.closed.Load() {
-			return fmt.Errorf("connection %s is closed", c.id)
-		}
+		c.queueMu.Unlock()
 		err := fmt.Errorf("connection %s send buffer full", c.id)
 		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameQueueFull, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, RawBytes: len(body), QueueLen: queueLen, QueueCap: queueCap, Err: err})
 		return err

@@ -341,6 +341,29 @@ func TestSubscribeAuthorizerDeniesBeforeHydration(t *testing.T) {
 	require.Contains(t, records.stages(), TransportStageSubscribeDenied)
 }
 
+func TestRequestWorkerPanicClosesOnlyAffectedConnection(t *testing.T) {
+	records := newRecordingTransportObserver()
+	_, server := newTestHubAndServerWithOptions(t,
+		WithTransportObserver(records),
+		WithSubscribeAuthorizer(func(context.Context, sessionstream.SessionId) error {
+			panic("authorizer panic must not escape request worker")
+		}),
+	)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	conn := dialWS(t, httpServer.URL)
+	defer func() { _ = conn.Close() }()
+	_ = readServerFrame(t, conn)
+	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Subscribe{Subscribe: &sessionstreamv1.SubscribeRequest{SessionId: "panic"}}})
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	_, _, err := conn.ReadMessage()
+	require.Error(t, err)
+	require.Eventually(t, func() bool {
+		return len(server.Connections()) == 0 && containsStage(records.stages(), TransportStageProtocolError)
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestLiveQueueOverflowClosesConnection(t *testing.T) {
 	records := newRecordingTransportObserver()
 	server, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
@@ -507,6 +530,20 @@ func TestServerCloseDeadlineIncludesBlockingDisconnectObserver(t *testing.T) {
 	finalCtx, finalCancel := context.WithTimeout(context.Background(), time.Second)
 	defer finalCancel()
 	require.NoError(t, server.Close(finalCtx))
+}
+
+func TestSendFrameRejectsClosedConnection(t *testing.T) {
+	server, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{}, nil
+	}))
+	require.NoError(t, err)
+	conn := &connection{
+		id: "closed", send: make(chan outboundFrame, 1), done: make(chan struct{}), pongs: make(chan string, 1),
+		subs: map[sessionstream.SessionId]subscription{},
+	}
+	server.closeConnection(conn)
+	require.ErrorContains(t, server.sendFrame(conn, newHelloFrame(conn.id)), "is closed")
+	require.Empty(t, conn.send)
 }
 
 func TestServerCloseClosesUpgradedConnections(t *testing.T) {
