@@ -58,3 +58,13 @@ Corrected write/deadline event serialization, passed 300 focused and 100 full tr
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/heartbeat.go — Deadline queue tie policy
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/server.go — Timestamped writer completion
 
+
+## 2026-08-10
+
+Added the scoped design for state-aware heartbeat reducer fuzzing before implementation
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go — Planned implementation target
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/design-doc/02-pragmatic-stateful-fuzzing-plan-for-the-heartbeat-reducer.md — Pragmatic fuzzing design
+

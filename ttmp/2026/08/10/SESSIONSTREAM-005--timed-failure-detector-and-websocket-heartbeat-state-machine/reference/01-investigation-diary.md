@@ -580,3 +580,82 @@ Deadline tie policy:
   drain at most 8 admitted heartbeat events
   then apply generation-tagged deadline event
 ```
+
+## Step 6: Scope and publish the pragmatic fuzzing design
+
+This step documented a deliberately bounded improvement to the reducer fuzzer before changing its implementation. The plan strengthens useful state-space exploration without adding a formal-tool runtime, external property-testing dependency, generated production code, or mandatory long CI campaign.
+
+The design uses one mutation-friendly byte to encode an operation, identity mode, and time mode. A state-sensitive advance operation guarantees that mutations can traverse repeated healthy generations, while direct operations still inject stale identities, deadline boundaries, failures, duplicates, and stop.
+
+### Prompt Context
+
+**User prompt (verbatim):** "ok, create a design doc for the better fuzzing, while we are at it. Don't over do it, we still want to ship. Only stuff that is reasonable to add and interesting to document. Upload the design doc to remarkable. Then implement it and run it."
+
+**Assistant interpretation:** Add a concise design document for practical state-aware fuzzing, publish it to reMarkable, then implement exactly that limited scope and run a bounded native Go fuzz campaign.
+
+**Inferred user intent:** Capture the interesting verification reasoning while preventing fuzz infrastructure from delaying shipment.
+
+### What I did
+
+- Added `design-doc/02-pragmatic-stateful-fuzzing-plan-for-the-heartbeat-reducer.md`.
+- Documented the limitations of the existing nonce-mismatched fuzzer.
+- Defined a one-byte operation/identity/time encoding.
+- Defined a phase-sensitive happy-path advance operation.
+- Limited properties to state shape, error atomicity, monotonic generation, and stable action contracts.
+- Defined a readable seed corpus and a 60-second local campaign.
+- Explicitly rejected external frameworks, formal code generation, supervisor/socket fuzzing, and mandatory long CI fuzzing.
+- Related the design to the reducer and test implementation.
+- Validated frontmatter and ticket health.
+- Ran a reMarkable dry-run and uploaded the design PDF.
+
+### Why
+
+- The current fuzzer often stalls in `Writing` because generated write and pong nonces do not match the tick nonce.
+- A small state-aware decoder provides much better exploration without creating a second specification project.
+- Publishing the design first keeps implementation reviewable against an agreed boundary.
+
+### What worked
+
+- Frontmatter validation passed.
+- Ticket-scoped `docmgr doctor` passed.
+- The dry-run showed only the requested fuzzing design in the bundle.
+- Upload succeeded at `/ai/2026/08/10/SESSIONSTREAM-005/SESSIONSTREAM-005 Heartbeat Fuzzing Plan.pdf`.
+
+### What didn't work
+
+N/A
+
+### What I learned
+
+- Eight operations, four identity modes, and eight time modes fit exactly in one byte, which is both compact and friendly to Go's corpus minimizer.
+- A single state-aware operation is enough to make healthy multi-cycle traces reachable without hiding malformed direct-event combinations.
+
+### What was tricky to build
+
+The scope needed to avoid a tautological second reducer while still asserting more than “did not panic.” The plan therefore checks coarse action contracts and error atomicity, leaving exact transition order to the independent deterministic table tests already present.
+
+### What warrants a second pair of eyes
+
+- Review whether the identity-mode distribution gives enough matching events without making stale events rare.
+- Review the chosen 4,096-operation per-input bound.
+- Confirm a 60-second local campaign is sufficient for this shipment.
+
+### What should be done in the future
+
+- Implement the decoder, seeds, state/action assertions, and bounded input loop.
+- Run seed regressions, race regressions, and the 60-second fuzz campaign.
+- Preserve any generated failure as a corpus fixture and named regression if one appears.
+
+### Code review instructions
+
+- Compare the implementation directly against the operation, identity, and time tables in the fuzzing design.
+- Ensure all helpers remain in `_test.go` and production APIs remain unchanged.
+
+### Technical details
+
+```text
+bits 0..2: operation
+bits 3..4: identity mode
+bits 5..7: time mode
+campaign: go test -run='^$' -fuzz=FuzzMachinePreservesInvariants -fuzztime=60s
+```

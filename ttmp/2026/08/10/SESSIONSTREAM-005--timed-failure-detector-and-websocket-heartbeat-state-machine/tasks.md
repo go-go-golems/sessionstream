@@ -14,3 +14,4 @@
 - [x] Complete evidence-backed architecture analysis and intern implementation guide <!-- t:pyzo -->
 - [x] Create and maintain the investigation diary, file relations, and ticket changelog <!-- t:5vtl -->
 - [x] Validate ticket documentation and upload the design bundle to reMarkable <!-- t:4drb -->
+- [ ] Design and implement pragmatic state-aware heartbeat reducer fuzzing and run a bounded campaign <!-- t:kk99 -->
