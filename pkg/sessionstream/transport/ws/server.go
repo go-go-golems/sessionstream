@@ -224,8 +224,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	s.lifecycleMu.Lock()
+	if s.closing {
+		s.lifecycleMu.Unlock()
+		http.Error(w, "websocket server is closing", http.StatusServiceUnavailable)
+		return
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		s.lifecycleMu.Unlock()
 		s.observe(r.Context(), TransportRecord{Stage: TransportStageUpgradeError, Err: err})
 		return
 	}
@@ -242,16 +249,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.conns[cid] = c
 	s.mu.Unlock()
-	s.observe(r.Context(), TransportRecord{Stage: TransportStageConnected, ConnectionId: cid})
-
-	s.lifecycleMu.Lock()
-	if s.closing {
-		s.lifecycleMu.Unlock()
-		s.closeConnection(c)
-		return
-	}
 	s.wg.Add(4)
 	s.lifecycleMu.Unlock()
+	s.observe(r.Context(), TransportRecord{Stage: TransportStageConnected, ConnectionId: cid})
 	defer s.wg.Done()
 	go func() { defer s.wg.Done(); s.writeLoop(ctx, c) }()
 	go func() { defer s.wg.Done(); s.heartbeatLoop(ctx, c) }()
@@ -455,7 +455,15 @@ func (s *Server) handleRequestFrame(ctx context.Context, c *connection, frame *s
 
 func (s *Server) writeLoop(ctx context.Context, c *connection) {
 	defer s.closeConnection(c)
-	for msg := range c.send {
+	for {
+		var msg outboundFrame
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
+		case msg = <-c.send:
+		}
 		if err := c.ws.SetWriteDeadline(time.Now().Add(s.connectionConfig.WriteTimeout)); err != nil {
 			notifyFrameWritten(msg, err)
 			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
@@ -557,7 +565,6 @@ func (s *Server) closeConnection(c *connection) {
 		s.mu.Unlock()
 
 		c.closed.Store(true)
-		close(c.send)
 		if c.ws != nil {
 			_ = c.ws.Close()
 		}
@@ -767,7 +774,7 @@ func (s *Server) sendFrameTracked(c *connection, frame *sessionstreamv1.ServerFr
 	return written, nil
 }
 
-func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, written chan error) (err error) {
+func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, written chan error) error {
 	frameType := serverFrameType(frame)
 	if c == nil {
 		return fmt.Errorf("connection is nil")
@@ -780,11 +787,6 @@ func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, w
 		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameMarshalError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, Err: err})
 		return err
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("connection %s is closed", c.id)
-		}
-	}()
 	queueLen := len(c.send)
 	queueCap := cap(c.send)
 	select {

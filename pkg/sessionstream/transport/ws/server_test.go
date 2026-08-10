@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -353,6 +354,57 @@ func TestLiveQueueOverflowClosesConnection(t *testing.T) {
 	require.Error(t, server.PublishUI(context.Background(), "session-1", 1, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
 	require.Empty(t, server.Connections())
 	require.Contains(t, records.stages(), TransportStageServerFrameQueueFull)
+}
+
+func TestServerCloseWaitsForUpgradeRegistration(t *testing.T) {
+	upgradeEntered := make(chan struct{})
+	releaseUpgrade := make(chan struct{})
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool {
+		close(upgradeEntered)
+		<-releaseUpgrade
+		return true
+	}}
+	_, server := newTestHubAndServerWithOptions(t, WithUpgrader(upgrader))
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	type dialResult struct {
+		conn *websocket.Conn
+		err  error
+	}
+	dialDone := make(chan dialResult, 1)
+	go func() {
+		wsURL := "ws" + httpServer.URL[len("http"):]
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		dialDone <- dialResult{conn: conn, err: err}
+	}()
+	select {
+	case <-upgradeEntered:
+	case <-time.After(time.Second):
+		t.Fatal("websocket upgrade did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- server.Close(ctx) }()
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close returned before upgrade registration completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(releaseUpgrade)
+	result := <-dialDone
+	require.NoError(t, result.err)
+	defer func() { _ = result.conn.Close() }()
+	require.NoError(t, <-closeDone)
+	require.NoError(t, result.conn.SetReadDeadline(time.Now().Add(time.Second)))
+	for {
+		if _, _, err := result.conn.ReadMessage(); err != nil {
+			break
+		}
+	}
 }
 
 func TestServerCloseClosesUpgradedConnections(t *testing.T) {
