@@ -181,6 +181,7 @@ type subscription struct {
 type outboundFrame struct {
 	body      []byte
 	frameType string
+	written   chan error
 }
 
 // ConnectionInfo describes the current transport-visible state of one connection.
@@ -456,13 +457,16 @@ func (s *Server) writeLoop(ctx context.Context, c *connection) {
 	defer s.closeConnection(c)
 	for msg := range c.send {
 		if err := c.ws.SetWriteDeadline(time.Now().Add(s.connectionConfig.WriteTimeout)); err != nil {
+			notifyFrameWritten(msg, err)
 			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
 			return
 		}
 		if err := c.ws.WriteMessage(websocket.TextMessage, msg.body); err != nil {
+			notifyFrameWritten(msg, err)
 			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
 			return
 		}
+		notifyFrameWritten(msg, nil)
 		s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWritten, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body)})
 	}
 }
@@ -479,11 +483,23 @@ func (s *Server) heartbeatLoop(ctx context.Context, c *connection) {
 		case <-ticker.C:
 		}
 		nonce := fmt.Sprintf("%s-%d", c.id, time.Now().UnixNano())
-		if err := s.sendFrame(c, newPingFrame(nonce)); err != nil {
+		written, err := s.sendFrameTracked(c, newPingFrame(nonce))
+		if err != nil {
 			s.closeConnection(c)
 			return
 		}
 		s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatPingQueued, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: "ping"})
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
+		case err := <-written:
+			if err != nil {
+				s.closeConnection(c)
+				return
+			}
+		}
 		timer := time.NewTimer(s.connectionConfig.PongTimeout)
 		matched := false
 		for !matched {
@@ -739,7 +755,19 @@ func (s *Server) removeSubscription(c *connection, sid sessionstream.SessionId) 
 	s.mu.Unlock()
 }
 
-func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) (err error) {
+func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) error {
+	return s.queueFrame(c, frame, nil)
+}
+
+func (s *Server) sendFrameTracked(c *connection, frame *sessionstreamv1.ServerFrame) (<-chan error, error) {
+	written := make(chan error, 1)
+	if err := s.queueFrame(c, frame, written); err != nil {
+		return nil, err
+	}
+	return written, nil
+}
+
+func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, written chan error) (err error) {
 	frameType := serverFrameType(frame)
 	if c == nil {
 		return fmt.Errorf("connection is nil")
@@ -760,7 +788,7 @@ func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) (e
 	queueLen := len(c.send)
 	queueCap := cap(c.send)
 	select {
-	case c.send <- outboundFrame{body: body, frameType: frameType}:
+	case c.send <- outboundFrame{body: body, frameType: frameType, written: written}:
 		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameQueued, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, RawBytes: len(body), QueueLen: queueLen, QueueCap: queueCap})
 		return nil
 	default:
@@ -770,6 +798,12 @@ func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) (e
 		err := fmt.Errorf("connection %s send buffer full", c.id)
 		s.observe(context.Background(), TransportRecord{Stage: TransportStageServerFrameQueueFull, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: frameType, RawBytes: len(body), QueueLen: queueLen, QueueCap: queueCap, Err: err})
 		return err
+	}
+}
+
+func notifyFrameWritten(frame outboundFrame, err error) {
+	if frame.written != nil {
+		frame.written <- err
 	}
 }
 

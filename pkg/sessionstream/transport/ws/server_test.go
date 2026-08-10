@@ -199,6 +199,51 @@ func TestHeartbeatPongKeepsConnectionAlive(t *testing.T) {
 	require.NotEmpty(t, second.GetPing().GetNonce())
 }
 
+func TestHeartbeatTimeoutStartsAfterPingIsWritten(t *testing.T) {
+	records := newRecordingTransportObserver()
+	config := DefaultConnectionConfig()
+	config.HeartbeatInterval = 5 * time.Millisecond
+	config.PongTimeout = 10 * time.Millisecond
+	server, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{}, nil
+	}), WithConnectionConfig(config), WithTransportObserver(records))
+	require.NoError(t, err)
+	conn := &connection{
+		id: "backpressured", send: make(chan outboundFrame, 1), done: make(chan struct{}), pongs: make(chan string, 1),
+		subs: map[sessionstream.SessionId]subscription{},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	loopDone := make(chan struct{})
+	go func() {
+		server.heartbeatLoop(ctx, conn)
+		close(loopDone)
+	}()
+
+	var queued outboundFrame
+	select {
+	case queued = <-conn.send:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for heartbeat ping")
+	}
+	frame := &sessionstreamv1.ServerFrame{}
+	require.NoError(t, protojson.Unmarshal(queued.body, frame))
+	require.NotEmpty(t, frame.GetPing().GetNonce())
+
+	time.Sleep(4 * config.PongTimeout)
+	require.False(t, conn.closed.Load())
+	require.NotContains(t, records.stages(), TransportStageHeartbeatTimeout)
+
+	notifyFrameWritten(queued, nil)
+	conn.pongs <- frame.GetPing().GetNonce()
+	cancel()
+	select {
+	case <-loopDone:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat loop did not stop")
+	}
+}
+
 func TestHeartbeatPongIsProcessedWhileSnapshotHydrationBlocks(t *testing.T) {
 	config := DefaultConnectionConfig()
 	config.HeartbeatInterval = 10 * time.Millisecond
