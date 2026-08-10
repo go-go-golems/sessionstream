@@ -411,6 +411,99 @@ func TestServerCloseDeadlineIncludesUpgradeRegistration(t *testing.T) {
 	}
 }
 
+func TestServerObserverReportsConnectedBeforeConcurrentDisconnect(t *testing.T) {
+	connectedEntered := make(chan struct{})
+	releaseConnected := make(chan struct{})
+	var mu sync.Mutex
+	lifecycleStages := make([]TransportStage, 0, 2)
+	observer := TransportObserverFunc(func(_ context.Context, record TransportRecord) {
+		if record.Stage == TransportStageConnected {
+			close(connectedEntered)
+			<-releaseConnected
+		}
+		if record.Stage == TransportStageConnected || record.Stage == TransportStageDisconnected {
+			mu.Lock()
+			lifecycleStages = append(lifecycleStages, record.Stage)
+			mu.Unlock()
+		}
+	})
+	_, server := newTestHubAndServerWithOptions(t, WithTransportObserver(observer))
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+
+	type dialResult struct {
+		conn *websocket.Conn
+		err  error
+	}
+	dialDone := make(chan dialResult, 1)
+	go func() {
+		wsURL := "ws" + httpServer.URL[len("http"):]
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		dialDone <- dialResult{conn: conn, err: err}
+	}()
+	select {
+	case <-connectedEntered:
+	case <-time.After(time.Second):
+		t.Fatal("connected observation did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, server.Close(ctx), context.DeadlineExceeded)
+	mu.Lock()
+	require.Empty(t, lifecycleStages)
+	mu.Unlock()
+
+	close(releaseConnected)
+	result := <-dialDone
+	require.NoError(t, result.err)
+	defer func() { _ = result.conn.Close() }()
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), time.Second)
+	defer finalCancel()
+	require.NoError(t, server.Close(finalCtx))
+	mu.Lock()
+	require.Equal(t, []TransportStage{TransportStageConnected, TransportStageDisconnected}, lifecycleStages)
+	mu.Unlock()
+}
+
+func TestServerCloseDeadlineIncludesBlockingDisconnectObserver(t *testing.T) {
+	disconnectEntered := make(chan struct{})
+	releaseDisconnect := make(chan struct{})
+	observer := TransportObserverFunc(func(_ context.Context, record TransportRecord) {
+		if record.Stage == TransportStageDisconnected {
+			close(disconnectEntered)
+			<-releaseDisconnect
+		}
+	})
+	_, server := newTestHubAndServerWithOptions(t, WithTransportObserver(observer))
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	conn := dialWS(t, httpServer.URL)
+	defer func() { _ = conn.Close() }()
+	_ = readServerFrame(t, conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- server.Close(ctx) }()
+	select {
+	case <-disconnectEntered:
+	case <-time.After(time.Second):
+		t.Fatal("disconnect observation did not start")
+	}
+	select {
+	case err := <-closeDone:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("Close did not honor its context while disconnect observer was blocked")
+	}
+
+	close(releaseDisconnect)
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), time.Second)
+	defer finalCancel()
+	require.NoError(t, server.Close(finalCtx))
+}
+
 func TestServerCloseClosesUpgradedConnections(t *testing.T) {
 	_, server := newTestHubAndServer(t)
 	httpServer := httptest.NewServer(server)

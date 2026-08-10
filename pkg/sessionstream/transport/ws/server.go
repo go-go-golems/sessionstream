@@ -251,6 +251,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		pongs:    make(chan string, 1),
 		requests: make(chan *sessionstreamv1.ClientFrame, s.connectionConfig.SendQueueSize),
 	}
+	// Publish Connected before making c visible to Close. This keeps observer
+	// ordering stable without invoking user observer code under lifecycleMu.
+	s.observe(r.Context(), TransportRecord{Stage: TransportStageConnected, ConnectionId: cid})
+
 	s.lifecycleMu.Lock()
 	if s.closing {
 		s.lifecycleMu.Unlock()
@@ -262,7 +266,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	s.wg.Add(3)
 	s.lifecycleMu.Unlock()
-	s.observe(r.Context(), TransportRecord{Stage: TransportStageConnected, ConnectionId: cid})
 	go func() { defer s.wg.Done(); s.writeLoop(ctx, c) }()
 	go func() { defer s.wg.Done(); s.heartbeatLoop(ctx, c) }()
 	go func() { defer s.wg.Done(); s.requestLoop(ctx, c) }()
@@ -600,11 +603,14 @@ func (s *Server) Close(ctx context.Context) error {
 		connections = append(connections, connection)
 	}
 	s.mu.RUnlock()
-	for _, connection := range connections {
-		s.closeConnection(connection)
-	}
 	done := make(chan struct{})
-	go func() { s.wg.Wait(); close(done) }()
+	go func() {
+		for _, connection := range connections {
+			s.closeConnection(connection)
+		}
+		s.wg.Wait()
+		close(done)
+	}()
 	select {
 	case <-done:
 		return nil
