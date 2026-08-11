@@ -124,3 +124,13 @@ Validated and uploaded the Supervisor Arbitration and Runtime Fuzzing Guide to r
 
 - /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/design-doc/03-intern-guide-to-heartbeat-supervisor-event-arbitration-and-runtime-fuzzing.md — Validated and delivered design guide
 
+
+## 2026-08-10
+
+Reproduced the overdue-on-arm P1 with a baseline fuzz seed, implemented shared admitted-pong deadline arbitration, and passed 877473 fuzz executions plus full race/CI validation (commit 5a1d9eb)
+
+### Related Files
+
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/heartbeat.go — Shared deadline arbitration production fix
+- /home/manuel/workspaces/2026-06-30/benchmark-cpu-inference/sessionstream-p111/pkg/sessionstream/transport/ws/heartbeat_arbitration_test.go — Focused runtime arbitration fuzzer and deterministic regressions
+

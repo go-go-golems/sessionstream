@@ -18,7 +18,11 @@ RelatedFiles:
     - Path: repo://pkg/sessionstream/hub_test.go
       Note: Race-safe shared hydration and event-store fixture from Step 8
     - Path: repo://pkg/sessionstream/transport/ws/heartbeat.go
-      Note: Integrated supervisor in Step 4 at commit dbfbf02
+      Note: |-
+        Integrated supervisor in Step 4 at commit dbfbf02
+        P1 overdue deadline fix and shared helper (commit 5a1d9eb)
+    - Path: repo://pkg/sessionstream/transport/ws/heartbeat_arbitration_test.go
+      Note: Pre-fix reproducer, regressions, seeds, oracle, and campaign (commit 5a1d9eb)
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/logcopter.go
       Note: Generated package metadata required by CI
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine.go
@@ -48,6 +52,7 @@ LastUpdated: 2026-08-10T20:10:00-04:00
 WhatFor: Continuing the heartbeat state-machine implementation with evidence, decisions, validation commands, and review guidance intact.
 WhenToUse: Read before implementing or reviewing SESSIONSTREAM-005.
 ---
+
 
 
 
@@ -1103,4 +1108,135 @@ Docmgr doctor: PASS
 Markdown fences: balanced
 reMarkable: /ai/2026/08/10/SESSIONSTREAM-005/SESSIONSTREAM-005 Supervisor Arbitration and Runtime Fuzzing Guide.pdf
 Implementation status: proposed; no runtime code changed in this step
+```
+
+## Step 11: Reproduce and fix overdue deadline arbitration with a focused fuzzer
+
+I implemented the runtime-seam fuzzer before completing the drain logic and deliberately routed the overdue-on-arm production branch through an incomplete helper that applied the deadline immediately. The checked-in timely-pong seed failed at baseline, reproducing the review finding without relying on scheduler luck. No failing intermediate state was committed.
+
+I then implemented the bounded admitted-event drain, routed both timer expiry and overdue-on-arm expiry through it, and retained the same seed as a permanent regression. The final harness constructs only reachable `Awaiting` detector states, generates bounded pong mailboxes, computes its expected phase from an independent identity/time predicate, and checks queue, phase, generation, and action contracts.
+
+### Prompt Context
+
+**User prompt (verbatim):** "ok, let's do that. Implement the fuzzer, keep a detailed diary as you work, and commit at appropriate intervals."
+
+**Assistant interpretation:** Build the separate supervisor-arbitration fuzz target, prove that it fails on the current defect before fixing production, implement shared deadline arbitration, validate broadly, and preserve detailed chronological evidence in code and documentation commits.
+
+**Inferred user intent:** Establish that the new fuzz harness genuinely detects the P1 review bug rather than merely passing against a pre-corrected helper, then ship a durable and reviewable fix.
+
+**Commit (code):** 5a1d9ebfe00e00b9712777d8a1db617753e6f00a — "fix(ws): arbitrate admitted pongs before deadlines"
+
+### What I did
+
+- Added the package-private `applyHeartbeatDeadlineAfterAdmittedEvents` production seam.
+- Initially implemented it as direct deadline application and routed the overdue-on-arm branch through it solely to test whether the new harness reproduced the defect.
+- Added `pkg/sessionstream/transport/ws/heartbeat_arbitration_test.go`.
+- Added deterministic timely, empty, exact, late, stale, mixed-order, and final-queue-slot regressions.
+- Added `FuzzHeartbeatDeadlineArbitration` with ten readable seeds.
+- Encoded current/stale/empty/future nonce classes and before/exact/after/before-write timestamp classes in each event byte.
+- Added a bounded eight-event mailbox, independently computed timely-current-pong oracle, reachable reducer setup, and action collector.
+- Ran the seed target against the intentionally incomplete production seam and captured the expected failure.
+- Replaced the incomplete helper with a bounded nonblocking drain followed by exactly one deadline application.
+- Replaced the duplicated timer-channel drain with the shared helper.
+- Captured `heartbeatNow()` once in the overdue-on-arm action branch.
+- Ran focused ordinary and race-enabled repetitions, a 60-second campaign, full tests, full repository race, vet, lint, and `make ci-check`.
+- Committed the green code and tests as one focused code commit.
+
+### Why
+
+- A seeded fuzz harness should demonstrate sensitivity to the known defect before it is trusted as regression coverage.
+- Both deadline origins represent the same protocol decision and require one shared arbitration policy.
+- A bounded direct helper turns concurrent mailbox scheduling into deterministic input data that Go's fuzzer can mutate and shrink.
+- Keeping the fuzzer in package `ws` tests the runtime refinement seam without adding concurrency or transport behavior to the pure reducer harness.
+
+### What worked
+
+The first baseline seed run caught the defect immediately. Seed 1 represented one current-nonce pong one nanosecond before the deadline. The oracle expected `Idle`; the incomplete production seam applied deadline first and produced `Suspected`:
+
+```text
+--- FAIL: FuzzHeartbeatDeadlineArbitration/seed#1
+Error: Not equal:
+  expected: 0x1
+  actual  : 0x4
+```
+
+Additional seeds failed because the queue remained undrained, confirming broad sensitivity rather than one hard-coded assertion.
+
+After the production fix:
+
+- 100 focused ordinary repetitions passed.
+- 100 focused race-enabled repetitions passed.
+- The 60-second campaign passed 877,473 executions.
+- It found 16 new interesting inputs, for 26 total corpus entries.
+- Full repository tests passed.
+- Full repository race tests passed.
+- `go vet`, lint, and `make ci-check` passed.
+- No failure corpus was produced after the fix.
+
+### What didn't work
+
+The first lint run after the successful campaign failed on an ineffectual initialization in the event decoder:
+
+```text
+pkg/sessionstream/transport/ws/heartbeat_arbitration_test.go:204:2: ineffectual assignment to at (ineffassign)
+    at := deadline.Add(-delta)
+```
+
+Every switch branch replaced `at`, so I changed the declaration to `var at time.Time`, formatted, and reran lint successfully.
+
+The deliberately incomplete helper caused seeds 1–9 to fail before the fix. This was expected reproduction evidence, not an attempted final implementation. It was never committed.
+
+### What I learned
+
+- A baseline seed can serve as a deterministic counterexample while still participating in later mutation and minimization.
+- The strongest oracle is smaller than the runtime: success exists if and only if the bounded admitted queue contains a current-nonce pong strictly before the deadline.
+- Applying the deadline after draining remains useful even after a pong succeeds because the reducer's phase and generation rules make it harmlessly stale.
+- The final queue-slot seed is important: it proves the work bound does not stop one event too early.
+
+### What was tricky to build
+
+The fuzzer needed to exercise the real production policy without reproducing nondeterministic Go `select` scheduling. The extracted helper is now called by both production deadline paths, so encoding the admitted queue as bytes tests the exact arbitration operation while keeping every failure replayable.
+
+The action oracle had to account for multiple queued pongs. The first timely current pong returns the machine to `Idle`; later pongs become stale, and the subsequent deadline is a no-op. Therefore a successful trace must contain exactly one `ActionRecordPong` and no suspicion/close pair, regardless of duplicates.
+
+The pre-fix experiment also needed to preserve a green commit history. I created and executed the incomplete seam locally, captured its failures, then replaced it with the correct bounded implementation before staging the code commit.
+
+### What warrants a second pair of eyes
+
+- Review the helper's deadline linearization point: nonblocking queue-empty observation followed by deadline application.
+- Confirm that limiting receives to `heartbeatEventQueueSize` remains correct if the queue's event kinds or capacity change.
+- Review the fuzzer oracle if anything besides pong events is later admitted to `heartbeatRuntime.events`.
+- Confirm both production branches continue to call the shared helper in future refactors.
+
+### What should be done in the future
+
+- Push the code and documentation commits to PR #11.
+- Run a longer arbitration fuzz campaign if review requests it.
+- Reply to the P1 thread with pre-fix reproduction, commit, campaign, and validation evidence, then resolve it.
+
+### Code review instructions
+
+- Start at `applyHeartbeatDeadlineAfterAdmittedEvents` in `heartbeat.go`.
+- Verify both `ActionArmDeadline` and `deadlineC` branches call it.
+- Review the ten seeds and the independent oracle in `heartbeat_arbitration_test.go`.
+- Reproduce seeds with `GOWORK=off go test ./pkg/sessionstream/transport/ws -run='^FuzzHeartbeatDeadlineArbitration$' -count=100`.
+- Campaign with `GOWORK=off go test ./pkg/sessionstream/transport/ws -run='^$' -fuzz='^FuzzHeartbeatDeadlineArbitration$' -fuzztime=60s`.
+- Run `GOWORK=off go test -race ./... -count=1` and `make ci-check`.
+
+### Technical details
+
+```text
+Pre-fix seed reproduction: FAIL as expected
+Shared production helper: applyHeartbeatDeadlineAfterAdmittedEvents
+Queue work bound: 8 events
+Deadline applications per arbitration: 1
+Readable seeds: 10
+Focused ordinary repetitions: 100 PASS
+Focused race repetitions: 100 PASS
+Fuzz executions: 877473
+New interesting: 16
+Total interesting: 26
+Post-fix failures: 0
+Full test/race/vet/lint/CI: PASS
+Code commit: 5a1d9ebfe00e00b9712777d8a1db617753e6f00a
 ```

@@ -12,7 +12,11 @@ Intent: long-term
 Owners: []
 RelatedFiles:
     - Path: repo://pkg/sessionstream/transport/ws/heartbeat.go
-      Note: Current supervisor arbitration and both deadline expiry paths analyzed by this design
+      Note: |-
+        Current supervisor arbitration and both deadline expiry paths analyzed by this design
+        Shared admitted-event deadline arbitration implemented in commit 5a1d9eb
+    - Path: repo://pkg/sessionstream/transport/ws/heartbeat_arbitration_test.go
+      Note: Deterministic and state-aware runtime arbitration coverage implemented in commit 5a1d9eb
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine.go
       Note: Pure reducer contract refined by the supervisor runtime
     - Path: repo://pkg/sessionstream/transport/ws/internal/heartbeat/machine_test.go
@@ -25,6 +29,7 @@ LastUpdated: 2026-08-10T19:05:03.87262508-04:00
 WhatFor: Implement and review deadline arbitration shared by normal timer expiry and overdue-on-arm expiry, and build a fuzz harness that tests the runtime adapter rather than only the pure reducer.
 WhenToUse: Use when changing heartbeat queues, writer acknowledgements, deadline timers, supervisor selection, reducer integration, or fuzz coverage for concurrent WebSocket control events.
 ---
+
 
 
 # Intern Guide to Heartbeat Supervisor Event Arbitration and Runtime Fuzzing
@@ -44,7 +49,7 @@ The resulting architecture has two explicit trace contracts:
 
 The second contract is the missing test surface. This document specifies it, explains its computer-science foundations, and provides an implementation and validation plan suitable for an engineer new to Sessionstream.
 
-> **Scope status:** The design is proposed for the PR #11 review finding on `pkg/sessionstream/transport/ws/heartbeat.go`. It is intentionally narrow. It does not change the public WebSocket schema, `ConnectionConfig`, timeout boundary, single-reader/single-writer architecture, or fixed-threshold failure-detector policy.
+> **Scope status:** Implemented in commit `5a1d9ebfe00e00b9712777d8a1db617753e6f00a` for the PR #11 review finding on `pkg/sessionstream/transport/ws/heartbeat.go`. The change is intentionally narrow. It does not change the public WebSocket schema, `ConnectionConfig`, timeout boundary, single-reader/single-writer architecture, or fixed-threshold failure-detector policy.
 
 ## 1. Reader orientation
 
@@ -1221,7 +1226,7 @@ GitHub check and security workflows pass.
 - **Decision:** Add a second focused arbitration target and retain the reducer target unchanged.
 - **Rationale:** This preserves fault localization, model clarity, throughput, and compact corpora while covering the missing refinement boundary.
 - **Consequences:** Two fuzz commands exist. Their names and documentation must make the boundary clear.
-- **Status:** proposed
+- **Status:** accepted
 
 ### Decision: Share one deadline arbitration helper
 
@@ -1230,7 +1235,7 @@ GitHub check and security workflows pass.
 - **Decision:** Centralize both paths in one nonblocking helper.
 - **Rationale:** A named shared policy prevents semantic drift and is directly testable.
 - **Consequences:** Deadline handling gains one package-private callback helper. Reducer semantics remain unchanged.
-- **Status:** proposed
+- **Status:** accepted
 
 ### Decision: Preserve reducer authority over identity and time
 
@@ -1239,7 +1244,7 @@ GitHub check and security workflows pass.
 - **Decision:** Feed all admitted events to the reducer, then the deadline.
 - **Rationale:** Nonce, generation, phase, and strict deadline checks already have one authoritative implementation.
 - **Consequences:** Stale events may produce observation actions before expiry, but no transition logic is duplicated.
-- **Status:** proposed
+- **Status:** accepted
 
 ### Decision: Bound draining by queue capacity
 
@@ -1248,7 +1253,7 @@ GitHub check and security workflows pass.
 - **Decision:** Process at most `heartbeatEventQueueSize` events nonblockingly.
 - **Rationale:** It guarantees termination and covers every event that could have occupied the bounded queue when arbitration began.
 - **Consequences:** Events admitted after the decision linearization may remain for later processing or connection close. This is compatible with fixed-threshold suspicion semantics.
-- **Status:** proposed
+- **Status:** accepted
 
 ### Decision: Use deterministic scheduling as data
 
@@ -1257,7 +1262,7 @@ GitHub check and security workflows pass.
 - **Decision:** Encode admitted mailbox state and timing classes as fuzz data; retain separate race-enabled integration tests.
 - **Rationale:** Failures become reproducible and shrinkable without claiming to model the entire Go scheduler.
 - **Consequences:** The harness proves the serialization operation, while integration tests prove production wiring and race freedom.
-- **Status:** proposed
+- **Status:** accepted
 
 ## 14. Alternatives considered
 
@@ -1376,7 +1381,33 @@ This document is justified because the defect exposes a reusable boundary: pure 
 4. If future control-event kinds share the heartbeat queue, should the oracle model all event transitions or should separate typed queues remain? Revisit before broadening the queue.
 5. Should a future supervisor use one typed mailbox for writer, reader, and timer events? Do not make that change solely for this finding.
 
-## 18. References
+## 18. Implementation result
+
+Commit `5a1d9ebfe00e00b9712777d8a1db617753e6f00a` implemented the design with one shared `applyHeartbeatDeadlineAfterAdmittedEvents` helper. Both the overdue `ActionArmDeadline` branch and the normal deadline-timer branch now use that operation. The overdue branch captures `now` once before deriving delay and constructing the deadline event.
+
+The focused harness lives in `pkg/sessionstream/transport/ws/heartbeat_arbitration_test.go`. It contains deterministic boundary tables, the final-queue-slot regression, ten readable fuzz seeds, a compact identity/time decoder, a reachable `Awaiting` machine constructor, an independent timely-current-pong oracle, and action-pairing assertions.
+
+Before the drain was implemented, the baseline fuzz command failed immediately. Seed 1 expected `Idle` for a queued timely current pong but observed `Suspected`; seeds with exact, late, and stale pongs also showed that the intentionally incomplete helper left queue entries undrained. This established that the harness exercised the defect rather than only validating the eventual fix.
+
+After implementation:
+
+```text
+Focused ordinary seed/test repetitions: 100 PASS
+Focused race-enabled repetitions: 100 PASS
+60-second campaign executions: 877473
+New interesting inputs: 16
+Total interesting corpus: 26
+Failure corpus: none
+Full repository tests: PASS
+Full repository race: PASS
+Go vet: PASS
+make ci-check: PASS
+Lint: PASS
+```
+
+The production and deterministic/fuzz test delta was 284 insertions and 21 deletions. No external fuzzing dependency, goroutine, socket, compatibility shim, or second heartbeat path was added.
+
+## 19. References
 
 ### Code
 
@@ -1405,7 +1436,7 @@ This document is justified because the defect exposes a reusable boundary: pure 
 - `go test -fuzz`
 - Go race detector
 
-## 19. Intern handoff
+## 20. Intern handoff
 
 Begin with the reported trace, not with code changes. Reconstruct the machine state immediately before `ActionArmDeadline`, list what is already present in each runtime mailbox, and write the expected reducer trace. Then extract one arbitration helper and prove its contract with deterministic cases before writing the fuzz decoder.
 
