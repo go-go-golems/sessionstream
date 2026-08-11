@@ -1,10 +1,8 @@
-.PHONY: all fmt fmt-check lint lintmax docker-lint golangci-lint-install install-generate-tools gosec govulncheck test build build-bin boundary-check schema-vet systemlab-build systemlab-run check ci-check goreleaser ensure-svu tag-major tag-minor tag-patch release bump-go-go-golems install logcopter-generate logcopter-check glazed-lint-build glazed-lint
+.PHONY: all fmt fmt-check lint lintmax docker-lint golangci-lint-install install-generate-tools gosec govulncheck test build boundary-check schema-vet check ci-check ensure-svu tag-major tag-minor tag-patch release bump-go-go-golems logcopter-generate logcopter-check glazed-lint-build glazed-lint
 
 all: check
 
-BINARY ?= sessionstream-systemlab
 MODULE ?= github.com/go-go-golems/sessionstream
-CMD_DIR ?= ./cmd/$(BINARY)
 
 TOOLS_BIN ?= $(CURDIR)/.bin
 export PATH := $(TOOLS_BIN):$(PATH)
@@ -12,8 +10,6 @@ export PATH := $(TOOLS_BIN):$(PATH)
 GOLANGCI_LINT_VERSION ?= $(shell cat .golangci-lint-version)
 GOLANGCI_LINT_BIN ?= $(TOOLS_BIN)/golangci-lint
 GO_GO_GOJA_VERSION ?= $(shell GOWORK=off go list -m -f '{{.Version}}' github.com/go-go-golems/go-go-goja 2>/dev/null)
-GORELEASER_ARGS ?= --skip=sign --snapshot --clean
-GORELEASER_TARGET ?= --single-target
 SVU ?= svu
 SESSIONSTREAM_LINT ?= /tmp/sessionstream-lint
 
@@ -59,23 +55,9 @@ build: install-generate-tools
 	GOWORK=off go generate ./...
 	GOWORK=off go build ./...
 
-build-bin:
-	@mkdir -p ./dist
-	GOWORK=off go build -o ./dist/$(BINARY) $(CMD_DIR)
-
 schema-vet:
 	GOWORK=off go build -o $(SESSIONSTREAM_LINT) ./cmd/sessionstream-lint
 	GOWORK=off go vet -vettool=$(SESSIONSTREAM_LINT) ./pkg/analysis/sessionstreamschema ./cmd/sessionstream-lint
-
-systemlab-build:
-	@mkdir -p .bin
-	GOWORK=off go build -o ./.bin/$(BINARY) $(CMD_DIR)
-
-systemlab-run:
-	GOWORK=off go run $(CMD_DIR) serve
-
-goreleaser:
-	GOWORK=off goreleaser release $(GORELEASER_ARGS) $(GORELEASER_TARGET)
 
 ensure-svu:
 	@command -v $(SVU) >/dev/null || (echo 'svu is required for tag/release targets: go install github.com/caarlos0/svu/v3@latest' && exit 1)
@@ -92,9 +74,6 @@ tag-patch: ensure-svu
 release: ensure-svu
 	git push origin --tags
 	GOWORK=off GOPROXY=proxy.golang.org go list -m $(MODULE)@$$($(SVU) current)
-
-install:
-	GOWORK=off go install $(CMD_DIR)
 
 check: boundary-check schema-vet logcopter-check glazed-lint test build
 

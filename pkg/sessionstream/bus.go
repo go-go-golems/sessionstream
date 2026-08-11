@@ -33,7 +33,6 @@ type busConfig struct {
 	subscriber     message.Subscriber
 	topic          string
 	messageMutator BusMessageMutator
-	observer       BusObserver
 }
 
 // BusOption configures sessionstream's Watermill integration.
@@ -42,37 +41,6 @@ type BusOption func(*busConfig) error
 // BusMessageMutator can attach backend-specific metadata before publish.
 // It is useful for test/lab setups that want to inject synthetic stream ids.
 type BusMessageMutator func(ctx context.Context, ev Event, msg *message.Message) error
-
-// BusRecord captures publish/consume metadata for a Watermill message.
-type BusRecord struct {
-	MessageID string            `json:"messageId"`
-	Topic     string            `json:"topic"`
-	Metadata  map[string]string `json:"metadata"`
-}
-
-// BusObserver receives publish/consume observations from the bus adapter and consumer.
-type BusObserver interface {
-	Published(ctx context.Context, ev Event, rec BusRecord)
-	Consumed(ctx context.Context, ev Event, rec BusRecord)
-}
-
-// BusObserverHooks adapts callbacks to BusObserver.
-type BusObserverHooks struct {
-	OnPublished func(ctx context.Context, ev Event, rec BusRecord)
-	OnConsumed  func(ctx context.Context, ev Event, rec BusRecord)
-}
-
-func (h BusObserverHooks) Published(ctx context.Context, ev Event, rec BusRecord) {
-	if h.OnPublished != nil {
-		h.OnPublished(ctx, ev, rec)
-	}
-}
-
-func (h BusObserverHooks) Consumed(ctx context.Context, ev Event, rec BusRecord) {
-	if h.OnConsumed != nil {
-		h.OnConsumed(ctx, ev, rec)
-	}
-}
 
 func WithBusTopic(topic string) BusOption {
 	return func(cfg *busConfig) error {
@@ -87,13 +55,6 @@ func WithBusTopic(topic string) BusOption {
 func WithBusMessageMutator(mutator BusMessageMutator) BusOption {
 	return func(cfg *busConfig) error {
 		cfg.messageMutator = mutator
-		return nil
-	}
-}
-
-func WithBusObserver(observer BusObserver) BusOption {
-	return func(cfg *busConfig) error {
-		cfg.observer = observer
 		return nil
 	}
 }
@@ -179,9 +140,6 @@ func (p watermillEventPublisher) Publish(ctx context.Context, ev Event) error {
 	if err := p.hub.bus.publisher.Publish(p.hub.bus.topic, msg); err != nil {
 		return fmt.Errorf("publish event %q: %w", ev.Name, err)
 	}
-	if p.hub.bus.observer != nil {
-		p.hub.bus.observer.Published(ctx, Event{Name: ev.Name, SessionId: ev.SessionId, Payload: proto.Clone(ev.Payload)}, newBusRecord(msg, p.hub.bus.topic))
-	}
 	return nil
 }
 
@@ -206,16 +164,6 @@ func decodeEventEnvelope(reg *SchemaRegistry, payload []byte) (Event, error) {
 		}
 	}
 	return Event{Name: env.Name, SessionId: SessionId(env.SessionID), Payload: msg}, nil
-}
-
-func newBusRecord(msg *message.Message, topic string) BusRecord {
-	rec := BusRecord{Topic: topic}
-	if msg == nil {
-		return rec
-	}
-	rec.MessageID = msg.UUID
-	rec.Metadata = cloneWatermillMetadata(msg.Metadata)
-	return rec
 }
 
 func cloneWatermillMetadata(metadata message.Metadata) map[string]string {

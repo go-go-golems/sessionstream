@@ -26,10 +26,9 @@ func TestHubEventBusGoChannelRoundTrip(t *testing.T) {
 	pubsub := gochannel.NewGoChannel(gochannel.Config{OutputChannelBuffer: 64}, watermill.NopLogger{})
 	store := newTestHydrationStore()
 	fanout := &recordingFanout{}
-	observer := &recordingBusObserver{}
 	sequence := uint64(0)
 
-	hub := newBusTestHub(t, store, fanout, observer, pubsub, func(_ context.Context, _ Event, msg *message.Message) error {
+	hub := newBusTestHub(t, store, fanout, pubsub, func(_ context.Context, _ Event, msg *message.Message) error {
 		sequence++
 		msg.Metadata.Set(MetadataKeyStreamID, fmt.Sprintf("1700000000000-%d", sequence))
 		return nil
@@ -60,33 +59,19 @@ func TestHubEventBusGoChannelRoundTrip(t *testing.T) {
 	require.Greater(t, snapB.SnapshotOrdinal, uint64(0))
 	require.Len(t, snapB.Entities, 1)
 
-	observer.mu.Lock()
-	defer observer.mu.Unlock()
-	require.Len(t, observer.published, 3)
-	require.Len(t, observer.consumed, 3)
-	require.Equal(t, uint64(0), observer.published[0].event.Ordinal)
-	require.Equal(t, "s-a", string(observer.published[0].event.SessionId))
-	require.NotEmpty(t, observer.published[0].record.Metadata[MetadataKeyStreamID])
-	firstDerived, ok := DeriveOrdinalFromStreamID(observer.consumed[0].record.Metadata[MetadataKeyStreamID])
-	require.True(t, ok)
-	require.Equal(t, firstDerived, observer.consumed[0].event.Ordinal)
-	consumedA := make([]uint64, 0, 2)
-	for _, consumed := range observer.consumed {
-		if consumed.event.SessionId == SessionId("s-a") {
-			consumedA = append(consumedA, consumed.event.Ordinal)
-		}
-	}
-	require.Len(t, consumedA, 2)
-	require.Greater(t, consumedA[1], consumedA[0])
+	fanout.mu.Lock()
+	ordinalsA := append([]uint64(nil), fanout.events["s-a"]...)
+	fanout.mu.Unlock()
+	require.Len(t, ordinalsA, 2)
+	require.Greater(t, ordinalsA[1], ordinalsA[0])
 }
 
 func TestHubEventBusFallsBackWithoutStreamID(t *testing.T) {
 	pubsub := gochannel.NewGoChannel(gochannel.Config{OutputChannelBuffer: 64}, watermill.NopLogger{})
 	store := newTestHydrationStore()
 	fanout := &recordingFanout{}
-	observer := &recordingBusObserver{}
 
-	hub := newBusTestHub(t, store, fanout, observer, pubsub, nil)
+	hub := newBusTestHub(t, store, fanout, pubsub, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -105,18 +90,16 @@ func TestHubEventBusFallsBackWithoutStreamID(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), snap.SnapshotOrdinal)
 
-	observer.mu.Lock()
-	defer observer.mu.Unlock()
-	require.Len(t, observer.consumed, 2)
-	require.Equal(t, uint64(1), observer.consumed[0].event.Ordinal)
-	require.Equal(t, uint64(2), observer.consumed[1].event.Ordinal)
+	fanout.mu.Lock()
+	ordinals := append([]uint64(nil), fanout.events["s-a"]...)
+	fanout.mu.Unlock()
+	require.Equal(t, []uint64{1, 2}, ordinals)
 }
 
 func newBusTestHub(
 	t *testing.T,
 	store HydrationStore,
 	fanout UIFanout,
-	observer BusObserver,
 	pubsub *gochannel.GoChannel,
 	mutator BusMessageMutator,
 ) *Hub {
@@ -134,7 +117,7 @@ func newBusTestHub(
 		WithSessionMetadataFactory(func(_ context.Context, sid SessionId) (any, error) {
 			return map[string]any{"sessionId": string(sid)}, nil
 		}),
-		WithEventBus(pubsub, pubsub, WithBusTopic("sessionstream.test"), WithBusObserver(observer), WithBusMessageMutator(mutator)),
+		WithEventBus(pubsub, pubsub, WithBusTopic("sessionstream.test"), WithBusMessageMutator(mutator)),
 	)
 	require.NoError(t, err)
 	require.NoError(t, hub.RegisterCommand(busTestCommandName, func(ctx context.Context, cmd Command, _ *Session, pub EventPublisher) error {
@@ -162,29 +145,6 @@ func submitBusCommand(t *testing.T, hub *Hub, sid SessionId, label string) error
 	return hub.Submit(context.Background(), sid, busTestCommandName, payload)
 }
 
-type recordedBusEvent struct {
-	event  Event
-	record BusRecord
-}
-
-type recordingBusObserver struct {
-	mu        sync.Mutex
-	published []recordedBusEvent
-	consumed  []recordedBusEvent
-}
-
-func (o *recordingBusObserver) Published(_ context.Context, ev Event, rec BusRecord) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.published = append(o.published, recordedBusEvent{event: cloneObservedEvent(ev), record: rec})
-}
-
-func (o *recordingBusObserver) Consumed(_ context.Context, ev Event, rec BusRecord) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.consumed = append(o.consumed, recordedBusEvent{event: cloneObservedEvent(ev), record: rec})
-}
-
 type recordingFanout struct {
 	mu     sync.Mutex
 	events map[string][]uint64
@@ -198,12 +158,4 @@ func (f *recordingFanout) PublishUI(_ context.Context, sid SessionId, ord uint64
 	}
 	f.events[string(sid)] = append(f.events[string(sid)], ord)
 	return nil
-}
-
-func cloneObservedEvent(ev Event) Event {
-	out := ev
-	if ev.Payload != nil {
-		out.Payload = proto.Clone(ev.Payload)
-	}
-	return out
 }

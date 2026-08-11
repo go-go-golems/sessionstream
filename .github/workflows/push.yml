@@ -26,5 +26,3 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Run repository checks
         run: make ci-check
-      - name: Smoke test systemlab help
-        run: GOWORK=off go run ./cmd/sessionstream-systemlab --help
