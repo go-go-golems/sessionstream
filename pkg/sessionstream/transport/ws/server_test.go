@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,6 +77,7 @@ func TestServerReconnectGetsSnapshotThenNextLive(t *testing.T) {
 	require.Equal(t, uint64(1), snapshot.GetSnapshot().GetSnapshotOrdinal())
 	_ = readServerFrame(t, conn) // subscribed
 	require.NoError(t, conn.Close())
+	require.Eventually(t, func() bool { return len(server.Connections()) == 0 }, time.Second, time.Millisecond)
 
 	payload2, err := structpb.NewStruct(map[string]any{"text": "two"})
 	require.NoError(t, err)
@@ -165,6 +167,23 @@ func TestServerFrameTypeClassifiesHeartbeatFrames(t *testing.T) {
 	require.Equal(t, "pong", serverFrameType(newPongFrame("pong-nonce")))
 }
 
+func TestHeartbeatWireAndDefaultConfigurationContract(t *testing.T) {
+	ping, err := marshalOptions.Marshal(newPingFrame("n-1"))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"ping":{"nonce":"n-1"}}`, string(ping))
+	pong, err := marshalOptions.Marshal(newPongFrame("n-1"))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"pong":{"nonce":"n-1"}}`, string(pong))
+
+	require.Equal(t, ConnectionConfig{
+		MaxReadBytes:      1 << 20,
+		SendQueueSize:     128,
+		WriteTimeout:      10 * time.Second,
+		HeartbeatInterval: 30 * time.Second,
+		PongTimeout:       10 * time.Second,
+	}, DefaultConnectionConfig())
+}
+
 func TestHeartbeatTimeoutClosesUnresponsiveConnection(t *testing.T) {
 	records := newRecordingTransportObserver()
 	config := DefaultConnectionConfig()
@@ -206,7 +225,7 @@ func TestConnectionConfigRejectsUnboundedValues(t *testing.T) {
 func TestHeartbeatPongKeepsConnectionAlive(t *testing.T) {
 	config := DefaultConnectionConfig()
 	config.HeartbeatInterval = 10 * time.Millisecond
-	config.PongTimeout = 50 * time.Millisecond
+	config.PongTimeout = 250 * time.Millisecond
 	_, server := newTestHubAndServerWithOptions(t, WithConnectionConfig(config))
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
@@ -220,13 +239,6 @@ func TestHeartbeatPongKeepsConnectionAlive(t *testing.T) {
 	writeClientFrame(t, conn, &sessionstreamv1.ClientFrame{Frame: &sessionstreamv1.ClientFrame_Pong{Pong: &sessionstreamv1.PongFrame{Nonce: nonce}}})
 	second := readServerFrame(t, conn)
 	require.NotEmpty(t, second.GetPing().GetNonce())
-}
-
-func TestOfferLatestPongReplacesStaleBufferedNonce(t *testing.T) {
-	conn := &connection{pongs: make(chan string, 1)}
-	conn.pongs <- "stale"
-	offerLatestPong(conn, "current")
-	require.Equal(t, "current", <-conn.pongs)
 }
 
 func TestHeartbeatPongIsProcessedBeforeBlockingReadObserver(t *testing.T) {
@@ -277,15 +289,18 @@ func TestHeartbeatTimeoutStartsAfterPingIsWritten(t *testing.T) {
 		return sessionstream.Snapshot{}, nil
 	}), WithConnectionConfig(config), WithTransportObserver(records))
 	require.NoError(t, err)
+	runtime, err := newHeartbeatRuntime(config)
+	require.NoError(t, err)
 	conn := &connection{
-		id: "backpressured", send: make(chan outboundFrame, 1), done: make(chan struct{}), pongs: make(chan string, 1),
+		id: "backpressured", send: make(chan outboundFrame, 1), done: make(chan struct{}), ready: make(chan struct{}), heartbeat: runtime,
 		subs: map[sessionstream.SessionId]subscription{},
 	}
+	close(conn.ready)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	loopDone := make(chan struct{})
 	go func() {
-		server.heartbeatLoop(ctx, conn)
+		server.runHeartbeatSupervisor(ctx.Done(), conn)
 		close(loopDone)
 	}()
 
@@ -303,20 +318,76 @@ func TestHeartbeatTimeoutStartsAfterPingIsWritten(t *testing.T) {
 	require.False(t, conn.closed.Load())
 	require.NotContains(t, records.stages(), TransportStageHeartbeatTimeout)
 
-	notifyFrameWritten(queued, nil)
-	conn.pongs <- frame.GetPing().GetNonce()
+	require.NoError(t, server.offerHeartbeatPong(conn, frame.GetPing().GetNonce()))
+	notifyFrameWritten(queued, server.heartbeatNow(), nil)
 	cancel()
 	select {
 	case <-loopDone:
 	case <-time.After(time.Second):
-		t.Fatal("heartbeat loop did not stop")
+		t.Fatal("heartbeat supervisor did not stop")
+	}
+}
+
+func TestHeartbeatSupervisorUsesWriteAckAndGenerationSafeTimer(t *testing.T) {
+	config := DefaultConnectionConfig()
+	config.HeartbeatInterval = 30 * time.Second
+	config.PongTimeout = 10 * time.Second
+	server, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{}, nil
+	}), WithConnectionConfig(config))
+	require.NoError(t, err)
+	clock := newFakeHeartbeatClock(time.Unix(1_700_000_000, 0))
+	server.heartbeatNow = clock.Now
+	server.newHeartbeatTimer = clock.NewTimer
+	server.heartbeatNonce = func(_ sessionstream.ConnectionId, generation uint64) (string, error) {
+		return fmt.Sprintf("nonce-%d", generation), nil
+	}
+	runtime, err := newHeartbeatRuntime(config)
+	require.NoError(t, err)
+	conn := &connection{
+		id: "deterministic", send: make(chan outboundFrame, 1), done: make(chan struct{}), ready: make(chan struct{}), heartbeat: runtime,
+		subs: map[sessionstream.SessionId]subscription{},
+	}
+	close(conn.ready)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	loopDone := make(chan struct{})
+	go func() {
+		server.runHeartbeatSupervisor(ctx.Done(), conn)
+		close(loopDone)
+	}()
+
+	require.Eventually(t, func() bool { return clock.ActiveTimers() == 1 }, time.Second, time.Millisecond)
+	clock.Advance(config.HeartbeatInterval)
+	var queued outboundFrame
+	select {
+	case queued = <-conn.send:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for deterministic heartbeat ping")
+	}
+	frame := &sessionstreamv1.ServerFrame{}
+	require.NoError(t, protojson.Unmarshal(queued.body, frame))
+	require.Equal(t, "nonce-1", frame.GetPing().GetNonce())
+
+	clock.Advance(4 * config.PongTimeout)
+	require.False(t, conn.closed.Load(), "timeout must not run before write acknowledgement")
+	notifyFrameWritten(queued, clock.Now(), nil)
+	require.Eventually(t, func() bool { return clock.ActiveTimers() == 1 }, time.Second, time.Millisecond)
+	clock.Advance(config.PongTimeout)
+	require.Eventually(t, conn.closed.Load, time.Second, time.Millisecond)
+
+	select {
+	case <-loopDone:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat supervisor did not stop after suspicion")
 	}
 }
 
 func TestHeartbeatPongIsProcessedWhileSnapshotHydrationBlocks(t *testing.T) {
+	records := newRecordingTransportObserver()
 	config := DefaultConnectionConfig()
 	config.HeartbeatInterval = 10 * time.Millisecond
-	config.PongTimeout = 25 * time.Millisecond
+	config.PongTimeout = 100 * time.Millisecond
 
 	snapshotStarted := make(chan struct{})
 	releaseSnapshot := make(chan struct{})
@@ -328,8 +399,13 @@ func TestHeartbeatPongIsProcessedWhileSnapshotHydrationBlocks(t *testing.T) {
 		case <-ctx.Done():
 			return sessionstream.Snapshot{}, ctx.Err()
 		}
-	}), WithConnectionConfig(config))
+	}), WithConnectionConfig(config), WithTransportObserver(records))
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("transport stages: %v", records.stages())
+		}
+	})
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
 
@@ -343,7 +419,7 @@ func TestHeartbeatPongIsProcessedWhileSnapshotHydrationBlocks(t *testing.T) {
 		t.Fatal("snapshot hydration did not start")
 	}
 
-	time.AfterFunc(4*config.PongTimeout, func() { close(releaseSnapshot) })
+	time.AfterFunc(2*config.PongTimeout, func() { close(releaseSnapshot) })
 	pingCount := 0
 	snapshotSeen := false
 	for {
@@ -440,7 +516,7 @@ func TestLiveQueueOverflowClosesConnection(t *testing.T) {
 	}), WithTransportObserver(records))
 	require.NoError(t, err)
 	conn := &connection{
-		id: "slow", send: make(chan outboundFrame, 1), done: make(chan struct{}), pongs: make(chan string, 1),
+		id: "slow", send: make(chan outboundFrame, 1), done: make(chan struct{}),
 		subs: map[sessionstream.SessionId]subscription{"session-1": {state: subscriptionStateLive}},
 	}
 	conn.send <- outboundFrame{body: []byte("occupied")}
@@ -450,7 +526,9 @@ func TestLiveQueueOverflowClosesConnection(t *testing.T) {
 	require.NoError(t, err)
 	require.Error(t, server.PublishUI(context.Background(), "session-1", 1, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
 	require.Empty(t, server.Connections())
-	require.Contains(t, records.stages(), TransportStageServerFrameQueueFull)
+	require.Eventually(t, func() bool {
+		return containsStage(records.stages(), TransportStageServerFrameQueueFull)
+	}, time.Second, time.Millisecond)
 }
 
 func TestServerCloseDeadlineIncludesUpgradeRegistration(t *testing.T) {
@@ -607,7 +685,7 @@ func TestSendFrameRejectsClosedConnection(t *testing.T) {
 	}))
 	require.NoError(t, err)
 	conn := &connection{
-		id: "closed", send: make(chan outboundFrame, 1), done: make(chan struct{}), pongs: make(chan string, 1),
+		id: "closed", send: make(chan outboundFrame, 1), done: make(chan struct{}),
 		subs: map[sessionstream.SessionId]subscription{},
 	}
 	server.closeConnection(conn)
@@ -745,6 +823,95 @@ func TestTransportObserverSubscribeAndFanoutSequence(t *testing.T) {
 	require.Len(t, fanout.FanoutTargetIds, 1)
 }
 
+func TestTransportObserverQueueIsBoundedAndReportsDrops(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	observer := TransportObserverFunc(func(context.Context, TransportRecord) {
+		once.Do(func() {
+			close(entered)
+			<-release
+		})
+	})
+	server, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{}, nil
+	}), WithTransportObserver(observer))
+	require.NoError(t, err)
+
+	server.observe(context.Background(), TransportRecord{Stage: TransportStageConnected})
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("observer dispatcher did not enter callback")
+	}
+	for i := 0; i < defaultObserverQueueSize+10; i++ {
+		server.observe(context.Background(), TransportRecord{Stage: TransportStageClientFrameRead})
+	}
+	require.Greater(t, server.ObserverDroppedRecords(), uint64(0))
+	close(release)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, server.Close(ctx))
+}
+
+func TestTransportObserverQueueDetachesCancellationAndPreservesValues(t *testing.T) {
+	type observerContextKey struct{}
+	type observedContext struct {
+		value       string
+		err         error
+		hasDeadline bool
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	observed := make(chan observedContext, 1)
+	observer := TransportObserverFunc(func(ctx context.Context, record TransportRecord) {
+		if record.Stage == TransportStageConnected {
+			close(entered)
+			<-release
+			return
+		}
+		if record.Stage == TransportStageClientFrameRead {
+			_, hasDeadline := ctx.Deadline()
+			value, _ := ctx.Value(observerContextKey{}).(string)
+			observed <- observedContext{
+				value:       value,
+				err:         ctx.Err(),
+				hasDeadline: hasDeadline,
+			}
+		}
+	})
+	server, err := NewServer(snapshotProviderFunc(func(context.Context, sessionstream.SessionId) (sessionstream.Snapshot, error) {
+		return sessionstream.Snapshot{}, nil
+	}), WithTransportObserver(observer))
+	require.NoError(t, err)
+
+	server.observe(context.Background(), TransportRecord{Stage: TransportStageConnected})
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("observer dispatcher did not enter blocking callback")
+	}
+
+	parent, cancel := context.WithTimeout(context.WithValue(context.Background(), observerContextKey{}, "request-value"), time.Hour)
+	server.observe(parent, TransportRecord{Stage: TransportStageClientFrameRead})
+	cancel()
+	close(release)
+
+	select {
+	case got := <-observed:
+		require.Equal(t, "request-value", got.value)
+		require.NoError(t, got.err)
+		require.False(t, got.hasDeadline)
+	case <-time.After(time.Second):
+		t.Fatal("observer dispatcher did not drain accepted record")
+	}
+
+	ctx, closeCancel := context.WithTimeout(context.Background(), time.Second)
+	defer closeCancel()
+	require.NoError(t, server.Close(ctx))
+}
+
 func TestTransportObserverBadClientFrameAndPanicRecovery(t *testing.T) {
 	records := newRecordingTransportObserver()
 	panicObserver := TransportObserverFunc(func(ctx context.Context, rec TransportRecord) {
@@ -778,9 +945,10 @@ func TestTransportObserverFanoutNoTargets(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, server.PublishUI(context.Background(), "missing", 7, []sessionstream.UIEvent{{Name: testUIEventName, Payload: payload}}))
 
-	rec := records.first(TransportStageFanoutNoTargets)
-	require.Equal(t, sessionstream.SessionId("missing"), rec.SessionId)
-	require.Equal(t, uint64(7), rec.Ordinal)
+	require.Eventually(t, func() bool {
+		rec := records.first(TransportStageFanoutNoTargets)
+		return rec.SessionId == sessionstream.SessionId("missing") && rec.Ordinal == 7
+	}, time.Second, time.Millisecond)
 }
 
 func newTestHubAndServerWithOptions(t *testing.T, opts ...Option) (*sessionstream.Hub, *Server) {
@@ -795,6 +963,11 @@ func newTestHubAndServerWithOptions(t *testing.T, opts ...Option) (*sessionstrea
 	t.Cleanup(func() { _ = store.Close() })
 	server, err := NewServer(snapshotAdapter{store: store}, opts...)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Close(ctx)
+	})
 	hub, err := sessionstream.NewHub(
 		sessionstream.WithSchemaRegistry(reg),
 		sessionstream.WithHydrationStore(store),
@@ -803,6 +976,74 @@ func newTestHubAndServerWithOptions(t *testing.T, opts ...Option) (*sessionstrea
 	require.NoError(t, err)
 	registerTestFlow(t, hub)
 	return hub, server
+}
+
+type fakeHeartbeatClock struct {
+	mu     sync.Mutex
+	now    time.Time
+	timers []*fakeHeartbeatTimer
+}
+
+type fakeHeartbeatTimer struct {
+	clock    *fakeHeartbeatClock
+	deadline time.Time
+	ch       chan time.Time
+	stopped  bool
+	fired    bool
+}
+
+func newFakeHeartbeatClock(now time.Time) *fakeHeartbeatClock {
+	return &fakeHeartbeatClock{now: now}
+}
+
+func (c *fakeHeartbeatClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeHeartbeatClock) NewTimer(delay time.Duration) heartbeatTimer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	timer := &fakeHeartbeatTimer{clock: c, deadline: c.now.Add(delay), ch: make(chan time.Time, 1)}
+	c.timers = append(c.timers, timer)
+	return timer
+}
+
+func (c *fakeHeartbeatClock) Advance(delta time.Duration) {
+	c.mu.Lock()
+	c.now = c.now.Add(delta)
+	for _, timer := range c.timers {
+		if !timer.stopped && !timer.fired && !timer.deadline.After(c.now) {
+			timer.fired = true
+			timer.ch <- timer.deadline
+		}
+	}
+	c.mu.Unlock()
+}
+
+func (c *fakeHeartbeatClock) ActiveTimers() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	count := 0
+	for _, timer := range c.timers {
+		if !timer.stopped && !timer.fired {
+			count++
+		}
+	}
+	return count
+}
+
+func (t *fakeHeartbeatTimer) C() <-chan time.Time { return t.ch }
+
+func (t *fakeHeartbeatTimer) Stop() bool {
+	t.clock.mu.Lock()
+	defer t.clock.mu.Unlock()
+	if t.stopped || t.fired {
+		return false
+	}
+	t.stopped = true
+	return true
 }
 
 type snapshotProviderFunc func(ctx context.Context, sid sessionstream.SessionId) (sessionstream.Snapshot, error)

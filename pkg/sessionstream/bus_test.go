@@ -70,7 +70,14 @@ func TestHubEventBusGoChannelRoundTrip(t *testing.T) {
 	firstDerived, ok := DeriveOrdinalFromStreamID(observer.consumed[0].record.Metadata[MetadataKeyStreamID])
 	require.True(t, ok)
 	require.Equal(t, firstDerived, observer.consumed[0].event.Ordinal)
-	require.Greater(t, observer.consumed[2].event.Ordinal, observer.consumed[0].event.Ordinal)
+	consumedA := make([]uint64, 0, 2)
+	for _, consumed := range observer.consumed {
+		if consumed.event.SessionId == SessionId("s-a") {
+			consumedA = append(consumedA, consumed.event.Ordinal)
+		}
+	}
+	require.Len(t, consumedA, 2)
+	require.Greater(t, consumedA[1], consumedA[0])
 }
 
 func TestHubEventBusFallsBackWithoutStreamID(t *testing.T) {

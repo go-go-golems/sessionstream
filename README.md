@@ -231,6 +231,18 @@ The important fields are:
 
 Browser clients should treat `uint64` ordinals as protobuf JSON strings. Do not coerce them through JavaScript `number` if precision matters.
 
+### WebSocket heartbeat and failure suspicion
+
+The transport uses the schema's application-level `PingFrame` and `PongFrame` messages because browser JavaScript cannot directly originate RFC 6455 Ping/Pong control frames. A client that receives a server ping must echo its opaque nonce in a pong. The shared Systemlab helper in `cmd/sessionstream-systemlab/static/js/websocket.js` implements this behavior.
+
+`ConnectionConfig.HeartbeatInterval` controls the idle delay before a challenge. `PongTimeout` starts only after the sole writer successfully writes that ping; time spent in the server's outbound queue is not charged to the client. One challenge is outstanding at a time, and the next interval begins after a matching pong. Stale nonces and stale timer generations cannot acknowledge or expire the current challenge.
+
+A heartbeat timeout means the connection is **suspected under the configured timing assumption**. It cannot prove that the remote process crashed: network delay, a paused browser event loop, or scheduler delay can produce the same silence. The current policy closes a suspected connection so the client can reconnect and hydrate from a fresh snapshot. Choose intervals and deadlines from observed deployment latency with an explicit safety margin.
+
+Transport observers are delivered in order through a bounded best-effort dispatcher. They never execute on socket reader/writer, heartbeat, request-worker, or connection-lifecycle critical paths. `Server.ObserverDroppedRecords` reports records discarded under observer backpressure. Call `Server.Close(ctx)` during shutdown to close connections, drain accepted observations, and stop transport workers; the context still bounds a callback that does not return.
+
+For the mathematical model, invariants, and implementation guide, see [`SESSIONSTREAM-005`](ttmp/2026/08/10/SESSIONSTREAM-005--timed-failure-detector-and-websocket-heartbeat-state-machine/).
+
 ## Goja / JavaScript integration
 
 The repository now includes a first Goja integration slice:

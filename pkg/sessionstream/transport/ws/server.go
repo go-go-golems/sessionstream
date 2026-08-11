@@ -132,6 +132,9 @@ type Server struct {
 	observer           TransportObserver
 	connectionConfig   ConnectionConfig
 	authorizeSubscribe SubscribeAuthorizer
+	heartbeatNow       func() time.Time
+	heartbeatNonce     func(sessionstream.ConnectionId, uint64) (string, error)
+	newHeartbeatTimer  func(time.Duration) heartbeatTimer
 
 	maxHydrationBufferedBatches int
 
@@ -143,19 +146,27 @@ type Server struct {
 	lifecycleMu sync.Mutex
 	closing     bool
 	wg          sync.WaitGroup
+
+	observerMu       sync.Mutex
+	observerQueue    chan observedTransportRecord
+	observerStop     chan struct{}
+	observerStopped  chan struct{}
+	observerClosing  bool
+	observerDropped  uint64
+	observerStopOnce sync.Once
 }
 
 type connection struct {
-	id       sessionstream.ConnectionId
-	ws       *websocket.Conn
-	send     chan outboundFrame
-	close    sync.Once
-	closed   atomic.Bool
-	queueMu  sync.Mutex
-	done     chan struct{}
-	ready    chan struct{}
-	pongs    chan string
-	requests chan *sessionstreamv1.ClientFrame
+	id        sessionstream.ConnectionId
+	ws        *websocket.Conn
+	send      chan outboundFrame
+	close     sync.Once
+	closed    atomic.Bool
+	queueMu   sync.Mutex
+	done      chan struct{}
+	ready     chan struct{}
+	heartbeat *heartbeatRuntime
+	requests  chan *sessionstreamv1.ClientFrame
 
 	mu   sync.RWMutex
 	subs map[sessionstream.SessionId]subscription
@@ -180,10 +191,15 @@ type subscription struct {
 	buffer               []bufferedUIBatch
 }
 
+type frameWriteResult struct {
+	at  time.Time
+	err error
+}
+
 type outboundFrame struct {
 	body      []byte
 	frameType string
-	written   chan error
+	written   chan frameWriteResult
 }
 
 // ConnectionInfo describes the current transport-visible state of one connection.
@@ -207,8 +223,11 @@ func NewServer(snapshots SnapshotProvider, opts ...Option) (*Server, error) {
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool { return true },
 		},
-		conns:     map[sessionstream.ConnectionId]*connection{},
-		bySession: map[sessionstream.SessionId]map[sessionstream.ConnectionId]struct{}{},
+		conns:             map[sessionstream.ConnectionId]*connection{},
+		bySession:         map[sessionstream.SessionId]map[sessionstream.ConnectionId]struct{}{},
+		heartbeatNow:      time.Now,
+		heartbeatNonce:    defaultHeartbeatNonce,
+		newHeartbeatTimer: func(delay time.Duration) heartbeatTimer { return realHeartbeatTimer{timer: time.NewTimer(delay)} },
 	}
 	for _, opt := range opts {
 		if opt == nil {
@@ -218,6 +237,7 @@ func NewServer(snapshots SnapshotProvider, opts ...Option) (*Server, error) {
 			return nil, err
 		}
 	}
+	server.startObserverDispatcher()
 	return server, nil
 }
 
@@ -244,15 +264,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cid := sessionstream.ConnectionId(fmt.Sprintf("conn-%d", atomic.AddUint64(&s.nextID, 1)))
+	heartbeatRuntime, err := newHeartbeatRuntime(s.connectionConfig)
+	if err != nil {
+		_ = conn.Close()
+		s.observe(r.Context(), TransportRecord{Stage: TransportStageProtocolError, ConnectionId: cid, Err: err})
+		return
+	}
 	c := &connection{
-		id:       cid,
-		ws:       conn,
-		send:     make(chan outboundFrame, s.connectionConfig.SendQueueSize),
-		subs:     map[sessionstream.SessionId]subscription{},
-		done:     make(chan struct{}),
-		ready:    make(chan struct{}),
-		pongs:    make(chan string, 1),
-		requests: make(chan *sessionstreamv1.ClientFrame, s.connectionConfig.SendQueueSize),
+		id:        cid,
+		ws:        conn,
+		send:      make(chan outboundFrame, s.connectionConfig.SendQueueSize),
+		subs:      map[sessionstream.SessionId]subscription{},
+		done:      make(chan struct{}),
+		ready:     make(chan struct{}),
+		heartbeat: heartbeatRuntime,
+		requests:  make(chan *sessionstreamv1.ClientFrame, s.connectionConfig.SendQueueSize),
 	}
 	// Publish Connected before making c visible to Close. This keeps observer
 	// ordering stable without invoking user observer code under lifecycleMu.
@@ -277,7 +303,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.wg.Add(3)
 	s.lifecycleMu.Unlock()
 	go func() { defer s.wg.Done(); s.writeLoop(ctx, c) }()
-	go func() { defer s.wg.Done(); s.heartbeatLoopAfterReady(ctx, c) }()
+	go func() { defer s.wg.Done(); s.runHeartbeatSupervisor(ctx.Done(), c) }()
 	go func() { defer s.wg.Done(); s.requestLoopAfterReady(ctx, c) }()
 	select {
 	case <-ctx.Done():
@@ -285,8 +311,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case <-c.done:
 		return
-	case err := <-helloWritten:
-		if err != nil {
+	case result := <-helloWritten:
+		if result.err != nil {
 			s.closeConnection(c)
 			return
 		}
@@ -369,7 +395,10 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			}
 			continue
 		case *sessionstreamv1.ClientFrame_Pong:
-			offerLatestPong(c, typed.Pong.GetNonce())
+			if err := s.offerHeartbeatPong(c, typed.Pong.GetNonce()); err != nil {
+				s.observe(ctx, TransportRecord{Stage: TransportStageProtocolError, Direction: FrameDirectionClientToServer, ConnectionId: c.id, FrameType: "pong", Err: err})
+				return
+			}
 			s.observe(ctx, TransportRecord{Stage: TransportStageClientFrameRead, Direction: FrameDirectionClientToServer, ConnectionId: c.id, RawBytes: len(raw)})
 			s.observe(ctx, clientFrameRecord(TransportStageClientFrameDecoded, c.id, frame, len(raw)))
 			s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatPongReceived, Direction: FrameDirectionClientToServer, ConnectionId: c.id, FrameType: "pong"})
@@ -391,24 +420,6 @@ func (s *Server) readLoop(ctx context.Context, c *connection) {
 			_ = s.sendFrame(c, newErrorFrame("request_queue_full", err.Error(), ""))
 			return
 		}
-	}
-}
-
-func offerLatestPong(c *connection, nonce string) {
-	select {
-	case c.pongs <- nonce:
-		return
-	default:
-	}
-	// The socket has one reader, so replacing the single buffered value is a
-	// latest-wins operation even while heartbeatLoop consumes concurrently.
-	select {
-	case <-c.pongs:
-	default:
-	}
-	select {
-	case c.pongs <- nonce:
-	default:
 	}
 }
 
@@ -546,89 +557,17 @@ func (s *Server) writeLoop(ctx context.Context, c *connection) {
 		case msg = <-c.send:
 		}
 		if err := c.ws.SetWriteDeadline(time.Now().Add(s.connectionConfig.WriteTimeout)); err != nil {
+			notifyFrameWritten(msg, s.heartbeatNow(), err)
 			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
-			notifyFrameWritten(msg, err)
 			return
 		}
 		if err := c.ws.WriteMessage(websocket.TextMessage, msg.body); err != nil {
+			notifyFrameWritten(msg, s.heartbeatNow(), err)
 			s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWriteError, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body), Err: err})
-			notifyFrameWritten(msg, err)
 			return
 		}
+		notifyFrameWritten(msg, s.heartbeatNow(), nil)
 		s.observe(ctx, TransportRecord{Stage: TransportStageServerFrameWritten, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: msg.frameType, RawBytes: len(msg.body)})
-		notifyFrameWritten(msg, nil)
-	}
-}
-
-func (s *Server) heartbeatLoopAfterReady(ctx context.Context, c *connection) {
-	select {
-	case <-ctx.Done():
-		return
-	case <-c.done:
-		return
-	case <-c.ready:
-		s.heartbeatLoop(ctx, c)
-	}
-}
-
-func (s *Server) heartbeatLoop(ctx context.Context, c *connection) {
-	ticker := time.NewTicker(s.connectionConfig.HeartbeatInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.done:
-			return
-		case <-ticker.C:
-		}
-		nonce := fmt.Sprintf("%s-%d", c.id, time.Now().UnixNano())
-		written, err := s.sendFrameTracked(c, newPingFrame(nonce))
-		if err != nil {
-			s.closeConnection(c)
-			return
-		}
-		s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatPingQueued, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: "ping"})
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.done:
-			return
-		case err := <-written:
-			if err != nil {
-				s.closeConnection(c)
-				return
-			}
-		}
-		timer := time.NewTimer(s.connectionConfig.PongTimeout)
-		matched := false
-		for !matched {
-			select {
-			case <-ctx.Done():
-				if !timer.Stop() {
-					<-timer.C
-				}
-				return
-			case <-c.done:
-				if !timer.Stop() {
-					<-timer.C
-				}
-				return
-			case pong := <-c.pongs:
-				matched = pong == nonce
-			case <-timer.C:
-				err := fmt.Errorf("connection %s heartbeat pong timeout", c.id)
-				s.observe(ctx, TransportRecord{Stage: TransportStageHeartbeatTimeout, ConnectionId: c.id, Err: err})
-				s.closeConnection(c)
-				return
-			}
-		}
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
 	}
 }
 
@@ -667,8 +606,10 @@ func (s *Server) closeConnection(c *connection) {
 	})
 }
 
-// Close closes all upgraded connections and waits for their read, write, and
-// heartbeat loops to exit or for ctx to expire.
+// Close closes all upgraded connections and waits for their reader, writer,
+// request worker, heartbeat supervisor, and accepted observer records to finish,
+// or for ctx to expire. Callers may invoke Close again after a deadline; it will
+// continue waiting for the same idempotent shutdown.
 func (s *Server) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
@@ -691,6 +632,8 @@ func (s *Server) Close(ctx context.Context) error {
 			s.closeConnection(connection)
 		}
 		s.wg.Wait()
+		s.stopObserverDispatcher()
+		s.waitObserverDispatcher()
 		close(done)
 	}()
 	select {
@@ -864,15 +807,15 @@ func (s *Server) sendFrame(c *connection, frame *sessionstreamv1.ServerFrame) er
 	return s.queueFrame(c, frame, nil)
 }
 
-func (s *Server) sendFrameTracked(c *connection, frame *sessionstreamv1.ServerFrame) (<-chan error, error) {
-	written := make(chan error, 1)
+func (s *Server) sendFrameTracked(c *connection, frame *sessionstreamv1.ServerFrame) (<-chan frameWriteResult, error) {
+	written := make(chan frameWriteResult, 1)
 	if err := s.queueFrame(c, frame, written); err != nil {
 		return nil, err
 	}
 	return written, nil
 }
 
-func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, written chan error) error {
+func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, written chan frameWriteResult) error {
 	frameType := serverFrameType(frame)
 	if c == nil {
 		return fmt.Errorf("connection is nil")
@@ -902,9 +845,9 @@ func (s *Server) queueFrame(c *connection, frame *sessionstreamv1.ServerFrame, w
 	}
 }
 
-func notifyFrameWritten(frame outboundFrame, err error) {
+func notifyFrameWritten(frame outboundFrame, at time.Time, err error) {
 	if frame.written != nil {
-		frame.written <- err
+		frame.written <- frameWriteResult{at: at, err: err}
 	}
 }
 
