@@ -1395,8 +1395,10 @@ After implementation:
 Focused ordinary seed/test repetitions: 100 PASS
 Focused race-enabled repetitions: 100 PASS
 60-second campaign executions: 877473
-New interesting inputs: 16
-Total interesting corpus: 26
+New interesting inputs in first campaign: 16
+Cached interesting corpus after first campaign: 26
+Complete 10-minute campaign executions: 8837183
+New interesting inputs in cached 10-minute campaign: 0
 Failure corpus: none
 Full repository tests: PASS
 Full repository race: PASS

@@ -1168,6 +1168,7 @@ After the production fix:
 - 100 focused race-enabled repetitions passed.
 - The 60-second campaign passed 877,473 executions.
 - It found 16 new interesting inputs, for 26 total corpus entries.
+- A later uninterrupted 10-minute campaign reused that 26-input cache, passed 8,837,183 executions, found no additional coverage-interesting input, and produced no failure.
 - Full repository tests passed.
 - Full repository race tests passed.
 - `go vet`, lint, and `make ci-check` passed.
@@ -1185,6 +1186,8 @@ pkg/sessionstream/transport/ws/heartbeat_arbitration_test.go:204:2: ineffectual 
 Every switch branch replaced `at`, so I changed the declaration to `var at time.Time`, formatted, and reran lint successfully.
 
 The deliberately incomplete helper caused seeds 1–9 to fail before the fix. This was expected reproduction evidence, not an attempted final implementation. It was never committed.
+
+The first attempted 10-minute post-fix campaign was interrupted at approximately 6m21s when a new user question arrived. It had completed roughly 5.59 million executions with no failure. I did not count that partial run as the requested campaign; I started a fresh uninterrupted 10-minute run, which passed 8,837,183 executions.
 
 ### What I learned
 
@@ -1233,9 +1236,11 @@ Deadline applications per arbitration: 1
 Readable seeds: 10
 Focused ordinary repetitions: 100 PASS
 Focused race repetitions: 100 PASS
-Fuzz executions: 877473
-New interesting: 16
-Total interesting: 26
+Initial 60-second fuzz executions: 877473
+Initial new interesting: 16
+Cached interesting corpus: 26
+Complete 10-minute fuzz executions: 8837183
+Additional interesting in cached campaign: 0
 Post-fix failures: 0
 Full test/race/vet/lint/CI: PASS
 Code commit: 5a1d9ebfe00e00b9712777d8a1db617753e6f00a
