@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/ThreeDotsLabs/watermill/message"
-	"google.golang.org/protobuf/proto"
 )
 
 type eventConsumer struct {
@@ -89,14 +88,6 @@ func (c *eventConsumer) handleMessage(ctx context.Context, msg *message.Message)
 		return err
 	}
 	ev.Ordinal = ord
-	if c.hub.bus != nil && c.hub.bus.observer != nil {
-		c.hub.bus.observer.Consumed(ctx, Event{
-			Name:      ev.Name,
-			Payload:   proto.Clone(ev.Payload),
-			SessionId: ev.SessionId,
-			Ordinal:   ev.Ordinal,
-		}, newBusRecord(msg, c.hub.bus.topic))
-	}
 	_, err = c.hub.projectAndApply(ctx, ev)
 	return err
 }

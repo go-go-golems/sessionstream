@@ -11,7 +11,6 @@ Topics:
   - transport
 Commands:
   - sessionstream-lint
-  - sessionstream-systemlab
 Flags: []
 IsTopLevel: true
 IsTemplate: false
@@ -51,7 +50,6 @@ import sessionstreamdoc "github.com/go-go-golems/sessionstream/pkg/doc"
 | `pkg/analysis/sessionstreamschema` | Go analyzer that rejects top-level `Struct` schema registrations. |
 | `cmd/sessionstream-lint` | Vettool command for the schema analyzer. |
 | `pkg/doc` | Embedded Glazed help entries for downstream CLIs. |
-| `cmd/sessionstream-systemlab` | Browser-based lab/reference application. |
 | `examples/chatdemo` | Small runnable chat-style example. |
 | `ttmp` | Design docs, tickets, and implementation diaries. |
 
@@ -249,35 +247,6 @@ go build -o /tmp/sessionstream-lint ../sessionstream/cmd/sessionstream-lint
 go vet -vettool=/tmp/sessionstream-lint ./cmd/... ./pkg/...
 ```
 
-### sessionstream-systemlab
-
-Run the browser-based lab app:
-
-```bash
-make systemlab-run
-# or directly:
-go run ./cmd/sessionstream-systemlab serve --addr :8091
-```
-
-Browse embedded CLI help entries:
-
-```bash
-go run ./cmd/sessionstream-systemlab help sessionstream-user-guide
-go run ./cmd/sessionstream-systemlab help sessionstream-reference
-```
-
-Default URL:
-
-```text
-http://localhost:8091/
-```
-
-Embedded help docs are served by Systemlab under:
-
-```text
-http://localhost:8091/docs/
-```
-
 ## Development commands
 
 ```bash
@@ -285,8 +254,6 @@ make test
 make build
 make lint
 make schema-vet
-make systemlab-build
-make systemlab-run
 make boundary-check
 ```
 

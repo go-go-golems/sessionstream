@@ -233,7 +233,16 @@ Browser clients should treat `uint64` ordinals as protobuf JSON strings. Do not 
 
 ### WebSocket heartbeat and failure suspicion
 
-The transport uses the schema's application-level `PingFrame` and `PongFrame` messages because browser JavaScript cannot directly originate RFC 6455 Ping/Pong control frames. A client that receives a server ping must echo its opaque nonce in a pong. The shared Systemlab helper in `cmd/sessionstream-systemlab/static/js/websocket.js` implements this behavior.
+The transport uses the schema's application-level `PingFrame` and `PongFrame` messages because browser JavaScript cannot directly originate RFC 6455 Ping/Pong control frames. A client that receives a server ping must echo its opaque nonce in a pong:
+
+```js
+const frame = JSON.parse(message.data);
+if (frame.ping?.nonce) {
+  socket.send(JSON.stringify({ pong: { nonce: frame.ping.nonce } }));
+}
+```
+
+Treat the nonce as opaque and echo it unchanged.
 
 `ConnectionConfig.HeartbeatInterval` controls the idle delay before a challenge. `PongTimeout` starts only after the sole writer successfully writes that ping; time spent in the server's outbound queue is not charged to the client. One challenge is outstanding at a time, and the next interval begins after a matching pong. Stale nonces and stale timer generations cannot acknowledge or expire the current challenge.
 
@@ -265,7 +274,6 @@ pkg/sessionstream/transport/    Transport adapters, including websocket support
 pkg/analysis/                   Go analysis / vet tooling
 pkg/doc/                        Embedded Glazed help sections for downstream CLIs
 cmd/sessionstream-lint/         Schema policy vettool
-cmd/sessionstream-systemlab/    Interactive/lab reference application
 examples/chatdemo/              Small chat-style reference app
 proto/sessionstream/v1/         WebSocket transport protobuf schemas
 ttmp/                           Ticket documentation, design notes, and implementation diaries
@@ -309,27 +317,16 @@ make build         # Generate and build packages
 make lint          # Run golangci-lint
 make schema-vet    # Run the Sessionstream schema registration analyzer
 make check         # Boundary check + test + build
-make goreleaser    # Local single-target snapshot release into dist/
 ```
 
 Most Makefile targets use `GOWORK=off` so the module is validated the way external consumers will see it, not only as part of the local multi-repo workspace.
 
-## Examples and labs
+## Examples
 
 Start with the small example when learning the API:
 
 - [`examples/chatdemo/chat.go`](examples/chatdemo/chat.go) — typed schemas, command handlers, UI projections, timeline projections, and snapshots.
 - [`examples/chatdemo/chat_test.go`](examples/chatdemo/chat_test.go) — executable expectations for the chat demo.
-
-Use Systemlab when you want the framework explained as phases:
-
-- [`cmd/sessionstream-systemlab/README.md`](cmd/sessionstream-systemlab/README.md)
-- [`cmd/sessionstream-systemlab/chapters/phase-0-foundations.md`](cmd/sessionstream-systemlab/chapters/phase-0-foundations.md)
-- [`cmd/sessionstream-systemlab/chapters/phase-1-command-to-projection.md`](cmd/sessionstream-systemlab/chapters/phase-1-command-to-projection.md)
-- [`cmd/sessionstream-systemlab/chapters/phase-2-ordering-and-ordinals.md`](cmd/sessionstream-systemlab/chapters/phase-2-ordering-and-ordinals.md)
-- [`cmd/sessionstream-systemlab/chapters/phase-3-hydration-and-reconnect.md`](cmd/sessionstream-systemlab/chapters/phase-3-hydration-and-reconnect.md)
-- [`cmd/sessionstream-systemlab/chapters/phase-4-chat-example.md`](cmd/sessionstream-systemlab/chapters/phase-4-chat-example.md)
-- [`cmd/sessionstream-systemlab/chapters/phase-5-persistence-and-restart.md`](cmd/sessionstream-systemlab/chapters/phase-5-persistence-and-restart.md)
 
 ## Further reading
 
@@ -340,7 +337,6 @@ Start with the user-facing docs and executable examples:
 - [`pkg/doc/reference/01-reference.md`](pkg/doc/reference/01-reference.md) — API, package, transport, command, and development reference.
 - [`pkg/doc/playbooks/01-sessionstream-schema-vet.md`](pkg/doc/playbooks/01-sessionstream-schema-vet.md) — operational playbook for building and using `sessionstream-lint`.
 - [`examples/chatdemo/chat.go`](examples/chatdemo/chat.go) — runnable reference application using typed schemas, handlers, projections, and snapshots.
-- [`cmd/sessionstream-systemlab/README.md`](cmd/sessionstream-systemlab/README.md) — browser lab overview and local run instructions.
 - [`proto/sessionstream/v1/transport.proto`](proto/sessionstream/v1/transport.proto) — websocket frame schema.
 
 For lower-level implementation history, see the design documents:
@@ -351,4 +347,4 @@ For lower-level implementation history, see the design documents:
 
 ## Current status
 
-The repository is in active framework extraction and hardening. The core API, hydration abstractions, websocket transport contract, examples, Systemlab material, and schema-vet analyzer are present. Downstream applications should import `github.com/go-go-golems/sessionstream/pkg/sessionstream` and keep product behavior in their own repositories.
+The repository is in active framework extraction and hardening. The core API, hydration abstractions, websocket transport contract, focused examples, and schema-vet analyzer are present. Downstream applications should import `github.com/go-go-golems/sessionstream/pkg/sessionstream` and keep product behavior in their own repositories.

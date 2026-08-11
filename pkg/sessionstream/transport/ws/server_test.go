@@ -482,7 +482,9 @@ func TestSubscribeAuthorizerDeniesBeforeHydration(t *testing.T) {
 	require.Equal(t, "forbidden", response.GetError().GetSessionId())
 	require.NotContains(t, response.GetError().GetMessage(), "sensitive")
 	require.Empty(t, server.Connections()[0].Subscriptions)
-	require.Contains(t, records.stages(), TransportStageSubscribeDenied)
+	require.Eventually(t, func() bool {
+		return containsStage(records.stages(), TransportStageSubscribeDenied)
+	}, time.Second, 10*time.Millisecond)
 	require.ErrorContains(t, records.first(TransportStageSubscribeDenied).Err, "sensitive policy backend detail")
 }
 

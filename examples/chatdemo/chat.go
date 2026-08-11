@@ -207,7 +207,7 @@ func (e *Engine) runDemoInference(ctx context.Context, sid sessionstream.Session
 	defer e.clearRun(sid, messageID)
 
 	started := &chatdemov1.InferenceStartedEvent{MessageId: messageID, Prompt: prompt, Role: "assistant", Content: "", Status: "streaming", Streaming: true}
-	if err := e.publish(ctx, sid, pub, EventInferenceStarted, started); err != nil {
+	if err := e.publish(context.WithoutCancel(ctx), sid, pub, EventInferenceStarted, started); err != nil {
 		return
 	}
 

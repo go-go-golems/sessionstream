@@ -41,7 +41,6 @@ func TestChatDemoStopPath(t *testing.T) {
 	hub := newTestHub(t, engine)
 	payload := &chatdemov1.StartInferenceCommand{Prompt: "Stop me"}
 	require.NoError(t, hub.Submit(context.Background(), sessionstream.SessionId("chat-2"), CommandStartInference, payload))
-	time.Sleep(12 * time.Millisecond)
 	stop := &chatdemov1.StopInferenceCommand{}
 	require.NoError(t, hub.Submit(context.Background(), sessionstream.SessionId("chat-2"), CommandStopInference, stop))
 	require.NoError(t, engine.WaitIdle(context.Background(), sessionstream.SessionId("chat-2")))
