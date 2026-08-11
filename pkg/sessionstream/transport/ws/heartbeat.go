@@ -65,6 +65,27 @@ func (s *Server) offerHeartbeatPong(c *connection, nonce string) error {
 	}
 }
 
+// applyHeartbeatDeadlineAfterAdmittedEvents gives bounded heartbeat events
+// already admitted by the reader a chance to affect detector state before a
+// deadline decision. The queue capacity bounds the work even if a producer
+// continues admitting events while the supervisor drains it.
+func applyHeartbeatDeadlineAfterAdmittedEvents(
+	events <-chan heartbeat.Event,
+	deadline heartbeat.Event,
+	apply func(heartbeat.Event),
+) {
+	for range heartbeatEventQueueSize {
+		select {
+		case event := <-events:
+			apply(event)
+		default:
+			apply(deadline)
+			return
+		}
+	}
+	apply(deadline)
+}
+
 func (s *Server) runHeartbeatSupervisor(ctxDone <-chan struct{}, c *connection) {
 	if c == nil || c.heartbeat == nil {
 		return
@@ -120,9 +141,14 @@ func (s *Server) runHeartbeatSupervisor(ctxDone <-chan struct{}, c *connection) 
 				s.observe(context.Background(), TransportRecord{Stage: TransportStageHeartbeatPingQueued, Direction: FrameDirectionServerToClient, ConnectionId: c.id, FrameType: "ping"})
 			case heartbeat.ActionArmDeadline:
 				stopTimer(deadlineTimer)
-				delay := action.Deadline.Sub(s.heartbeatNow())
+				now := s.heartbeatNow()
+				delay := action.Deadline.Sub(now)
 				if delay <= 0 {
-					apply(heartbeat.Event{Kind: heartbeat.EventDeadlineElapsed, At: s.heartbeatNow(), Generation: action.Generation})
+					applyHeartbeatDeadlineAfterAdmittedEvents(
+						c.heartbeat.events,
+						heartbeat.Event{Kind: heartbeat.EventDeadlineElapsed, At: now, Generation: action.Generation},
+						apply,
+					)
 					continue
 				}
 				deadlineTimer = s.newHeartbeatTimer(delay)
@@ -191,25 +217,11 @@ func (s *Server) runHeartbeatSupervisor(ctxDone <-chan struct{}, c *connection) 
 			apply(heartbeat.Event{Kind: kind, At: result.at, Generation: writeGeneration, Nonce: writeNonce, Err: result.err})
 		case at := <-deadlineC:
 			deadlineC = nil
-			// A pong may have been admitted before the deadline while Go's
-			// select chose the simultaneously ready timer. Process the bounded
-			// control queue first so scheduler choice cannot override event time.
-			deadlineApplied := false
-			for range heartbeatEventQueueSize {
-				select {
-				case event := <-c.heartbeat.events:
-					apply(event)
-				default:
-					apply(heartbeat.Event{Kind: heartbeat.EventDeadlineElapsed, At: at, Generation: deadlineGeneration})
-					deadlineApplied = true
-				}
-				if deadlineApplied {
-					break
-				}
-			}
-			if !deadlineApplied {
-				apply(heartbeat.Event{Kind: heartbeat.EventDeadlineElapsed, At: at, Generation: deadlineGeneration})
-			}
+			applyHeartbeatDeadlineAfterAdmittedEvents(
+				c.heartbeat.events,
+				heartbeat.Event{Kind: heartbeat.EventDeadlineElapsed, At: at, Generation: deadlineGeneration},
+				apply,
+			)
 		}
 	}
 }
