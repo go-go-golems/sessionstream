@@ -19,6 +19,10 @@ const (
 	TransportStageClientFrameDecodeError  TransportStage = "client_frame_decode_error"
 	TransportStageReadError               TransportStage = "read_error"
 	TransportStageProtocolError           TransportStage = "protocol_error"
+	TransportStageSubscribeDenied         TransportStage = "subscribe_denied"
+	TransportStageHeartbeatPingQueued     TransportStage = "heartbeat_ping_queued"
+	TransportStageHeartbeatPongReceived   TransportStage = "heartbeat_pong_received"
+	TransportStageHeartbeatTimeout        TransportStage = "heartbeat_timeout"
 	TransportStageSubscribeReceived       TransportStage = "subscribe_received"
 	TransportStageUnsubscribeReceived     TransportStage = "unsubscribe_received"
 	TransportStageSnapshotLoadStarted     TransportStage = "snapshot_load_started"
@@ -186,6 +190,8 @@ func serverFrameType(frame *sessionstreamv1.ServerFrame) string {
 		return "uiEvent"
 	case *sessionstreamv1.ServerFrame_Error:
 		return "error"
+	case *sessionstreamv1.ServerFrame_Ping:
+		return "ping"
 	case *sessionstreamv1.ServerFrame_Pong:
 		return "pong"
 	default:
