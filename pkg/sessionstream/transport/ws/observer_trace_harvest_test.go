@@ -49,6 +49,11 @@ func TestObserverTraceHarvestConcurrent(t *testing.T) {
 		}},
 	}
 	server.startObserverDispatcher()
+	// Guarantee a retained prefix before racing producers against Close. This
+	// makes every harvested run cover accept/receive/drain as well as rejection.
+	for i := 0; i < 8; i++ {
+		server.observe(context.Background(), TransportRecord{Ordinal: uint64(i + 1)})
+	}
 
 	const producers = 4
 	const submissions = 40
@@ -61,7 +66,7 @@ func TestObserverTraceHarvestConcurrent(t *testing.T) {
 			<-start
 			for i := 0; i < submissions; i++ {
 				server.observe(context.Background(), TransportRecord{
-					Ordinal: uint64(producer*submissions + i + 1),
+					Ordinal: uint64(8 + producer*submissions + i + 1),
 				})
 			}
 		}(producer)
