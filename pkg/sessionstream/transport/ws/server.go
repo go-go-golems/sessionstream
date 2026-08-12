@@ -130,6 +130,7 @@ type Server struct {
 	snapshots          SnapshotProvider
 	upgrader           websocket.Upgrader
 	observer           TransportObserver
+	observerTrace      *observerTraceState
 	connectionConfig   ConnectionConfig
 	authorizeSubscribe SubscribeAuthorizer
 	heartbeatNow       func() time.Time

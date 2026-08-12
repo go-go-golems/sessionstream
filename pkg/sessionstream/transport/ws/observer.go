@@ -127,14 +127,16 @@ func WithTransportObserver(observer TransportObserver) Option {
 }
 
 type observedTransportRecord struct {
-	ctx context.Context
-	rec TransportRecord
+	ctx    context.Context
+	rec    TransportRecord
+	itemID uint64
 }
 
 func (s *Server) startObserverDispatcher() {
 	if s == nil || s.observer == nil {
 		return
 	}
+	s.observerTrace.start(context.Background())
 	s.observerQueue = make(chan observedTransportRecord, defaultObserverQueueSize)
 	s.observerStop = make(chan struct{})
 	s.observerStopped = make(chan struct{})
@@ -148,31 +150,64 @@ func (s *Server) observe(ctx context.Context, rec TransportRecord) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	item := observedTransportRecord{ctx: context.WithoutCancel(ctx), rec: cloneTransportRecord(rec)}
+	operation := s.observerTrace.begin("submit")
+	defer operation.end()
+	item := observedTransportRecord{
+		ctx:    context.WithoutCancel(ctx),
+		rec:    cloneTransportRecord(rec),
+		itemID: s.observerTrace.nextItemID(),
+	}
 	s.observerMu.Lock()
 	defer s.observerMu.Unlock()
 	if s.observerClosing || s.observerQueue == nil {
+		if operation.state != nil {
+			operation.linearize("submit_rejected", item.itemID, nil, map[string]any{"closing": true})
+		}
 		return
 	}
 	select {
 	case s.observerQueue <- item:
+		if operation.state != nil {
+			operation.linearize("submit_accepted", item.itemID, map[string]any{
+				"queue_len": len(s.observerQueue),
+			}, nil)
+		}
 	default:
 		s.observerDropped++
+		if operation.state != nil {
+			operation.linearize("submit_dropped", item.itemID, map[string]any{
+				"dropped": s.observerDropped,
+			}, map[string]any{"queue_len": len(s.observerQueue)})
+		}
 	}
 }
 
 func (s *Server) runObserverDispatcher() {
 	defer close(s.observerStopped)
 	for {
+		operation := s.observerTrace.begin("callback")
 		select {
 		case item := <-s.observerQueue:
-			s.deliverObservation(item)
+			s.linearizeObservationReceive(operation, item)
+			s.deliverObservation(operation, item)
 		case <-s.observerStop:
+			operation.cancel()
 			for {
+				operation := s.observerTrace.begin("callback")
 				select {
 				case item := <-s.observerQueue:
-					s.deliverObservation(item)
+					s.linearizeObservationReceive(operation, item)
+					s.deliverObservation(operation, item)
 				default:
+					operation.cancel()
+					exit := s.observerTrace.begin("drain")
+					if exit.state != nil {
+						exit.linearize("worker_exit", 0, map[string]any{"worker_done": true}, map[string]any{
+							"closing":   true,
+							"queue_len": 0,
+						})
+					}
+					exit.end()
 					return
 				}
 			}
@@ -180,9 +215,25 @@ func (s *Server) runObserverDispatcher() {
 	}
 }
 
-func (s *Server) deliverObservation(item observedTransportRecord) {
-	defer func() { _ = recover() }()
+func (s *Server) linearizeObservationReceive(operation observerTraceOperation, item observedTransportRecord) {
+	if operation.state != nil {
+		operation.linearize("receive", item.itemID, map[string]any{
+			"queue_len": len(s.observerQueue),
+		}, nil)
+	}
+}
+
+func (s *Server) deliverObservation(operation observerTraceOperation, item observedTransportRecord) {
+	defer operation.end()
+	defer func() {
+		if recover() != nil && operation.state != nil {
+			operation.linearize("panic_recovered", item.itemID, map[string]any{"offered_item": item.itemID}, nil)
+		}
+	}()
 	s.observer.OnTransport(item.ctx, item.rec)
+	if operation.state != nil {
+		operation.linearize("offered", item.itemID, map[string]any{"offered_item": item.itemID}, nil)
+	}
 }
 
 func (s *Server) stopObserverDispatcher() {
@@ -190,9 +241,14 @@ func (s *Server) stopObserverDispatcher() {
 		return
 	}
 	s.observerStopOnce.Do(func() {
+		operation := s.observerTrace.begin("close")
+		defer operation.end()
 		s.observerMu.Lock()
 		s.observerClosing = true
 		close(s.observerStop)
+		if operation.state != nil {
+			operation.linearize("close_effective", 0, map[string]any{"closing": true}, nil)
+		}
 		s.observerMu.Unlock()
 	})
 }
@@ -201,7 +257,13 @@ func (s *Server) waitObserverDispatcher() {
 	if s == nil || s.observerStopped == nil {
 		return
 	}
+	operation := s.observerTrace.begin("wait")
+	defer operation.end()
 	<-s.observerStopped
+	if operation.state != nil {
+		operation.linearize("wait_returned", 0, map[string]any{"waited": true}, map[string]any{"worker_done": true})
+	}
+	s.observerTrace.finish()
 }
 
 // ObserverDroppedRecords reports records discarded because the bounded
