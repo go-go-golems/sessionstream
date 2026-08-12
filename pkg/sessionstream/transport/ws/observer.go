@@ -168,9 +168,7 @@ func (s *Server) observe(ctx context.Context, rec TransportRecord) {
 	select {
 	case s.observerQueue <- item:
 		if operation.state != nil {
-			operation.linearize("submit_accepted", item.itemID, map[string]any{
-				"queue_len": len(s.observerQueue),
-			}, nil)
+			operation.linearize("submit_accepted", item.itemID, nil, nil)
 		}
 	default:
 		s.observerDropped++
@@ -217,9 +215,7 @@ func (s *Server) runObserverDispatcher() {
 
 func (s *Server) linearizeObservationReceive(operation observerTraceOperation, item observedTransportRecord) {
 	if operation.state != nil {
-		operation.linearize("receive", item.itemID, map[string]any{
-			"queue_len": len(s.observerQueue),
-		}, nil)
+		operation.linearize("receive", item.itemID, nil, nil)
 	}
 }
 
