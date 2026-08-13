@@ -254,12 +254,14 @@ func (s *Server) waitObserverDispatcher() {
 		return
 	}
 	operation := s.observerTrace.begin("wait")
+	// End this wait operation before allowing the trace task to finish. Other
+	// concurrent waiters remain counted until their own deferred end runs.
+	defer s.observerTrace.finish()
 	defer operation.end()
 	<-s.observerStopped
 	if operation.state != nil {
 		operation.linearize("wait_returned", 0, map[string]any{"waited": true}, map[string]any{"worker_done": true})
 	}
-	s.observerTrace.finish()
 }
 
 // ObserverDroppedRecords reports records discarded because the bounded

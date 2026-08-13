@@ -33,6 +33,44 @@ func (s *recordingObserverTraceSink) snapshot() ([]ObserverModelEvent, []Observe
 	return append([]ObserverModelEvent(nil), s.model...), append([]ObserverIntervalEvent(nil), s.intervals...)
 }
 
+type panicOnceObserverTraceSink struct {
+	mu       sync.Mutex
+	panicked bool
+}
+
+func (s *panicOnceObserverTraceSink) OnObserverModelEvent(ObserverModelEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.panicked {
+		s.panicked = true
+		panic("intentional trace sink panic")
+	}
+}
+
+func (*panicOnceObserverTraceSink) OnObserverIntervalEvent(ObserverIntervalEvent) {}
+
+func TestObserverTraceModelSinkPanicReleasesMutex(t *testing.T) {
+	sink := &panicOnceObserverTraceSink{}
+	state := &observerTraceState{config: ObserverTraceConfig{
+		RunID: "run-panic", DispatcherID: "observer-panic", Sink: sink,
+	}}
+	state.start(context.Background())
+
+	operation := state.begin("submit")
+	func() {
+		defer operation.end()
+		defer func() { require.NotNil(t, recover()) }()
+		operation.linearize("submit_accepted", 1, nil, nil)
+	}()
+
+	second := state.begin("submit")
+	require.NotPanics(t, func() {
+		second.linearize("submit_accepted", 2, nil, nil)
+		second.end()
+	})
+	state.finish()
+}
+
 func TestObserverTraceRequiresPartitionIdentity(t *testing.T) {
 	sink := &recordingObserverTraceSink{}
 	server := &Server{}
