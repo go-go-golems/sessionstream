@@ -10,11 +10,19 @@ Topics:
     - onboarding
 DocType: reference
 Intent: long-term
-Summary: "Diary for the sessionstream design patterns study."
+Owners: []
+RelatedFiles:
+    - Path: repo://Research/Software Architecture Garden/sessionstream/Index of Design Patterns - Rationale.md
+      Note: Companion rationale for the index
+    - Path: repo://Research/Software Architecture Garden/sessionstream/Index of Design Patterns.md
+      Note: Garden back-of-the-book index built from the patterns study (Step 2)
+ExternalSources: []
+Summary: Diary for the sessionstream design patterns study.
 LastUpdated: 2026-08-15T00:00:00-04:00
-WhatFor: "Records the in-depth study of sessionstream design patterns."
-WhenToUse: "Read before resuming SS-DESIGN-PATTERNS work."
+WhatFor: Records the in-depth study of sessionstream design patterns.
+WhenToUse: Read before resuming SS-DESIGN-PATTERNS work.
 ---
+
 
 # Diary
 

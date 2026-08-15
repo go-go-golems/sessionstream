@@ -31,3 +31,12 @@ Added reference/02: overlap/expansion/replacement analysis vs. the Architecture 
 
 - ttmp/2026/08/15/SS-DESIGN-PATTERNS--sessionstream-design-patterns-study-command-event-projection-hydration-batch-patch-into-delta-heartbeat-observers/reference/02-overlap-vs-architecture-garden-readme.md — Comparison with the Architecture Garden README
 
+
+## 2026-08-15
+
+Step 2: Built the Architecture Garden 'Index of Design Patterns' for sessionstream (index + rationale), following the coinvault playbook. 48 ### entries, 4 See redirects, 18-row notation table, cross-reference summary, 47-entry rationale with a 20-situation reader test. Includes the batch-patch-into-delta pattern. Study README back-linked. All links validated (PASS). Committed in go-go-parc (896a381).
+
+### Related Files
+
+- Research/Software Architecture Garden/sessionstream/Index of Design Patterns.md — Garden index derived from the patterns study
+
