@@ -22,3 +22,12 @@ Step 1: diary created; design patterns study committed and related.
 
 - ttmp/2026/08/15/SS-DESIGN-PATTERNS--sessionstream-design-patterns-study-command-event-projection-hydration-batch-patch-into-delta-heartbeat-observers/reference/01-diary.md — Investigation diary
 
+
+## 2026-08-15
+
+Added reference/02: overlap/expansion/replacement analysis vs. the Architecture Garden sessionstream README. Conclusion: the Study complements (does not replace) the Garden README — intern/code-grounded vs mathematical/research authority. Study adds the batch-patch-into-delta pattern, concrete SQLite mechanics, and post-anchor heartbeat/observer hardening evidence; Garden README adds the math, the hardening laws, the cross-project comparison, and the formal-verification program. Noted the README's commit anchor (fb6b70d, 2026-06-16) predates 12 heartbeat/observer commits.
+
+### Related Files
+
+- ttmp/2026/08/15/SS-DESIGN-PATTERNS--sessionstream-design-patterns-study-command-event-projection-hydration-batch-patch-into-delta-heartbeat-observers/reference/02-overlap-vs-architecture-garden-readme.md — Comparison with the Architecture Garden README
+
