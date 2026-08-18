@@ -1,0 +1,38 @@
+name: MySQL integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  mysql-integration:
+    name: MySQL hydration integration
+    runs-on: ubuntu-latest
+    env:
+      SESSIONSTREAM_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/sessionstream_test?parseTime=true
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: sessionstream_test
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run required MySQL integration tests
+        run: GOWORK=off go test ./pkg/sessionstream/hydration/mysql -count=1
