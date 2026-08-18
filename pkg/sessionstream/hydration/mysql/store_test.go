@@ -134,14 +134,12 @@ func TestMySQLStorePreservesOpaqueIdentityBytes(t *testing.T) {
 		}})
 		require.NoError(t, err)
 	}
-	for i, sid := range []sessionstream.SessionId{"identity-session", "Identity-Session"} {
-		err := store.Apply(context.Background(), sid, uint64(10+i), []sessionstream.TimelineEntity{{
-			Kind:    "TestEntity",
-			Id:      "session-specific",
-			Payload: payload,
-		}})
-		require.NoError(t, err)
-	}
+	err = store.Apply(context.Background(), "Identity-Session", 10, []sessionstream.TimelineEntity{{
+		Kind:    "TestEntity",
+		Id:      "session-specific",
+		Payload: payload,
+	}})
+	require.NoError(t, err)
 
 	snap, err := store.Snapshot(context.Background(), "identity-session", 0)
 	require.NoError(t, err)
