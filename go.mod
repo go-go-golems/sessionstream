@@ -10,6 +10,7 @@ require (
 	github.com/go-go-golems/glazed v1.3.6
 	github.com/go-go-golems/go-go-goja v0.9.6
 	github.com/go-go-golems/logcopter v0.1.1
+	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/mattn/go-sqlite3 v1.14.42
@@ -23,6 +24,7 @@ require (
 
 require (
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20260210014823-2f36a2f1ba17 // indirect
+	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/BurntSushi/toml v1.3.2 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
